@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MOK - CEO Dashboard",
-  description: "Strategische Ziele, Funktionsziele und OKR-Übersicht",
+  title: "CITADEL - Management Plattform",
+  description: "Strategische Ziele, Planung und OKR-Uebersicht",
 };
 
 export default function RootLayout({

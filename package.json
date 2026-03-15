@@ -5,6 +5,8 @@
     "dev": "npm --prefix web run dev",
     "build": "npm --prefix web run build",
     "start": "npm --prefix web run start",
-    "lint": "npm --prefix web run lint"
+    "lint": "npm --prefix web run lint",
+    "tenant:isolation": "npm --prefix web run tenant:isolation",
+    "strategy:rollout": "npm --prefix web run strategy:rollout"
   }
 }

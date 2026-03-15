@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import Link from "next/link";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getSupabasePublicConfigError } from "@/lib/supabase/public-config";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,10 +14,38 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (mounted && session) {
+        router.replace("/dashboard");
+        router.refresh();
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router, supabase]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError(null);
+
+    const configError = getSupabasePublicConfigError();
+    if (configError) {
+      setLoading(false);
+      setError(configError);
+      return;
+    }
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
@@ -29,17 +59,19 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    const nextFromUrl = new URLSearchParams(window.location.search).get("next");
+    const safeNextPath = nextFromUrl && nextFromUrl.startsWith("/") ? nextFromUrl : "/dashboard";
+    router.replace(safeNextPath);
     router.refresh();
   }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
       <section className="w-full rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">MOK Login</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">CEO Dashboard Zugang</h1>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">CITADEL Login</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Plattform-Zugang</h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Mit Supabase-Account anmelden, um auf die CEO-Ansichten zuzugreifen.
+          Anmeldung erfolgt per Firmen-Einladung. Ohne Einladung kann kein Konto erstellt werden.
         </p>
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
@@ -65,6 +97,15 @@ export default function LoginPage() {
             />
           </label>
 
+          <div className="flex items-center justify-end text-sm">
+            <Link
+              href="/forgot-password"
+              className="font-medium text-zinc-900 underline underline-offset-2"
+            >
+              Passwort vergessen?
+            </Link>
+          </div>
+
           {error ? (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
@@ -79,6 +120,11 @@ export default function LoginPage() {
             {loading ? "Anmeldung..." : "Anmelden"}
           </button>
         </form>
+
+        <p className="mt-4 text-sm text-zinc-600">
+          Keine Einladung erhalten?{" "}
+          <span className="font-medium text-zinc-900">Bitte an den Organisations-Admin wenden.</span>
+        </p>
       </section>
     </main>
   );

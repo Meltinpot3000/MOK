@@ -1,132 +1,279 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { OrganizationCreateForm } from "@/components/ceo/OrganizationCreateForm";
+import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
+import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
+import { OrganizationUnitTree } from "@/components/ceo/OrganizationUnitTree";
+import {
+  getOrganizationUnits,
+  getOrganizationUnitTypes,
+  getPhase0Context,
+  getPlanningCycles,
+} from "@/lib/phase0/queries";
+import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getPhase0Context, getOrgUnits } from "@/lib/phase0/queries";
 
-export default async function OrganizationPage() {
-  const context = await getPhase0Context();
-  if (!context) {
-    redirect("/no-access");
+type HierarchyNode = {
+  id: string;
+  parent_id: string | null;
+};
+
+function collectDescendants(unitId: string, units: HierarchyNode[]): Set<string> {
+  const byParent = new Map<string | null, HierarchyNode[]>();
+  for (const unit of units) {
+    const key = unit.parent_id ?? null;
+    const existing = byParent.get(key) ?? [];
+    existing.push(unit);
+    byParent.set(key, existing);
   }
 
-  const orgUnits = await getOrgUnits(context.organizationId);
-
-  async function createOrgUnit(formData: FormData) {
-    "use server";
-
-    const localContext = await getPhase0Context();
-    if (!localContext) {
-      redirect("/no-access");
+  const descendants = new Set<string>();
+  const stack = [unitId];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const children = byParent.get(current) ?? [];
+    for (const child of children) {
+      if (!descendants.has(child.id)) {
+        descendants.add(child.id);
+        stack.push(child.id);
+      }
     }
+  }
 
-    const levelNo = Number(formData.get("level_no"));
-    const unitType = String(formData.get("unit_type"));
-    const code = String(formData.get("code") ?? "").trim();
+  return descendants;
+}
+
+async function requireWriteAccess() {
+  const context = await getPhase0Context();
+  if (!context) redirect("/no-access");
+  const access = await getSidebarAccessContext("organization");
+  if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
+  return context;
+}
+
+async function validateTypeExists(typeId: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .schema("app")
+    .from("organization_unit_type")
+    .select("id")
+    .eq("id", typeId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!data) redirect("/organization");
+}
+
+async function validateUniqueCode(organizationId: string, code: string, currentId?: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const query = supabase
+    .schema("app")
+    .from("organization_unit")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("code", code.trim());
+
+  const { data } = currentId ? await query.neq("id", currentId).limit(1) : await query.limit(1);
+  if ((data ?? []).length > 0) redirect("/organization");
+}
+
+export default async function OrganizationPage() {
+  const pageAccess = await getSidebarAccessContext("organization");
+  if (pageAccess.state === "unauthenticated") redirect("/login");
+  if (pageAccess.state === "forbidden") redirect("/no-access");
+  const canWrite = pageAccess.canWrite;
+
+  const context = await getPhase0Context();
+  if (!context) redirect("/no-access");
+
+  const [units, unitTypes, cycles] = await Promise.all([
+    getOrganizationUnits(context.organizationId),
+    getOrganizationUnitTypes(),
+    getPlanningCycles(context.organizationId),
+  ]);
+
+  async function createOrganizationUnit(formData: FormData) {
+    "use server";
+    const localContext = await requireWriteAccess();
     const name = String(formData.get("name") ?? "").trim();
-    const parent = String(formData.get("parent_unit_id") ?? "").trim();
+    const code = String(formData.get("code") ?? "").trim();
+    const organizationUnitTypeId = String(formData.get("organization_unit_type_id") ?? "").trim();
+    const parentIdRaw = String(formData.get("parent_id") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+
+    if (!name || !code || !organizationUnitTypeId) redirect("/organization");
+    await validateTypeExists(organizationUnitTypeId);
+    await validateUniqueCode(localContext.organizationId, code);
 
     const supabase = await createSupabaseServerClient();
-    await supabase.schema("app").from("org_units").insert({
+    let parentId: string | null = null;
+    if (parentIdRaw) {
+      const { data: parent } = await supabase
+        .schema("app")
+        .from("organization_unit")
+        .select("id")
+        .eq("organization_id", localContext.organizationId)
+        .eq("id", parentIdRaw)
+        .maybeSingle();
+      if (!parent) redirect("/organization");
+      parentId = parent.id;
+    }
+
+    await supabase.schema("app").from("organization_unit").insert({
       organization_id: localContext.organizationId,
-      level_no: levelNo,
-      unit_type: unitType,
-      code,
       name,
-      parent_unit_id: parent.length > 0 ? parent : null,
-      owner_membership_id: localContext.membershipId,
+      code,
+      organization_unit_type_id: organizationUnitTypeId,
+      parent_id: parentId,
+      description: description || null,
+      status: "active",
     });
 
     revalidatePath("/organization");
+    revalidatePath("/responsibles");
+    redirect("/organization");
+  }
+
+  async function updateOrganizationUnit(formData: FormData) {
+    "use server";
+    const localContext = await requireWriteAccess();
+    const id = String(formData.get("id") ?? "").trim();
+    const name = String(formData.get("name") ?? "").trim();
+    const code = String(formData.get("code") ?? "").trim();
+    const organizationUnitTypeId = String(formData.get("organization_unit_type_id") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+
+    if (!id || !name || !code || !organizationUnitTypeId) redirect("/organization");
+    await validateTypeExists(organizationUnitTypeId);
+    await validateUniqueCode(localContext.organizationId, code, id);
+
+    const supabase = await createSupabaseServerClient();
+    await supabase
+      .schema("app")
+      .from("organization_unit")
+      .update({
+        name,
+        code,
+        organization_unit_type_id: organizationUnitTypeId,
+        description: description || null,
+      })
+      .eq("organization_id", localContext.organizationId)
+      .eq("id", id);
+
+    revalidatePath("/organization");
+    revalidatePath("/responsibles");
+    redirect("/organization");
+  }
+
+  async function moveOrganizationUnit(formData: FormData) {
+    "use server";
+    const localContext = await requireWriteAccess();
+    const id = String(formData.get("id") ?? "").trim();
+    const parentIdRaw = String(formData.get("parent_id") ?? "").trim();
+    if (!id) redirect("/organization");
+    if (parentIdRaw === id) redirect("/organization");
+
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase
+      .schema("app")
+      .from("organization_unit")
+      .select("id, parent_id")
+      .eq("organization_id", localContext.organizationId);
+
+    const unitsInOrg = (data ?? []) as HierarchyNode[];
+    if (!unitsInOrg.some((unit) => unit.id === id)) redirect("/organization");
+
+    let parentId: string | null = null;
+    if (parentIdRaw) {
+      if (!unitsInOrg.some((unit) => unit.id === parentIdRaw)) redirect("/organization");
+      const descendants = collectDescendants(id, unitsInOrg);
+      if (descendants.has(parentIdRaw)) redirect("/organization");
+      parentId = parentIdRaw;
+    }
+
+    await supabase
+      .schema("app")
+      .from("organization_unit")
+      .update({ parent_id: parentId })
+      .eq("organization_id", localContext.organizationId)
+      .eq("id", id);
+
+    revalidatePath("/organization");
+    revalidatePath("/responsibles");
+    redirect("/organization");
+  }
+
+  async function archiveOrganizationUnit(formData: FormData) {
+    "use server";
+    const localContext = await requireWriteAccess();
+    const id = String(formData.get("id") ?? "").trim();
+    if (!id) redirect("/organization");
+
+    const supabase = await createSupabaseServerClient();
+    await supabase
+      .schema("app")
+      .from("organization_unit")
+      .update({ status: "archived" })
+      .eq("organization_id", localContext.organizationId)
+      .eq("id", id);
+
+    revalidatePath("/organization");
+    revalidatePath("/responsibles");
     redirect("/organization");
   }
 
   return (
     <div className="space-y-6">
-      <header className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Phase 0 Fundament
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Organisationsteile</h1>
+      <header className="brand-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Aufbauorganisation</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Aufbauorganisation</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Drei Ebenen: Organisation {"->"} Bereich {"->"} Team. Eltern-Kind-Struktur ist technisch
-          validiert.
+          Flexible Hierarchie mit frei konfigurierbaren Organisationstypen und Parent-Child-Struktur.
         </p>
       </header>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-zinc-900">Organisationsteil anlegen</h2>
-        <form action={createOrgUnit} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input
-            name="code"
-            required
-            placeholder="Code (z. B. DIV-SALES)"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="name"
-            required
-            placeholder="Name (z. B. Sales)"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <select name="level_no" className="rounded-md border border-zinc-300 px-3 py-2 text-sm">
-            <option value="1">Level 1 - Organisation</option>
-            <option value="2">Level 2 - Bereich</option>
-            <option value="3">Level 3 - Team</option>
-          </select>
-          <select name="unit_type" className="rounded-md border border-zinc-300 px-3 py-2 text-sm">
-            <option value="organization">organization</option>
-            <option value="division">division</option>
-            <option value="team">team</option>
-          </select>
-          <select
-            name="parent_unit_id"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-          >
-            <option value="">Kein Parent (nur für Level 1)</option>
-            {orgUnits.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.code} - {unit.name} (L{unit.level_no})
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 md:col-span-2"
-          >
-            Organisationsteil speichern
-          </button>
-        </form>
+      <OrganizationTabs />
+
+      <section className="brand-card p-6">
+        <h2 className="text-lg font-semibold text-zinc-900">Organisationseinheit anlegen</h2>
+        {unitTypes.length === 0 ? (
+          <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Keine Organisationstypen verfügbar. Bitte Migrationen anwenden oder
+            `SUPABASE_SERVICE_ROLE_KEY` setzen, damit Standardtypen automatisch angelegt werden.
+          </p>
+        ) : null}
+        <OrganizationCreateForm
+          units={units}
+          unitTypes={unitTypes}
+          canWrite={canWrite}
+          action={createOrganizationUnit}
+        />
       </section>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-zinc-900">Strukturübersicht</h2>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 text-left text-zinc-500">
-                <th className="py-2">Level</th>
-                <th className="py-2">Code</th>
-                <th className="py-2">Name</th>
-                <th className="py-2">Typ</th>
-                <th className="py-2">Parent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orgUnits.map((unit) => (
-                <tr key={unit.id} className="border-b border-zinc-100">
-                  <td className="py-2">{unit.level_no}</td>
-                  <td className="py-2">{unit.code}</td>
-                  <td className="py-2">{unit.name}</td>
-                  <td className="py-2">{unit.unit_type}</td>
-                  <td className="py-2">{unit.parent_unit_id ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {!canWrite ? (
+        <p className="brand-surface p-3 text-sm text-zinc-600">
+          Diese Rolle hat nur Leserechte für Aufbauorganisation.
+        </p>
+      ) : null}
+
+      <OrganizationGraphPanel
+        organizationId={context.organizationId}
+        planningCycleId={cycles[0]?.id ?? null}
+      />
+
+      <section className="brand-card p-6">
+        <h2 className="text-lg font-semibold text-zinc-900">Organisationsstruktur</h2>
+        <div className="mt-4">
+          <OrganizationUnitTree
+            units={units}
+            unitTypes={unitTypes}
+            canWrite={canWrite}
+            updateAction={updateOrganizationUnit}
+            createChildAction={createOrganizationUnit}
+            moveAction={moveOrganizationUnit}
+            archiveAction={archiveOrganizationUnit}
+          />
         </div>
-        {orgUnits.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500">Noch keine Organisationsteile angelegt.</p>
-        ) : null}
       </section>
     </div>
   );

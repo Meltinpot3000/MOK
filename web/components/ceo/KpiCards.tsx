@@ -10,7 +10,7 @@ export function KpiCards({ items }: KpiCardsProps) {
       {items.map((item) => (
         <article
           key={item.label}
-          className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
+          className="brand-card p-4"
         >
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
             {item.label}

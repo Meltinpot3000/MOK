@@ -189,6 +189,11 @@ Management, Strategy Owner, PMO.
 ### Nutzen für die Steuerung
 Gemeinsames Prozessverständnis und klare Governance über den gesamten Strategiezyklus.
 
+### Hinweis Entwicklungsdoku (Quality Score)
+- Der aktuelle Quality-Score im Strategy-Cycle nutzt für **Evidence** eine heuristische Näherung über die Begründungslänge.
+- Der aktuelle Quality-Score nutzt für **Structure** eine heuristische Näherung über die Verfügbarkeit eines `sub_type`.
+- Diese beiden Komponenten sind als Übergangslösung zu verstehen und müssen in einer nächsten Ausbaustufe fachlich verbessert werden (z. B. Evidenzqualität über Quellen/Quantifizierung/Zeithorizont und Strukturqualität über formale Vollständigkeitskriterien).
+
 ---
 
 ## 4.4 Strategic Directions

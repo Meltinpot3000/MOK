@@ -41,6 +41,7 @@ export type KeyResult = {
 export type CeoAccessContext = {
   userId: string;
   organizationId: string;
+  organizationName: string;
   membershipId: string;
   roleCodes: string[];
 };
@@ -54,6 +55,15 @@ export type CeoDashboardData = {
   objectives: Objective[];
   keyResults: KeyResult[];
   kpis: KpiCard[];
+};
+
+export type TenantBranding = {
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  logo_url: string | null;
+  status: "draft" | "published";
+  branding_config?: Record<string, unknown> | null;
 };
 
 function isCeoRole(roleCode: string): boolean {
@@ -95,6 +105,17 @@ export async function getCeoAccessContext(
   }
 
   const membershipIds = memberships.map((membership) => membership.id);
+  const organizationIds = [...new Set(memberships.map((membership) => membership.organization_id))];
+  const { data: organizations } = await supabase
+    .schema("app")
+    .from("organizations")
+    .select("id, name")
+    .in("id", organizationIds);
+
+  const organizationNameById = new Map(
+    (organizations ?? []).map((organization) => [organization.id, organization.name])
+  );
+
   const { data: memberRoles } = await supabase
     .schema("rbac")
     .from("member_roles")
@@ -124,6 +145,7 @@ export async function getCeoAccessContext(
       return {
         userId: resolvedUserId,
         organizationId: membership.organization_id,
+        organizationName: organizationNameById.get(membership.organization_id) ?? "Tenant",
         membershipId: membership.id,
         roleCodes,
       };
@@ -145,6 +167,20 @@ export async function getPlanningCyclesForOrganization(
     .order("start_date", { ascending: false });
 
   return data ?? [];
+}
+
+export async function getTenantBranding(
+  organizationId: string
+): Promise<TenantBranding | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("primary_color, secondary_color, accent_color, logo_url, status, branding_config")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  return (data ?? null) as TenantBranding | null;
 }
 
 export async function getCeoDashboardData(

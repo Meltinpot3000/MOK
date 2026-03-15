@@ -3,6 +3,9 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --brand-primary: #1d4ed8;
+  --brand-secondary: #0f172a;
+  --brand-accent: #14b8a6;
 }
 
 @theme inline {
@@ -23,4 +26,231 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.brand-shell .bg-zinc-900 {
+  background-color: var(--brand-primary);
+}
+
+.brand-shell .hover\:bg-zinc-700:hover {
+  background-color: color-mix(in srgb, var(--brand-primary) 84%, black);
+}
+
+.brand-shell .ring-zinc-900:focus {
+  --tw-ring-color: color-mix(in srgb, var(--brand-primary) 55%, white);
+}
+
+.brand-shell .border-zinc-200 {
+  border-color: color-mix(in srgb, var(--brand-primary) 16%, #e4e4e7);
+}
+
+.brand-shell .bg-zinc-50 {
+  background-color: color-mix(in srgb, var(--brand-secondary) 4%, white);
+}
+
+.brand-shell .text-zinc-500 {
+  color: color-mix(in srgb, var(--brand-secondary) 45%, #71717a);
+}
+
+.brand-shell .text-zinc-600 {
+  color: color-mix(in srgb, var(--brand-secondary) 58%, #52525b);
+}
+
+.brand-shell .brand-card {
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 16%, #e4e4e7);
+  background: #ffffff;
+  border-radius: 0.75rem;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 0 0 1px color-mix(in srgb, var(--brand-primary) 8%, transparent);
+}
+
+.brand-shell .brand-surface {
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 12%, #e4e4e7);
+  background: color-mix(in srgb, var(--brand-secondary) 4%, white);
+  border-radius: 0.5rem;
+}
+
+.brand-shell .brand-btn {
+  background: var(--brand-primary);
+  color: #ffffff;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  transition: background-color 160ms ease;
+}
+
+.brand-shell .brand-btn:hover {
+  background: color-mix(in srgb, var(--brand-primary) 84%, black);
+}
+
+.brand-shell .brand-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.brand-shell .brand-btn-secondary {
+  border: 1px solid color-mix(in srgb, var(--brand-secondary) 28%, #d4d4d8);
+  color: color-mix(in srgb, var(--brand-secondary) 72%, #3f3f46);
+  border-radius: 0.375rem;
+  font-weight: 500;
+  background: #fff;
+}
+
+.brand-shell .brand-btn-secondary:hover {
+  background: color-mix(in srgb, var(--brand-secondary) 6%, white);
+}
+
+.brand-shell .brand-accent-badge {
+  background: color-mix(in srgb, var(--brand-accent) 14%, white);
+  border: 1px solid color-mix(in srgb, var(--brand-accent) 44%, white);
+  color: color-mix(in srgb, var(--brand-secondary) 72%, #27272a);
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+}
+
+.brand-shell .org-graph-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.brand-shell .org-graph-tree {
+  margin: 0 auto;
+  display: inline-flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  padding-left: 0;
+}
+
+.brand-shell .org-graph-tree ul {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  padding-left: 0;
+  margin: 0;
+}
+
+.brand-shell .org-graph-tree li {
+  list-style-type: none;
+  text-align: center;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: max-content;
+  padding: 1rem 0.4rem 0;
+}
+
+.brand-shell .org-graph-tree li > ul {
+  width: max-content;
+}
+
+.brand-shell .org-graph-tree li::before,
+.brand-shell .org-graph-tree li::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  border-top: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  width: 50%;
+  height: 1rem;
+}
+
+.brand-shell .org-graph-tree li::after {
+  right: auto;
+  left: 50%;
+  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+}
+
+.brand-shell .org-graph-tree li:only-child::before,
+.brand-shell .org-graph-tree li:only-child::after {
+  display: none;
+}
+
+.brand-shell .org-graph-tree li:only-child {
+  padding-top: 0;
+}
+
+.brand-shell .org-graph-tree li:first-child::before,
+.brand-shell .org-graph-tree li:last-child::after {
+  border: 0;
+}
+
+.brand-shell .org-graph-tree li:last-child::before {
+  border-right: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  border-radius: 0 4px 0 0;
+}
+
+.brand-shell .org-graph-tree li:first-child::after {
+  border-radius: 4px 0 0 0;
+}
+
+.brand-shell .org-graph-tree ul ul::before,
+.brand-shell .org-graph-tree li > ul::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  width: 0;
+  height: 1rem;
+}
+
+.brand-shell .org-graph-node {
+  min-width: 12rem;
+  max-width: 16rem;
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 18%, #d4d4d8);
+  border-radius: 0.5rem;
+  background: white;
+  padding: 0.5rem 0.75rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.brand-shell .org-graph-code {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--brand-secondary) 55%, #52525b);
+}
+
+.brand-shell .org-graph-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--brand-secondary) 80%, #18181b);
+}
+
+.brand-shell .org-graph-type {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--brand-secondary) 60%, #52525b);
+}
+
+.brand-shell .graph-legend {
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 0.1rem 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-shell .graph-legend-resp {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.brand-shell .graph-legend-ind {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.brand-shell .graph-legend-bm {
+  background: #d1fae5;
+  color: #047857;
+  border-color: #a7f3d0;
 }

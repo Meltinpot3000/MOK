@@ -1,6 +1,12 @@
+import { redirect } from "next/navigation";
 import { AreaPlaceholder } from "@/components/ceo/AreaPlaceholder";
+import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 
-export default function OkrWorkspacePage() {
+export default async function OkrWorkspacePage() {
+  const pageAccess = await getSidebarAccessContext("okr-workspace");
+  if (pageAccess.state === "unauthenticated") redirect("/login");
+  if (pageAccess.state === "forbidden") redirect("/no-access");
+
   return (
     <AreaPlaceholder
       title="OKR Workspace"

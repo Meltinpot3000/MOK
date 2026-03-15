@@ -2,19 +2,28 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPhase0Context, getPlanningCycles } from "@/lib/phase0/queries";
+import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 
 export default async function PlanningCyclesPage() {
-  const context = await getPhase0Context();
-  if (!context) {
+  const pageAccess = await getSidebarAccessContext("planning-cycles");
+  if (pageAccess.state === "unauthenticated") {
+    redirect("/login");
+  }
+  if (pageAccess.state === "forbidden") {
     redirect("/no-access");
   }
 
+  const context = await getPhase0Context();
+  if (!context) redirect("/no-access");
+  const canWrite = pageAccess.canWrite;
   const cycles = await getPlanningCycles(context.organizationId);
 
   async function createCycle(formData: FormData) {
     "use server";
     const localContext = await getPhase0Context();
     if (!localContext) redirect("/no-access");
+    const localAccess = await getSidebarAccessContext("planning-cycles");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
 
     const supabase = await createSupabaseServerClient();
     await supabase.schema("app").from("planning_cycles").insert({
@@ -36,6 +45,8 @@ export default async function PlanningCyclesPage() {
     "use server";
     const localContext = await getPhase0Context();
     if (!localContext) redirect("/no-access");
+    const localAccess = await getSidebarAccessContext("planning-cycles");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
 
     const supabase = await createSupabaseServerClient();
     await supabase.rpc("clone_planning_cycle_full_snapshot", {
@@ -55,7 +66,7 @@ export default async function PlanningCyclesPage() {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Phase 0 Fundament</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Strategiezyklus-Management</h1>
         <p className="mt-1 text-sm text-zinc-600">
@@ -64,7 +75,7 @@ export default async function PlanningCyclesPage() {
       </header>
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <article className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <article className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Neuen Zyklus anlegen</h2>
           <form action={createCycle} className="mt-4 space-y-3">
             <input
@@ -103,14 +114,15 @@ export default async function PlanningCyclesPage() {
             />
             <button
               type="submit"
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              disabled={!canWrite}
+              className="brand-btn px-4 py-2 text-sm"
             >
               Zyklus erstellen
             </button>
           </form>
         </article>
 
-        <article className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <article className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Bestehenden Zyklus überführen</h2>
           <form action={cloneCycle} className="mt-4 space-y-3">
             <select
@@ -153,15 +165,21 @@ export default async function PlanningCyclesPage() {
             </div>
             <button
               type="submit"
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              disabled={!canWrite}
+              className="brand-btn px-4 py-2 text-sm"
             >
               Full Snapshot Clone ausführen
             </button>
           </form>
         </article>
       </section>
+      {!canWrite ? (
+        <p className="brand-surface p-3 text-sm text-zinc-600">
+          Diese Rolle hat nur Leserechte für Planungszyklen.
+        </p>
+      ) : null}
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Planungszyklen</h2>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">

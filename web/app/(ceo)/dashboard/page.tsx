@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { KpiCards } from "@/components/ceo/KpiCards";
+import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getAuthenticatedUserId,
   getCeoAccessContext,
@@ -8,6 +9,14 @@ import {
 } from "@/lib/ceo/queries";
 
 export default async function CeoDashboardPage() {
+  const pageAccess = await getSidebarAccessContext("dashboard");
+  if (pageAccess.state === "unauthenticated") {
+    redirect("/login");
+  }
+  if (pageAccess.state === "forbidden") {
+    redirect("/no-access");
+  }
+
   const userId = await getAuthenticatedUserId();
 
   if (!userId) {
@@ -35,9 +44,9 @@ export default async function CeoDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          CEO Dashboard
+          Dashboard
         </p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">
           {data.selectedCycle.name}
@@ -47,7 +56,7 @@ export default async function CeoDashboardPage() {
         </p>
         <Link
           href={`/dashboard/cycles/${data.selectedCycle.id}`}
-          className="mt-4 inline-flex rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+          className="brand-btn mt-4 inline-flex px-4 py-2 text-sm"
         >
           Zum Zyklus-Drilldown
         </Link>
@@ -56,11 +65,11 @@ export default async function CeoDashboardPage() {
       <KpiCards items={data.kpis} />
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <article className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <article className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Strategische Gesamtziele</h2>
           <ul className="mt-4 space-y-3">
             {data.strategicGoals.map((goal) => (
-              <li key={goal.id} className="rounded-md border border-zinc-100 bg-zinc-50 p-3">
+              <li key={goal.id} className="brand-surface p-3">
                 <p className="font-medium text-zinc-900">{goal.title}</p>
                 <p className="mt-1 text-xs text-zinc-600">
                   Status: {goal.status} {goal.priority ? `| Priorität: ${goal.priority}` : ""}
@@ -73,11 +82,11 @@ export default async function CeoDashboardPage() {
           ) : null}
         </article>
 
-        <article className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <article className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Abgeleitete Funktionsziele</h2>
           <ul className="mt-4 space-y-3">
             {data.functionalStrategies.map((strategy) => (
-              <li key={strategy.id} className="rounded-md border border-zinc-100 bg-zinc-50 p-3">
+              <li key={strategy.id} className="brand-surface p-3">
                 <p className="font-medium text-zinc-900">{strategy.title}</p>
                 <p className="mt-1 text-xs text-zinc-600">
                   Funktion: {strategy.function_name} | Status: {strategy.status}
