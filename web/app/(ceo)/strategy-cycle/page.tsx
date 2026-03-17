@@ -23,6 +23,7 @@ import {
 } from "@/app/(ceo)/strategy-cycle/actions";
 import StrategyMatrixPage from "@/app/(ceo)/strategy-matrix/page";
 import { AnalysisVisualizationWorkspace } from "@/components/analysis-visualization/AnalysisVisualizationWorkspace";
+import { LiveRangeInput } from "@/components/ceo/LiveRangeInput";
 import { evaluateLlmBudgetStatus } from "@/lib/analysis-network/budget";
 import { getTenantBranding } from "@/lib/ceo/queries";
 import {
@@ -110,7 +111,7 @@ function getTabTitle(tab: string) {
     case "swot":
       return "SWOT";
     case "workshop":
-      return "Workshop Findings";
+      return "Workshop-Erkenntnisse";
     default:
       return "Sonstige Analyse";
   }
@@ -119,15 +120,15 @@ function getTabTitle(tab: string) {
 function getL1TabTitle(tab: string) {
   switch (tab) {
     case "mission-vision-culture-values":
-      return "Mission, Vision, Culture & Values";
+      return "Mission, Vision, Kultur & Werte";
     case "corporate-strategy":
-      return "Corporate Strategy";
+      return "Unternehmensstrategie";
     case "strategic-directions":
-      return "Strategic Directions";
+      return "Strategische Stossrichtungen";
     case "pips":
       return "PIPs";
     default:
-      return "Corporate Strategy";
+      return "Unternehmensstrategie";
   }
 }
 
@@ -135,7 +136,7 @@ function getStGallenHint(tab: string) {
   if (tab === "summary")
     return "Strategische Gesamtsicht mit Netzwerk und Tabellen-Scan aller Analysepunkte.";
   if (tab === "strategy-matrix")
-    return "Matrix zur Ausrichtung von Strategic Challenges, Directions und Annual Targets.";
+    return "Matrix zur Ausrichtung von strategischen Herausforderungen, Stossrichtungen und Jahreszielen.";
   if (tab === "environment") return "St. Gallen: Umwelt-Sphaeren und Anspruchsgruppen systematisch erfassen.";
   if (tab === "company") return "St. Gallen: interne Faehigkeiten, Ressourcen und Prozesse bewerten.";
   if (tab === "competitor") return "St. Gallen: Wettbewerbsposition und Differenzierungskraefte analysieren.";
@@ -166,13 +167,13 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (error === "missing-title")
     return { type: "error", text: "Bitte einen Titel erfassen." };
   if (error === "invalid-impact")
-    return { type: "error", text: "Impact muss zwischen 1 und 5 liegen." };
+    return { type: "error", text: "Wirkung muss zwischen 1 und 5 liegen." };
   if (error === "invalid-uncertainty")
     return { type: "error", text: "Unsicherheits-Score muss zwischen 1 und 5 liegen." };
   if (error === "high-impact-justification")
     return {
       type: "error",
-      text: "Bei hohem Impact (4-5) braucht es eine belastbare Begruendung (mind. 40 Zeichen).",
+      text: "Bei hoher Wirkung (4-5) braucht es eine belastbare Begruendung (mind. 40 Zeichen).",
     };
   if (error === "invalid-subtype")
     return { type: "error", text: "Der Sub-Typ passt nicht zum ausgewaehlten Analysebereich." };
@@ -187,7 +188,7 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "deleted")
     return { type: "success", text: "Analyse-Eintrag wurde geloescht." };
   if (success === "promoted")
-    return { type: "success", text: "Eintrag wurde als Strategic Challenge in die Matrix uebernommen." };
+    return { type: "success", text: "Eintrag wurde als strategische Herausforderung in die Matrix uebernommen." };
   if (success === "links-generated")
     return { type: "success", text: "Link-Entwuerfe wurden neu generiert." };
   if (success === "link-approved")
@@ -197,13 +198,13 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "clusters-recomputed")
     return { type: "success", text: "Cluster wurden neu berechnet." };
   if (success === "gaps-recomputed")
-    return { type: "success", text: "Gap-Analyse wurde neu berechnet." };
+    return { type: "success", text: "Lueckenanalyse wurde neu berechnet." };
   if (success === "cluster-promoted")
-    return { type: "success", text: "Cluster wurde als Strategic Challenge uebernommen." };
+    return { type: "success", text: "Cluster wurde als strategische Herausforderung uebernommen." };
   if (success === "finding-linked")
-    return { type: "success", text: "Finding wurde einer bestehenden Challenge zugeordnet." };
+    return { type: "success", text: "Befund wurde einer bestehenden Herausforderung zugeordnet." };
   if (success === "direction-created")
-    return { type: "success", text: "Strategic Direction wurde erstellt." };
+    return { type: "success", text: "Strategische Stossrichtung wurde erstellt." };
   if (success === "initiative-created")
     return { type: "success", text: "PIP wurde erstellt." };
   if (success === "linked")
@@ -211,7 +212,7 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "unlinked")
     return { type: "success", text: "Predecessor-Verknuepfung wurde entfernt." };
   if (success === "strategy-reference-saved")
-    return { type: "success", text: "Mission, Vision, Culture und Values wurden gespeichert." };
+    return { type: "success", text: "Mission, Vision, Kultur und Werte wurden gespeichert." };
   return null;
 }
 
@@ -231,9 +232,9 @@ function getQualityBand(score: number) {
 }
 
 function getQualityBandLabel(band: string) {
-  if (band === "high") return "High Quality";
-  if (band === "medium") return "Medium Quality";
-  return "Low Quality";
+  if (band === "high") return "Hohe Qualitaet";
+  if (band === "medium") return "Mittlere Qualitaet";
+  return "Niedrige Qualitaet";
 }
 
 async function enrichEntriesWithQuality<
@@ -290,11 +291,36 @@ async function enrichEntriesWithQuality<
           qualityExplanation: null,
         };
       }
+      const llmRequestedForEntry = llmEligible.has(entry.id);
+      if (process.env.NODE_ENV !== "production" && !llmRequestedForEntry) {
+        console.info("[quality-scoring] fallback(rule): entry not in llm-eligible top-N", {
+          entryId: entry.id,
+          title: entry.title,
+          impactLevel: entry.impact_level ?? 3,
+          maxLlmItems: options.maxLlmItems,
+        });
+      }
       const result = await calculateQualityScoreWithFallback(entry, scoreWeights, {
-        llmEnabled: options.llmEnabled && llmEligible.has(entry.id),
+        llmEnabled: options.llmEnabled && llmRequestedForEntry,
         strategyReferenceText: options.strategyReferenceText,
         maxOutputTokens: options.maxOutputTokens,
       });
+      if (
+        process.env.NODE_ENV !== "production" &&
+        llmRequestedForEntry &&
+        result.source === "rule"
+      ) {
+        console.info("[quality-scoring] fallback(rule): llm returned no usable result", {
+          entryId: entry.id,
+          title: entry.title,
+          fallbackReason: result.fallbackReason,
+          hasUsage: Boolean(result.usage),
+          promptTokens: result.usage?.promptTokens ?? null,
+          completionTokens: result.usage?.completionTokens ?? null,
+          totalTokens: result.usage?.totalTokens ?? null,
+          usageMissing: result.usage?.usageMissing ?? null,
+        });
+      }
       if (result.source === "llm" && result.usage && result.provider && result.model && result.promptVersion) {
         usageEvents.push({
           provider: result.provider,
@@ -459,11 +485,13 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategiephase</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Strategy Cycle Workspace</h1>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategiezyklus</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Arbeitsbereich Strategiezyklus</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Zyklus: {selectedCycle.name} ({selectedCycle.code}) - Analyse nach St.-Gallen-orientierter Logik
-          als Input fuer Strategic Challenges.
+          Erfasse Signale strukturiert und leite daraus fokussierte strategische Herausforderungen ab.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Zyklus: {selectedCycle.name} ({selectedCycle.code})
         </p>
       </header>
 
@@ -520,9 +548,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <p className="text-sm text-zinc-600">{getStGallenHint(activeTab)}</p>
             {activeTab !== "strategy-matrix" ? (
               <p className="text-xs text-zinc-500">
-                Score-Gewichte: Impact {Math.round(scoreWeights.impact * 100)}% | Certainty{" "}
-                {Math.round(scoreWeights.certainty * 100)}% | Evidence {Math.round(scoreWeights.evidence * 100)}
-                % | Structure {Math.round(scoreWeights.structure * 100)}%
+                Bewertungsgewichte: Wirkung {Math.round(scoreWeights.impact * 100)}% | Sicherheit{" "}
+                {Math.round(scoreWeights.certainty * 100)}% | Evidenz {Math.round(scoreWeights.evidence * 100)}
+                % | Struktur {Math.round(scoreWeights.structure * 100)}%
               </p>
             ) : null}
           </>
@@ -532,7 +560,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       {activeL1 === "mission-vision-culture-values" ? (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <article className="brand-card p-6 lg:col-span-2">
-            <h2 className="text-lg font-semibold text-zinc-900">Mission, Vision, Culture, Values & Leadership</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Mission, Vision, Kultur, Werte & Fuehrung</h2>
             <p className="mt-2 text-sm text-zinc-600">
               Hinterlege die Leitbild-Bausteine als Freitext und pflege sie laufend.
             </p>
@@ -558,7 +586,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 />
               </label>
               <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Culture</span>
+                <span className="mb-1 block font-medium">Kultur</span>
                 <textarea
                   name="strategy_reference_culture"
                   defaultValue={strategyReferenceFields.culture}
@@ -568,7 +596,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 />
               </label>
               <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Values</span>
+                <span className="mb-1 block font-medium">Werte</span>
                 <textarea
                   name="strategy_reference_values"
                   defaultValue={strategyReferenceFields.values}
@@ -600,14 +628,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       {activeL1 === "strategic-directions" ? (
         <section className="space-y-4">
           <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">Strategic Challenges</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Strategische Herausforderungen</h2>
             <p className="mt-1 text-sm text-zinc-600">
               Diese Challenges stammen aus Corporate Strategy und bilden die Basis fuer die Stossrichtungen.
             </p>
             <div className="mt-4 space-y-2">
               {(workspace.challenges ?? []).length === 0 ? (
                 <p className="brand-surface p-3 text-sm text-zinc-600">
-                  Noch keine Strategic Challenges vorhanden.
+                  Noch keine strategischen Herausforderungen vorhanden.
                 </p>
               ) : (
                 (workspace.challenges ?? []).map((challenge) => (
@@ -623,12 +651,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </article>
 
           <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">Strategic Directions</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtungen</h2>
             <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
               <input
                 name="title"
                 required
-                placeholder="Neue Strategic Direction"
+                placeholder="Neue strategische Stossrichtung"
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
               />
               <input
@@ -649,7 +677,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <h3 className="text-base font-semibold text-zinc-900">Predecessors aus Corporate Strategy</h3>
             <div className="mt-4 space-y-3">
               {(workspace.strategicDirections ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Strategic Directions vorhanden.</p>
+                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
               ) : (
                 (workspace.strategicDirections ?? []).map((direction) => {
                   const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
@@ -663,7 +691,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-semibold text-zinc-900">{direction.title}</p>
                         <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                          Coverage {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
+                          Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
                         </span>
                       </div>
                       <form action={linkDirectionToChallengePredecessor} className="flex flex-wrap gap-2">
@@ -673,7 +701,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           defaultValue=""
                           className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
                         >
-                          <option value="">Predecessor-Challenge verknuepfen</option>
+                          <option value="">Vorgaenger-Herausforderung verknuepfen</option>
                           {challengeOptions.map((challenge) => (
                             <option key={challenge.id} value={challenge.id}>
                               {challenge.title}
@@ -737,7 +765,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </article>
 
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Predecessors aus Strategic Directions</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Vorgaenger aus strategischen Stossrichtungen</h3>
             <div className="mt-4 space-y-3">
               {(workspace.initiatives ?? []).length === 0 ? (
                 <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine PIPs vorhanden.</p>
@@ -764,7 +792,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           defaultValue=""
                           className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
                         >
-                          <option value="">Predecessor-Target verknuepfen</option>
+                          <option value="">Vorgaenger-Ziel verknuepfen</option>
                           {(workspace.annualTargets ?? []).map((target) => (
                             <option key={target.id} value={target.id}>
                               {target.title}
@@ -821,18 +849,18 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
         <section className="brand-card p-6 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-zinc-900">Challenge-Empfehlungen</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Empfehlungen fuer Herausforderungen</h2>
             <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
               {workspace.challengeCandidates.filter((candidate) => candidate.status === "draft").length} offen
             </span>
           </div>
           <p className="text-sm text-zinc-600">
-            Vorschlaege aus Clustern und Gaps. Uebernehmen erstellt direkt eine Strategic Challenge.
+            Vorschlaege aus Clustern und Luecken. Uebernehmen erstellt direkt eine strategische Herausforderung.
           </p>
           <div className="space-y-2">
             {workspace.challengeCandidates.filter((candidate) => candidate.status === "draft").length === 0 ? (
               <p className="brand-surface p-3 text-sm text-zinc-600">
-                Keine offenen Empfehlungen. Fuehre &quot;Gaps neu berechnen&quot; aus, um neue Vorschlaege zu erzeugen.
+                Keine offenen Empfehlungen. Fuehre &quot;Luecken neu berechnen&quot; aus, um neue Vorschlaege zu erzeugen.
               </p>
             ) : (
               workspace.challengeCandidates
@@ -881,7 +909,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
       <section className="brand-card p-6 space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-semibold text-zinc-900">Analysis Netzwerk</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Analyse-Netzwerk</h2>
           <form action={generateLinkDrafts}>
             <input type="hidden" name="analysis_type" value={actionTab} />
             <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
@@ -897,7 +925,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           <form action={recomputeGaps}>
             <input type="hidden" name="analysis_type" value={actionTab} />
             <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-              Gaps neu berechnen
+              Luecken neu berechnen
             </button>
           </form>
         </div>
@@ -1001,14 +1029,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <h3 className="text-sm font-semibold text-zinc-900">Luecken in der Betrachtung</h3>
             <div className="mt-2 space-y-2">
               {(workspace.gapFindings ?? []).length === 0 ? (
-                <p className="text-xs text-zinc-600">Keine offenen Gaps gefunden.</p>
+                <p className="text-xs text-zinc-600">Keine offenen Luecken gefunden.</p>
               ) : (
                 (workspace.gapFindings ?? []).slice(0, 12).map((gap) => (
                   <div key={gap.id} className="rounded-md border border-zinc-200 bg-white p-2">
                     <p className="text-xs font-medium text-zinc-900">
                       {gap.gap_type} | {gap.dimension}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-600">Severity: {gap.severity} | Status: {gap.status}</p>
+                    <p className="mt-1 text-xs text-zinc-600">Prioritaet: {gap.severity} | Status: {gap.status}</p>
                     <p className="mt-1 text-xs text-zinc-500">{gap.recommendation}</p>
                   </div>
                 ))
@@ -1090,40 +1118,18 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             />
             <div>
               <label className="mb-1 block text-xs font-medium text-zinc-700">
-                Strategischer Impact (1-5)
+                Strategische Wirkung (1-5)
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  name="impact_level"
-                  min={1}
-                  max={5}
-                  step={1}
-                  defaultValue={3}
-                  className="min-w-0 flex-1 accent-[var(--brand-primary)]"
-                />
-                <span className="w-10 shrink-0 text-right text-xs font-medium text-zinc-700">3/5</span>
-              </div>
+              <LiveRangeInput name="impact_level" defaultValue={3} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-zinc-700">
                 Unsicherheits-Score (1-5)
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  name="uncertainty_level"
-                  min={1}
-                  max={5}
-                  step={1}
-                  defaultValue={3}
-                  className="min-w-0 flex-1 accent-[var(--brand-primary)]"
-                />
-                <span className="w-10 shrink-0 text-right text-xs font-medium text-zinc-700">3/5</span>
-              </div>
+              <LiveRangeInput name="uncertainty_level" defaultValue={3} />
             </div>
             <p className="text-xs text-zinc-500">
-              Qualitätsregel: Bei Impact 4-5 muss die Begruendung mindestens 40 Zeichen haben.
+              Qualitaetsregel: Bei Wirkung 4-5 muss die Begruendung mindestens 40 Zeichen haben.
             </p>
             <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
               Eintrag speichern
@@ -1151,8 +1157,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               defaultValue={sort}
               className="min-w-[260px] flex-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
             >
-              <option value="score_desc">Sort: Quality Score (absteigend)</option>
-              <option value="updated_desc">Sort: Letzte Aktualisierung</option>
+              <option value="score_desc">Sortierung: Qualitaetswert (absteigend)</option>
+              <option value="updated_desc">Sortierung: Letzte Aktualisierung</option>
             </select>
             <select
               name="quality_band"
@@ -1160,12 +1166,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               className="min-w-[180px] rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
             >
               <option value="all">Band: Alle</option>
-              <option value="high">Band: High Quality</option>
-              <option value="medium">Band: Medium Quality</option>
-              <option value="low">Band: Low Quality</option>
+              <option value="high">Band: Hohe Qualitaet</option>
+              <option value="medium">Band: Mittlere Qualitaet</option>
+              <option value="low">Band: Niedrige Qualitaet</option>
             </select>
             <div className="flex min-w-[150px] items-center gap-2">
-              <label className="text-xs text-zinc-600">Min Score</label>
+              <label className="text-xs text-zinc-600">Mindestwert</label>
               <input
                 type="number"
                 name="min_score"
@@ -1192,6 +1198,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               filteredEntries.map((entry) => {
                 const promotedChallengeId = workspace.promotedBySourceId.get(entry.id) ?? null;
                 const pestelArea = activeTab === "environment" ? getPestelAreaStyle(entry.sub_type) : null;
+                const updatedAtLabel = String(entry.updated_at ?? "")
+                  .replace("T", " ")
+                  .replace("Z", "")
+                  .slice(0, 16);
                 return (
                   <div
                     key={entry.id}
@@ -1216,39 +1226,13 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                             <span className="mb-1 block text-xs font-medium text-zinc-600">
                               Strategischer Impact
                             </span>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="range"
-                                name="impact_level"
-                                min={1}
-                                max={5}
-                                step={1}
-                                defaultValue={entry.impact_level ?? 3}
-                                className="min-w-0 flex-1 accent-[var(--brand-primary)]"
-                              />
-                              <span className="w-10 shrink-0 text-right text-xs font-medium text-zinc-700">
-                                {(entry.impact_level ?? 3)}/5
-                              </span>
-                            </div>
+                            <LiveRangeInput name="impact_level" defaultValue={entry.impact_level ?? 3} />
                           </label>
                           <label className="block min-w-0 overflow-hidden">
                             <span className="mb-1 block text-xs font-medium text-zinc-600">
                               Unsicherheits-Score
                             </span>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="range"
-                                name="uncertainty_level"
-                                min={1}
-                                max={5}
-                                step={1}
-                                defaultValue={entry.uncertainty_level ?? 3}
-                                className="min-w-0 flex-1 accent-[var(--brand-primary)]"
-                              />
-                              <span className="w-10 shrink-0 text-right text-xs font-medium text-zinc-700">
-                                {(entry.uncertainty_level ?? 3)}/5
-                              </span>
-                            </div>
+                            <LiveRangeInput name="uncertainty_level" defaultValue={entry.uncertainty_level ?? 3} />
                           </label>
                         </div>
                         <div className="block min-w-0">
@@ -1322,7 +1306,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           Speichern
                         </button>
                         <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
-                          Quality Score: {entry.qualityScore}
+                          Qualitaetswert: {entry.qualityScore}
                         </span>
                         <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
                           Quelle: {entry.qualitySource === "llm" ? "LLM" : "Rule-Fallback"}
@@ -1353,7 +1337,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           disabled={!canWrite || promotedChallengeId !== null}
                           className="brand-btn-secondary px-3 py-1.5 text-xs"
                         >
-                          {promotedChallengeId ? "Bereits als Challenge uebernommen" : "Als Challenge uebernehmen"}
+                          {promotedChallengeId ? "Bereits als Herausforderung uebernommen" : "Als Herausforderung uebernehmen"}
                         </button>
                       </form>
                       <form action={attachFindingToChallenge} className="flex items-center gap-1">
@@ -1364,7 +1348,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           defaultValue=""
                           className="rounded border border-zinc-300 px-2 py-1 text-xs"
                         >
-                          <option value="">Challenge zuordnen</option>
+                          <option value="">Herausforderung zuordnen</option>
                           {challengeOptions.map((challenge) => (
                             <option key={challenge.id} value={challenge.id}>
                               {challenge.title}
@@ -1387,7 +1371,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         </button>
                       </form>
                       <span className="text-xs text-zinc-500">
-                        Aktualisiert: {new Date(entry.updated_at).toLocaleString("de-CH")}
+                        Aktualisiert: {updatedAtLabel || "-"}
                       </span>
                     </div>
                   </div>

@@ -442,7 +442,7 @@ export default async function PlanningCyclesPage({ searchParams }: PlanningCycle
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Systemkonfiguration</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Neuer Planungszyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Verwaltung der Planungszyklen</h1>
         <p className="mt-1 text-sm text-zinc-600">
           Stabiler Zyklusbetrieb mit geführter 3-Schritt-Erfassung und optionalem Cut-over auf ein neues

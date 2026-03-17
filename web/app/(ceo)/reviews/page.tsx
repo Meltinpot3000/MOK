@@ -81,7 +81,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
             activeTab === "overview" ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
           }`}
         >
-          Review-Board
+          Uebersicht
         </Link>
         <Link
           href="/reviews?tab=annual-targets"
@@ -95,7 +95,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
 
       {activeTab === "overview" ? (
         <section className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Review-Board</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Uebersicht</h2>
           <p className="mt-1 text-sm text-zinc-600">
             Hier werden Retrospektiven, Lessons Learned und Verbesserungsmassnahmen fuer den laufenden Reviewzyklus gebuendelt.
           </p>
@@ -116,7 +116,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
             <div className="mt-4 space-y-3">
               {links.annualTargets.length === 0 ? (
                 <p className="brand-surface p-3 text-sm text-zinc-600">
-                  Noch keine Annual Targets vorhanden.
+                  Noch keine Jahresziele vorhanden.
                 </p>
               ) : (
                 links.annualTargets.map((target) => {
@@ -131,44 +131,44 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
                     <div key={target.id} className="brand-surface space-y-2 p-3">
                       <p className="text-sm font-semibold text-zinc-900">{target.title}</p>
                       <p className="text-xs text-zinc-600">
-                        Industries: {linkedIndustries.map((x) => x.name).join(", ") || "-"}
+                        Industrien: {linkedIndustries.map((x) => x.name).join(", ") || "-"}
                       </p>
                       <p className="text-xs text-zinc-600">
-                        Business Models: {linkedBusinessModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
+                        Geschaeftsmodelle: {linkedBusinessModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
                       </p>
                       <p className="text-xs text-zinc-600">
-                        Operating Models: {linkedOperatingModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
+                        Betriebsmodelle: {linkedOperatingModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <form action={linkAnnualTargetToIndustry} className="flex gap-2">
                           <input type="hidden" name="annual_target_id" value={target.id} />
                           <select name="industry_id" defaultValue="" className="min-w-[200px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                            <option value="">Industry verbinden</option>
+                            <option value="">Industrie verknuepfen</option>
                             {industries.map((industry) => (
                               <option key={industry.id} value={industry.id}>{industry.name}</option>
                             ))}
                           </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Link</button>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
                         </form>
                         <form action={linkAnnualTargetToBusinessModel} className="flex gap-2">
                           <input type="hidden" name="annual_target_id" value={target.id} />
                           <select name="business_model_id" defaultValue="" className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                            <option value="">Business Model verbinden</option>
+                            <option value="">Geschaeftsmodell verknuepfen</option>
                             {businessModels.map((model) => (
                               <option key={model.id} value={model.id}>{model.name} (v{model.version_no})</option>
                             ))}
                           </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Link</button>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
                         </form>
                         <form action={linkAnnualTargetToOperatingModel} className="flex gap-2">
                           <input type="hidden" name="annual_target_id" value={target.id} />
                           <select name="operating_model_id" defaultValue="" className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                            <option value="">Operating Model verbinden</option>
+                            <option value="">Betriebsmodell verknuepfen</option>
                             {operatingModels.map((model) => (
                               <option key={model.id} value={model.id}>{model.name} (v{model.version_no})</option>
                             ))}
                           </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Link</button>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
                         </form>
                       </div>
                     </div>

@@ -27,7 +27,7 @@ function getAnalysisTypeLabel(type: string) {
 function getPriorityZone(impact: number, uncertainty: number) {
   if (impact >= 4 && uncertainty >= 4) return "Prioritaet A";
   if (impact >= 4 || uncertainty >= 4) return "Beobachten";
-  return "Backlog";
+  return "Rueckstand";
 }
 
 export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProps) {
@@ -39,12 +39,12 @@ export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProp
             <th className="px-2 py-2">Analyse-Typ</th>
             <th className="px-2 py-2">Sub-Typ</th>
             <th className="px-2 py-2">Titel</th>
-            <th className="px-2 py-2">Impact</th>
+            <th className="px-2 py-2">Wirkung</th>
             <th className="px-2 py-2">Unsicherheit</th>
-            <th className="px-2 py-2">Quality</th>
-            <th className="px-2 py-2">Priority Zone</th>
-            <th className="px-2 py-2">Challenge</th>
-            <th className="px-2 py-2">Directions</th>
+            <th className="px-2 py-2">Qualitaet</th>
+            <th className="px-2 py-2">Prioritaetszone</th>
+            <th className="px-2 py-2">Herausforderung</th>
+            <th className="px-2 py-2">Stossrichtungen</th>
           </tr>
         </thead>
         <tbody>

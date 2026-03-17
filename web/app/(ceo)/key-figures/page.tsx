@@ -9,9 +9,10 @@ export default async function KeyFiguresPage() {
 
   return (
     <AreaPlaceholder
-      title="Strategic Key Figures"
+      eyebrow="Kennzahlen"
+      title="Strategische Kennzahlen"
       purpose="Konsolidierte Sicht auf strategische Kennzahlen mit Baselines, Zielwerten und Abweichungen."
-      audience="Executive Team, Strategy Office, Controlling"
+      audience="Geschaeftsleitung, Strategiebuero, Controlling"
     />
   );
 }

@@ -1,4 +1,6 @@
-begin;
+-- 0037_cycle_cutovers.sql
+-- migrate:up
+
 
 create table if not exists app.cycle_cutovers (
   id uuid primary key default gen_random_uuid(),
@@ -83,4 +85,6 @@ create policy cycle_cutovers_modify on app.cycle_cutovers
 for all using (app.has_permission(organization_id, 'cycle_scheme.write'))
 with check (app.has_permission(organization_id, 'cycle_scheme.write'));
 
-commit;
+
+-- migrate:down
+-- irreversible migration (no-op)

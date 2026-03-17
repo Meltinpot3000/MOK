@@ -1,4 +1,6 @@
-begin;
+-- 0039_cycle_cutover_snapshot_and_carry_forward.sql
+-- migrate:up
+
 
 create table if not exists app.cycle_cutover_snapshots (
   id uuid primary key default gen_random_uuid(),
@@ -512,4 +514,6 @@ create policy cycle_cutover_snapshots_modify on app.cycle_cutover_snapshots
 for all using (app.has_permission(organization_id, 'cycle_scheme.write'))
 with check (app.has_permission(organization_id, 'cycle_scheme.write'));
 
-commit;
+
+-- migrate:down
+-- irreversible migration (no-op)

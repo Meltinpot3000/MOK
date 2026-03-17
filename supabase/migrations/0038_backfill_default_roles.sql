@@ -1,4 +1,6 @@
-begin;
+-- 0038_backfill_default_roles.sql
+-- migrate:up
+
 
 insert into rbac.roles (organization_id, code, name, description, is_system)
 select
@@ -87,4 +89,6 @@ join rbac.permissions p
 where r.code = 'team_member'
 on conflict (role_id, permission_id) do nothing;
 
-commit;
+
+-- migrate:down
+-- irreversible migration (no-op)

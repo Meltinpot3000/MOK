@@ -6,16 +6,17 @@
 - `SUPABASE_DB_PASSWORD` ist gesetzt.
 - `DATABASE_URL` oder `DIRECT_DATABASE_URL` ist in `.env.local` gepflegt.
 - Supabase CLI ist installiert.
+- In `.env.local` ist `DATABASE_URL` als Pooler-URL mit `sslmode=require` gesetzt.
 
 ## 1) Primärer Weg: dbmate Migrationen
 
 1. `DATABASE_URL` setzen (Pooler-URL mit `sslmode=require`).
 2. Schema-Migrationen ausführen:
-   - `dbmate --migrations-dir supabase/migrations up`
+   - `npm run db:migrate`
 3. Seeds ausführen:
    - `dbmate --migrations-dir supabase/seed up`
 4. Status prüfen:
-   - `dbmate --migrations-dir supabase/migrations status`
+   - `npm run db:migrate:status`
    - `dbmate --migrations-dir supabase/seed status`
 
 ## 2) Fallback: Supabase SQL Editor

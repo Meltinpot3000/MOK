@@ -6,13 +6,13 @@ export default function NoAccessPage() {
       <p className="text-sm font-semibold uppercase tracking-wide text-zinc-500">CITADEL</p>
       <h1 className="mt-2 text-3xl font-semibold text-zinc-900">Kein Zugriff</h1>
       <p className="mt-3 text-sm text-zinc-600">
-        Dieses Dashboard ist im MVP nur für CEO/Admin-Rollen freigeschaltet.
+        Dieser Bereich ist im MVP nur fuer Rollen der Geschaeftsleitung und Administration freigeschaltet.
       </p>
       <Link
         href="/dashboard"
         className="mt-6 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
       >
-        Zur Dashboard-Startseite
+        Zur Startseite
       </Link>
     </main>
   );

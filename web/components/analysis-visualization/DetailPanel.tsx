@@ -72,10 +72,10 @@ export function DetailPanel({
         <div className="space-y-1">
           <p className="text-sm font-semibold text-zinc-900">{selectedNode.label}</p>
           <p className="text-xs text-zinc-600">
-            Type: {selectedNode.analysisType} {selectedNode.subType ? `/${selectedNode.subType}` : ""}
+            Typ: {selectedNode.analysisType} {selectedNode.subType ? `/${selectedNode.subType}` : ""}
           </p>
           <p className="text-xs text-zinc-600">
-            Impact {selectedNode.impact}/5 | Unsicherheit {selectedNode.uncertainty}/5 | Quality {selectedNode.qualityScore}
+            Wirkung {selectedNode.impact}/5 | Unsicherheit {selectedNode.uncertainty}/5 | Qualitaet {selectedNode.qualityScore}
           </p>
           <p className="text-xs text-zinc-600">
             Einfluss: {incomingEdgeCount} eingehend / {outgoingEdgeCount} ausgehend
@@ -84,13 +84,13 @@ export function DetailPanel({
             Cluster: {selectedNode.clusterLabel ?? "isoliert"}
           </p>
           <p className="text-xs text-zinc-600">
-            Challenge Mapping: {challengeMapped ? "vorhanden" : "offen"}
+            Herausforderungs-Zuordnung: {challengeMapped ? "vorhanden" : "offen"}
           </p>
           {selectedNode.description ? (
             <p className="mt-2 text-xs text-zinc-600">{selectedNode.description}</p>
           ) : null}
           <p className="mt-2 text-xs text-zinc-600">
-            Strategic Hint: Nutze high-impact Knoten mit vielen ausgehenden Kanten als Challenge-Kandidaten.
+            Strategischer Hinweis: Nutze Knoten mit hoher Wirkung und vielen ausgehenden Kanten als Kandidaten fuer Herausforderungen.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <a
@@ -114,7 +114,7 @@ export function DetailPanel({
           <p className="text-xs font-semibold text-zinc-900">Verbindung</p>
           <p className="text-xs text-zinc-600">Typ: {selectedEdge.linkType}</p>
           <p className="text-xs text-zinc-600">
-            Strength {selectedEdge.strength}/5 | Confidence {Math.round(selectedEdge.confidence * 100)}%
+            Staerke {selectedEdge.strength}/5 | Vertrauen {Math.round(selectedEdge.confidence * 100)}%
           </p>
           {tri ? (
             <p className="text-xs text-zinc-600">
@@ -130,7 +130,7 @@ export function DetailPanel({
           ) : null}
           {selectedEdge.updatedAt ? (
             <p className="text-xs text-zinc-500">
-              Letztes Update: {new Date(selectedEdge.updatedAt).toLocaleString("de-CH")}
+              Letzte Aktualisierung: {new Date(selectedEdge.updatedAt).toLocaleString("de-CH")}
             </p>
           ) : null}
           {selectedEdge.history && selectedEdge.history.length > 0 ? (
@@ -150,20 +150,20 @@ export function DetailPanel({
             </div>
           ) : null}
           <div className="mt-2 space-y-2 border-t border-zinc-200 pt-2">
-            <p className="text-xs font-medium text-zinc-700">Edge bearbeiten</p>
+            <p className="text-xs font-medium text-zinc-700">Verbindung bearbeiten</p>
             <select
               value={editLinkType}
               onChange={(event) => setEditLinkType(event.target.value)}
               disabled={!canWrite || busy}
               className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs"
             >
-              <option value="related_to">related_to</option>
-              <option value="causes">causes</option>
-              <option value="supports">supports</option>
-              <option value="contradicts">contradicts</option>
-              <option value="amplifies">amplifies</option>
-              <option value="depends_on">depends_on</option>
-              <option value="duplicates">duplicates</option>
+              <option value="related_to">ist verbunden mit</option>
+              <option value="causes">verursacht</option>
+              <option value="supports">unterstuetzt</option>
+              <option value="contradicts">widerspricht</option>
+              <option value="amplifies">verstaerkt</option>
+              <option value="depends_on">haengt ab von</option>
+              <option value="duplicates">dupliziert</option>
             </select>
             <div className="flex items-center gap-2">
               <input
@@ -204,7 +204,7 @@ export function DetailPanel({
                     });
                     setStatus("Verbindung aktualisiert.");
                   } catch {
-                    setStatus("Update fehlgeschlagen.");
+                    setStatus("Aktualisierung fehlgeschlagen.");
                   } finally {
                     setBusy(false);
                   }

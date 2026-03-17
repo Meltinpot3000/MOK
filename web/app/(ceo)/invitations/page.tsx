@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import Image from "next/image";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAppBaseUrl } from "@/lib/app-url";
 import { getPhase0Context } from "@/lib/phase0/queries";
@@ -13,12 +14,78 @@ import {
 } from "@/lib/invitations";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 
+type InvitationsPageProps = {
+  searchParams: Promise<{ success?: string; error?: string }>;
+};
+
+type MembershipRow = {
+  id: string;
+  user_id: string;
+  status: "active" | "invited" | "suspended";
+  title: string | null;
+  created_at: string;
+  responsible_id: string | null;
+  responsible:
+    | {
+        id: string;
+        full_name: string;
+        email: string | null;
+        role_title: string | null;
+      }
+    | Array<{
+        id: string;
+        full_name: string;
+        email: string | null;
+        role_title: string | null;
+      }>
+    | null;
+};
+
+type RoleAssignmentRow = {
+  membership_id: string;
+  role: { code: string; name: string } | { code: string; name: string }[] | null;
+};
+type RoleRow = { id: string; code: string; name: string };
+
+type UserIdentity = {
+  email: string | null;
+  name: string | null;
+};
+
+function getStatusMessage(error?: string, success?: string) {
+  if (success === "responsible-linked") {
+    return { type: "success", text: "Benutzer wurde einem Verantwortlichen zugeordnet." as const };
+  }
+  if (success === "responsible-unlinked") {
+    return { type: "success", text: "Zuordnung zum Verantwortlichen wurde entfernt." as const };
+  }
+  if (error === "missing-membership") {
+    return { type: "error", text: "Mitgliedschaft fehlt oder ist ungueltig." as const };
+  }
+  if (error === "missing-responsible") {
+    return { type: "error", text: "Verantwortlicher fehlt oder ist ungueltig." as const };
+  }
+  if (error === "save-failed") {
+    return { type: "error", text: "Zuordnung konnte nicht gespeichert werden." as const };
+  }
+  if (error === "missing-role") {
+    return { type: "error", text: "Rolle fehlt oder ist ungueltig." as const };
+  }
+  if (error === "role-save-failed") {
+    return { type: "error", text: "Rolle konnte nicht gespeichert werden." as const };
+  }
+  if (success === "role-updated") {
+    return { type: "success", text: "Rolle wurde aktualisiert." as const };
+  }
+  return null;
+}
+
 function isServiceRoleConfigured(): boolean {
   const value = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   return Boolean(value && !value.includes("your_service_role_key"));
 }
 
-export default async function InvitationsPage() {
+export default async function InvitationsPage({ searchParams }: InvitationsPageProps) {
   const pageAccess = await getSidebarAccessContext("invitations");
   if (pageAccess.state === "unauthenticated") {
     redirect("/login");
@@ -33,10 +100,87 @@ export default async function InvitationsPage() {
 
   const baseUrl = await getAppBaseUrl();
   const serviceRoleConfigured = isServiceRoleConfigured();
-  const [roles, invitations] = await Promise.all([
+  const [roles, invitations, membershipsRes, roleAssignmentsRes, responsiblesRes, editableRolesRes] = await Promise.all([
     getInvitationRoles(context.organizationId),
     listInvitations(context.organizationId),
+    createSupabaseServerClient().then((supabase) =>
+      supabase
+        .schema("app")
+        .from("organization_memberships")
+        .select(
+          "id, user_id, status, title, created_at, responsible_id, responsible:responsible_id(id, full_name, email, role_title)"
+        )
+        .eq("organization_id", context.organizationId)
+        .order("created_at", { ascending: false })
+    ),
+    createSupabaseServerClient().then((supabase) =>
+      supabase
+        .schema("rbac")
+        .from("member_roles")
+        .select("membership_id, role:role_id(code, name)")
+    ),
+    createSupabaseServerClient().then((supabase) =>
+      supabase
+        .schema("app")
+        .from("responsibles")
+        .select("id, full_name, email, role_title, is_active")
+        .eq("organization_id", context.organizationId)
+        .eq("is_active", true)
+        .order("full_name", { ascending: true })
+    ),
+    createSupabaseServerClient().then((supabase) =>
+      supabase
+        .schema("rbac")
+        .from("roles")
+        .select("id, code, name")
+        .eq("organization_id", context.organizationId)
+        .order("name", { ascending: true })
+    ),
   ]);
+  const params = await searchParams;
+  const status = getStatusMessage(params.error, params.success);
+
+  const memberships = (membershipsRes.data ?? []) as MembershipRow[];
+  const roleAssignments = (roleAssignmentsRes.data ?? []) as RoleAssignmentRow[];
+  const responsibles =
+    (responsiblesRes.data ?? []) as Array<{
+      id: string;
+      full_name: string;
+      email: string | null;
+      role_title: string | null;
+      is_active: boolean;
+    }>;
+  const editableRoles = (editableRolesRes.data ?? []) as RoleRow[];
+
+  const roleCodesByMembership = new Map<string, string[]>();
+  const membershipIds = new Set(memberships.map((membership) => membership.id));
+  for (const row of roleAssignments) {
+    if (!membershipIds.has(row.membership_id)) continue;
+    const roleValue = Array.isArray(row.role) ? row.role[0] : row.role;
+    const roleCode = roleValue?.code;
+    if (!roleCode) continue;
+    const list = roleCodesByMembership.get(row.membership_id) ?? [];
+    list.push(roleCode);
+    roleCodesByMembership.set(row.membership_id, Array.from(new Set(list)));
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const identityByUserId = new Map<string, UserIdentity>();
+  if (adminClient) {
+    await Promise.all(
+      Array.from(new Set(memberships.map((membership) => membership.user_id))).map(async (userId) => {
+        const { data } = await adminClient.auth.admin.getUserById(userId);
+        const email = data.user?.email?.toLowerCase() ?? null;
+        const metadata =
+          data.user?.user_metadata && typeof data.user.user_metadata === "object"
+            ? (data.user.user_metadata as Record<string, unknown>)
+            : null;
+        const fullNameRaw = metadata?.full_name ?? metadata?.name ?? metadata?.display_name ?? null;
+        const fullName = typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0 ? fullNameRaw.trim() : null;
+        identityByUserId.set(userId, { email, name: fullName });
+      })
+    );
+  }
 
   const invitationViews = await Promise.all(
     invitations.map(async (invite) => {
@@ -50,6 +194,108 @@ export default async function InvitationsPage() {
       };
     })
   );
+
+  async function assignResponsibleToMembership(formData: FormData) {
+    "use server";
+    const localContext = await getPhase0Context();
+    if (!localContext) redirect("/no-access");
+    const localAccess = await getSidebarAccessContext("invitations");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
+
+    const membershipId = String(formData.get("membership_id") ?? "").trim();
+    const responsibleId = String(formData.get("responsible_id") ?? "").trim();
+    if (!membershipId) redirect("/invitations?error=missing-membership");
+
+    const supabase = await createSupabaseServerClient();
+    const { data: membership } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id, organization_id")
+      .eq("id", membershipId)
+      .eq("organization_id", localContext.organizationId)
+      .maybeSingle();
+    if (!membership) redirect("/invitations?error=missing-membership");
+
+    if (!responsibleId) {
+      const { error } = await supabase
+        .schema("app")
+        .from("organization_memberships")
+        .update({ responsible_id: null })
+        .eq("id", membership.id)
+        .eq("organization_id", localContext.organizationId);
+      if (error) redirect("/invitations?error=save-failed");
+      revalidatePath("/invitations");
+      redirect("/invitations?success=responsible-unlinked");
+    }
+
+    const { data: responsible } = await supabase
+      .schema("app")
+      .from("responsibles")
+      .select("id, organization_id, is_active")
+      .eq("id", responsibleId)
+      .eq("organization_id", localContext.organizationId)
+      .maybeSingle();
+    if (!responsible || !responsible.is_active) {
+      redirect("/invitations?error=missing-responsible");
+    }
+
+    const { error } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .update({ responsible_id: responsible.id })
+      .eq("id", membership.id)
+      .eq("organization_id", localContext.organizationId);
+    if (error) redirect("/invitations?error=save-failed");
+    revalidatePath("/invitations");
+    redirect("/invitations?success=responsible-linked");
+  }
+
+  async function updateMembershipRole(formData: FormData) {
+    "use server";
+    const localContext = await getPhase0Context();
+    if (!localContext) redirect("/no-access");
+    const localAccess = await getSidebarAccessContext("invitations");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
+
+    const membershipId = String(formData.get("membership_id") ?? "").trim();
+    const roleCode = String(formData.get("role_code") ?? "").trim();
+    if (!membershipId || !roleCode) redirect("/invitations?error=missing-role");
+
+    const supabase = await createSupabaseServerClient();
+    const { data: membership } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id, organization_id")
+      .eq("id", membershipId)
+      .eq("organization_id", localContext.organizationId)
+      .maybeSingle();
+    if (!membership) redirect("/invitations?error=missing-membership");
+
+    const { data: role } = await supabase
+      .schema("rbac")
+      .from("roles")
+      .select("id")
+      .eq("organization_id", localContext.organizationId)
+      .eq("code", roleCode)
+      .maybeSingle();
+    if (!role) redirect("/invitations?error=missing-role");
+
+    const { error: deleteError } = await supabase
+      .schema("rbac")
+      .from("member_roles")
+      .delete()
+      .eq("membership_id", membership.id);
+    if (deleteError) redirect("/invitations?error=role-save-failed");
+
+    const { error: insertError } = await supabase
+      .schema("rbac")
+      .from("member_roles")
+      .insert({ membership_id: membership.id, role_id: role.id });
+    if (insertError) redirect("/invitations?error=role-save-failed");
+
+    revalidatePath("/invitations");
+    redirect("/invitations?success=role-updated");
+  }
 
   async function createInvitation(formData: FormData) {
     "use server";
@@ -170,24 +416,117 @@ export default async function InvitationsPage() {
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Mitgliederverwaltung</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Einladungen</h1>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Benutzer</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Benutzer</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Nur Admins koennen Zugaenge anlegen. Neue Nutzer kommen per Einladungslink und QR-Code ins
-          System.
+          Verwalte Benutzer, Verantwortlichen-Zuordnungen und Zugaenge zentral an einer Stelle.
         </p>
       </header>
 
+      {status ? (
+        <p className={`rounded-md border p-3 text-sm ${status.type === "error" ? "border-red-300 bg-red-50 text-red-800" : "border-emerald-300 bg-emerald-50 text-emerald-800"}`}>
+          {status.text}
+        </p>
+      ) : null}
+
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Neue Einladung versenden</h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Benutzerliste und Verantwortlichen-Zuordnung</h2>
+        <p className="mt-1 text-sm text-zinc-600">
+          Pro Benutzer ist optional genau ein Verantwortlicher zuordenbar. Diese Zuordnung steuert kein RBAC.
+        </p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-200 text-left text-zinc-500">
+                <th className="py-2 pr-3">Benutzer</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Rolle</th>
+                <th className="py-2 pr-3">Verantwortlicher</th>
+                <th className="py-2 pr-3">Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {memberships.map((membership) => {
+                const roleCodes = roleCodesByMembership.get(membership.id) ?? [];
+                const responsible = Array.isArray(membership.responsible) ? membership.responsible[0] : membership.responsible;
+                const identity = identityByUserId.get(membership.user_id);
+                const displayEmail = identity?.email ?? responsible?.email ?? null;
+                const displayName =
+                  identity?.name ??
+                  responsible?.full_name ??
+                  (displayEmail ? displayEmail.split("@")[0] : "Unbekannter Benutzer");
+                return (
+                  <tr key={membership.id} className="border-b border-zinc-100 align-top">
+                    <td className="py-3 pr-3">
+                      <div className="font-medium text-zinc-900">{displayName}</div>
+                      <div className="text-xs text-zinc-500">{displayEmail ?? "E-Mail nicht verfuegbar"}</div>
+                    </td>
+                    <td className="py-3 pr-3">{membership.status}</td>
+                    <td className="py-3 pr-3">
+                      <form action={updateMembershipRole} className="flex items-center gap-2">
+                        <input type="hidden" name="membership_id" value={membership.id} />
+                        <select
+                          name="role_code"
+                          defaultValue={roleCodes[0] ?? ""}
+                          disabled={!canWrite}
+                          className="min-w-[200px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Rolle waehlen</option>
+                          {editableRoles.map((role) => (
+                            <option key={role.id} value={role.code}>
+                              {role.name} ({role.code})
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Speichern
+                        </button>
+                      </form>
+                    </td>
+                    <td className="py-3 pr-3">
+                      {responsible ? `${responsible.full_name}${responsible.role_title ? ` (${responsible.role_title})` : ""}` : "-"}
+                    </td>
+                    <td className="py-3 pr-3">
+                      <form action={assignResponsibleToMembership} className="flex items-center gap-2">
+                        <input type="hidden" name="membership_id" value={membership.id} />
+                        <select
+                          name="responsible_id"
+                          defaultValue={membership.responsible_id ?? ""}
+                          disabled={!canWrite}
+                          className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Keine Zuordnung</option>
+                          {responsibles.map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.full_name}{entry.role_title ? ` - ${entry.role_title}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Speichern
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {memberships.length === 0 ? (
+          <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzer-Memberships vorhanden.</p>
+        ) : null}
+      </section>
+
+      <section className="brand-card p-6">
+        <h2 className="text-lg font-semibold text-zinc-900">Neuen Benutzerzugang anlegen</h2>
         {serviceRoleConfigured ? (
           <p className="mt-1 text-sm text-zinc-600">
-            `SUPABASE_SERVICE_ROLE_KEY` ist gesetzt. Einladungen werden automatisch per E-Mail versendet.
+            Automatischer E-Mail-Versand ist aktiv. Benutzerzugaenge werden direkt zugestellt.
           </p>
         ) : (
           <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            `SUPABASE_SERVICE_ROLE_KEY` fehlt oder ist noch ein Platzhalter. Einladungen werden erstellt,
-            aber E-Mails nicht automatisch versendet.
+            Automatischer E-Mail-Versand ist derzeit deaktiviert. Benutzerzugaenge werden erstellt, aber nicht automatisch versendet.
           </p>
         )}
         <form action={createInvitation} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -211,13 +550,13 @@ export default async function InvitationsPage() {
             disabled={!canWrite}
             className="brand-btn px-4 py-2 text-sm"
           >
-            Einladung erstellen
+            Benutzerzugang erstellen
           </button>
         </form>
       </section>
 
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Offene und versendete Einladungen</h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Offene und versendete Benutzerzugaenge</h2>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -225,7 +564,7 @@ export default async function InvitationsPage() {
                 <th className="py-2">E-Mail</th>
                 <th className="py-2">Rolle</th>
                 <th className="py-2">Status</th>
-                <th className="py-2">Login-Link</th>
+                <th className="py-2">Anmeldelink</th>
                 <th className="py-2">QR</th>
                 <th className="py-2">Aktionen</th>
               </tr>
@@ -243,7 +582,7 @@ export default async function InvitationsPage() {
                   </td>
                   <td className="py-3 pr-3">
                     <a href={invite.loginUrl} className="text-zinc-900 underline underline-offset-2">
-                      Login-Link
+                      Anmeldelink
                     </a>
                     <div className="mt-1 break-all text-xs text-zinc-500">{invite.loginUrl}</div>
                   </td>
@@ -287,12 +626,12 @@ export default async function InvitationsPage() {
           </table>
         </div>
         {invitationViews.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500">Noch keine Einladungen vorhanden.</p>
+          <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzerzugaenge vorhanden.</p>
         ) : null}
       </section>
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
-          Diese Rolle hat nur Leserechte für Einladungen.
+          Diese Rolle hat nur Leserechte fuer Benutzer.
         </p>
       ) : null}
     </div>

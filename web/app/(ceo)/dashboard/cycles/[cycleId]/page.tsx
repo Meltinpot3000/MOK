@@ -44,11 +44,13 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Zyklus-Detail</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Dashboard</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">{data.selectedCycle.name}</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          {data.selectedCycle.start_date} bis {data.selectedCycle.end_date} | Status:{" "}
-          {data.selectedCycle.status}
+          Analysiere den ausgewaehlten Zyklus im Detail und verfolge Ziele, Fortschritt und Risiken.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {data.selectedCycle.start_date} bis {data.selectedCycle.end_date} | Status: {data.selectedCycle.status}
         </p>
       </header>
 

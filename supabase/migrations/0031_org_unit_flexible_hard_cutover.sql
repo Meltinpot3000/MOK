@@ -180,13 +180,30 @@ on conflict (id) do nothing;
 alter table app.responsible_assignments
   add column if not exists organization_unit_id uuid;
 
-update app.responsible_assignments
-set organization_unit_id = org_unit_id
-where organization_unit_id is null
-  and org_unit_id is not null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'app'
+      and table_name = 'responsible_assignments'
+      and column_name = 'org_unit_id'
+  ) then
+    execute $sql$
+      update app.responsible_assignments
+      set organization_unit_id = org_unit_id
+      where organization_unit_id is null
+        and org_unit_id is not null
+    $sql$;
+  end if;
+end
+$$;
 
 alter table app.responsible_assignments
   drop constraint if exists responsible_assignments_org_unit_id_fkey;
+
+alter table app.responsible_assignments
+  drop constraint if exists responsible_assignments_organization_unit_id_fkey;
 
 alter table app.responsible_assignments
   add constraint responsible_assignments_organization_unit_id_fkey

@@ -202,7 +202,7 @@ export function GraphCanvas3D({
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        3D-Achsen: X internal/external | Y impact | Z short/long-term
+        3D-Achsen: X intern/extern | Y Wirkung | Z kurz/langfristig
       </p>
     </div>
   );

@@ -3,6 +3,7 @@ import {
   createBusinessModel,
   linkBusinessModelToOrganizationUnit,
   linkBusinessModelToIndustry,
+  unlinkBusinessModelFromIndustry,
   unlinkBusinessModelFromOrganizationUnit,
 } from "@/app/(ceo)/strategy-dimensions/actions";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
@@ -23,8 +24,10 @@ type BusinessModelsPageProps = {
 function getMessage(error?: string, success?: string) {
   if (error === "missing-name") return { type: "error", text: "Name ist erforderlich." };
   if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung waehlen." };
+  if (error === "save-failed") return { type: "error", text: "Business Model konnte nicht gespeichert werden." };
   if (success === "saved") return { type: "success", text: "Business Model wurde gespeichert." };
   if (success === "linked") return { type: "success", text: "Verknuepfung wurde gespeichert." };
+  if (success === "unlinked-industry") return { type: "success", text: "Industrie-Zuordnung wurde entfernt." };
   if (success === "unlinked") return { type: "success", text: "Zuordnung zur Organisationseinheit wurde entfernt." };
   return null;
 }
@@ -76,9 +79,9 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Core Strategy Dimensions</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Business Models</h1>
-        <p className="mt-1 text-sm text-zinc-600">Business Model Canvas pro Zyklus inkl. Industrie-Relationen.</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Geschaeftsmodelle</h1>
+        <p className="mt-1 text-sm text-zinc-600">Erstelle Geschaeftsmodelle und verknupfe sie mit Industrien und Organisationseinheiten.</p>
       </header>
 
       <OrganizationTabs />
@@ -91,33 +94,93 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Neues Business Model</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Neues Geschaeftsmodell</h2>
           <form action={createBusinessModel} className="mt-4 space-y-2">
-            <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <textarea name="description" rows={2} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Name</span>
+              <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Beschreibung</span>
+              <textarea name="description" rows={2} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
             <div className="grid grid-cols-2 gap-2">
-              <select name="status" defaultValue="active" className="rounded-md border border-zinc-300 px-2 py-2 text-sm">
-                <option value="draft">draft</option>
-                <option value="active">active</option>
-                <option value="archived">archived</option>
-              </select>
-              <input type="number" min={1} name="version_no" defaultValue={1} className="rounded-md border border-zinc-300 px-2 py-2 text-sm" />
+              <label className="block space-y-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Status</span>
+                <select name="status" defaultValue="active" className="w-full rounded-md border border-zinc-300 px-2 py-2 text-sm">
+                  <option value="draft">Entwurf</option>
+                  <option value="active">Aktiv</option>
+                  <option value="archived">Archiviert</option>
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Version</span>
+                <input type="number" min={1} name="version_no" defaultValue={1} className="w-full rounded-md border border-zinc-300 px-2 py-2 text-sm" />
+              </label>
             </div>
-            <textarea name="customer_segments" rows={2} placeholder="customer_segments (Zeilen oder komma-separiert)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="value_proposition" rows={2} placeholder="value_proposition" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="channels" rows={2} placeholder="channels" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="customer_relationships" rows={2} placeholder="customer_relationships" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="revenue_streams" rows={2} placeholder="revenue_streams" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="key_resources" rows={2} placeholder="key_resources" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="key_activities" rows={2} placeholder="key_activities" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="key_partners" rows={2} placeholder="key_partners" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="cost_structure" rows={2} placeholder="cost_structure" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Business Model speichern</button>
+            <div className="space-y-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Kundensegmente (Industrien)</span>
+              {industries.length === 0 ? (
+                <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                  Keine Industrien vorhanden. Bitte zuerst unter Industrien anlegen.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {industries.map((industry) => (
+                    <label key={industry.id} className="inline-flex">
+                      <input
+                        type="checkbox"
+                        name="industry_ids"
+                        value={industry.id}
+                        disabled={!canWrite}
+                        className="peer sr-only"
+                      />
+                      <span className="cursor-pointer rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700 transition hover:border-zinc-400 peer-checked:border-zinc-900 peer-checked:bg-zinc-900 peer-checked:text-white peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+                        {industry.name}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Wertversprechen</span>
+              <textarea name="value_proposition" rows={2} placeholder="Wertversprechen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Kanaele</span>
+              <textarea name="channels" rows={2} placeholder="Kanaele eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Kundenbeziehungen</span>
+              <textarea name="customer_relationships" rows={2} placeholder="Kundenbeziehungen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Einnahmequellen</span>
+              <textarea name="revenue_streams" rows={2} placeholder="Einnahmequellen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselressourcen</span>
+              <textarea name="key_resources" rows={2} placeholder="Schluesselressourcen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselaktivitaeten</span>
+              <textarea name="key_activities" rows={2} placeholder="Schluesselaktivitaeten eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselpartner</span>
+              <textarea name="key_partners" rows={2} placeholder="Schluesselpartner eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Kostenstruktur</span>
+              <textarea name="cost_structure" rows={2} placeholder="Kostenstruktur eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Geschaeftsmodell speichern</button>
           </form>
         </article>
 
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Modelle ({models.length})</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Geschaeftsmodelle ({models.length})</h2>
           <div className="mt-3 space-y-3">
             {models.length === 0 ? (
               <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Eintraege vorhanden.</p>
@@ -125,13 +188,14 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
               models.map((model) => {
                 const linkedIds = new Set(linkedIndustryIdsByModel.get(model.id) ?? []);
                 const linkedIndustries = industries.filter((industry) => linkedIds.has(industry.id));
+                const customerSegmentsText = linkedIndustries.map((industry) => industry.name).join(", ") || "-";
                 return (
                   <div key={model.id} className="brand-surface p-3 space-y-2">
                     <p className="text-sm font-semibold text-zinc-900">{model.name} (v{model.version_no})</p>
                     <p className="text-xs text-zinc-600">Status: {model.status}</p>
-                    <p className="text-xs text-zinc-600">Customer Segments: {asList(model.customer_segments) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Value Proposition: {asList(model.value_proposition) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Industries: {linkedIndustries.map((i) => i.name).join(", ") || "-"}</p>
+                    <p className="text-xs text-zinc-600">Kundensegmente: {customerSegmentsText}</p>
+                    <p className="text-xs text-zinc-600">Wertversprechen: {asList(model.value_proposition) || "-"}</p>
+                    <p className="text-xs text-zinc-600">Industrien: {linkedIndustries.map((i) => i.name).join(", ") || "-"}</p>
                     <p className="text-xs text-zinc-600">
                       Organisationseinheiten:{" "}
                       {orgUnits
@@ -141,16 +205,35 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         .map((unit) => `${unit.code} (${unit.name})`)
                         .join(", ") || "-"}
                     </p>
-                    <form action={linkBusinessModelToIndustry} className="flex gap-2">
-                      <input type="hidden" name="business_model_id" value={model.id} />
-                      <select name="industry_id" defaultValue="" className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                        <option value="">Industrie verknuepfen</option>
-                        {industries.map((industry) => (
-                          <option key={industry.id} value={industry.id}>{industry.name}</option>
-                        ))}
-                      </select>
-                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">Link</button>
-                    </form>
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknuepfen/entfernen</p>
+                      <div className="flex flex-wrap gap-2">
+                        {industries.map((industry) => {
+                          const isLinked = linkedIds.has(industry.id);
+                          return (
+                            <form
+                              key={`${model.id}-${industry.id}`}
+                              action={isLinked ? unlinkBusinessModelFromIndustry : linkBusinessModelToIndustry}
+                              className="inline-flex"
+                            >
+                              <input type="hidden" name="business_model_id" value={model.id} />
+                              <input type="hidden" name="industry_id" value={industry.id} />
+                              <button
+                                type="submit"
+                                disabled={!canWrite}
+                                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                                  isLinked
+                                    ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+                                    : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
+                                }`}
+                              >
+                                {isLinked ? `Entfernen: ${industry.name}` : industry.name}
+                              </button>
+                            </form>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <form action={linkBusinessModelToOrganizationUnit} className="flex gap-2">
                       <input type="hidden" name="business_model_id" value={model.id} />
                       <select
@@ -170,7 +253,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         disabled={!canWrite}
                         className="brand-btn-secondary px-3 py-1.5 text-xs"
                       >
-                        Link
+                        Verknuepfen
                       </button>
                     </form>
                     <div className="flex flex-wrap gap-2">

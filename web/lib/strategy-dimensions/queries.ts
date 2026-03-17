@@ -9,18 +9,67 @@ export type OrganizationUnitDimensionLinks = {
   }>;
 };
 
-export async function getIndustries(organizationId: string, cycleInstanceId: string) {
+export async function getIndustries(
+  organizationId: string,
+  cycleInstanceId: string
+) {
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase
+  const withPortfolioShareByCycleInstance = await supabase
     .schema("app")
     .from("industries")
     .select(
-      "id, name, description, market_characteristics, growth_rate, strategic_importance, status, updated_at"
+      "id, name, description, market_characteristics, growth_rate, portfolio_share, strategic_importance, status, updated_at"
     )
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
     .order("name", { ascending: true });
-  return data ?? [];
+  if (!withPortfolioShareByCycleInstance.error) {
+    return withPortfolioShareByCycleInstance.data ?? [];
+  }
+
+  const withoutPortfolioShareByCycleInstance = await supabase
+    .schema("app")
+    .from("industries")
+    .select("id, name, description, market_characteristics, growth_rate, strategic_importance, status, updated_at")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .order("name", { ascending: true });
+  if (!withoutPortfolioShareByCycleInstance.error) {
+    return (withoutPortfolioShareByCycleInstance.data ?? []).map((row) => ({
+      ...row,
+      portfolio_share: null,
+    }));
+  }
+
+  const planningCycleFilter = cycleInstanceId;
+  const withPortfolioShareByPlanningCycle = await supabase
+    .schema("app")
+    .from("industries")
+    .select(
+      "id, name, description, market_characteristics, growth_rate, portfolio_share, strategic_importance, status, updated_at"
+    )
+    .eq("organization_id", organizationId)
+    .eq("planning_cycle_id", planningCycleFilter)
+    .order("name", { ascending: true });
+  if (!withPortfolioShareByPlanningCycle.error) {
+    return withPortfolioShareByPlanningCycle.data ?? [];
+  }
+
+  const withoutPortfolioShareByPlanningCycle = await supabase
+    .schema("app")
+    .from("industries")
+    .select("id, name, description, market_characteristics, growth_rate, strategic_importance, status, updated_at")
+    .eq("organization_id", organizationId)
+    .eq("planning_cycle_id", planningCycleFilter)
+    .order("name", { ascending: true });
+  if (!withoutPortfolioShareByPlanningCycle.error) {
+    return (withoutPortfolioShareByPlanningCycle.data ?? []).map((row) => ({
+      ...row,
+      portfolio_share: null,
+    }));
+  }
+
+  return [];
 }
 
 export async function getBusinessModels(organizationId: string, cycleInstanceId: string) {
@@ -29,7 +78,7 @@ export async function getBusinessModels(organizationId: string, cycleInstanceId:
     .schema("app")
     .from("business_models")
     .select(
-      "id, name, description, status, version_no, customer_segments, value_proposition, channels, customer_relationships, revenue_streams, key_resources, key_activities, key_partners, cost_structure, updated_at"
+      "id, name, description, status, version_no, value_proposition, channels, customer_relationships, revenue_streams, key_resources, key_activities, key_partners, cost_structure, updated_at"
     )
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)

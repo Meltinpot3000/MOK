@@ -112,7 +112,7 @@ export function FilterPanel({
               <option value="competitor">Wettbewerb</option>
               <option value="swot">SWOT</option>
               <option value="workshop">Workshop</option>
-              <option value="other">Other</option>
+              <option value="other">Sonstige</option>
             </select>
           </label>
           <label className="block">
@@ -137,7 +137,7 @@ export function FilterPanel({
         <div className="space-y-3">
           <label className="block">
             <span className="mb-1 flex items-center justify-between text-xs text-zinc-600">
-              <span>Min Impact</span>
+              <span>Mindestwirkung</span>
               <span className="text-zinc-700">{minImpact}/5</span>
             </span>
             <input
@@ -152,7 +152,7 @@ export function FilterPanel({
           </label>
           <label className="block">
             <span className="mb-1 flex items-center justify-between text-xs text-zinc-600">
-              <span>Min Link Confidence</span>
+              <span>Mindestvertrauen Verbindung</span>
               <span className="text-zinc-700">{minConfidence}%</span>
             </span>
             <input
@@ -217,19 +217,19 @@ export function FilterPanel({
 
         <div className="space-y-3">
           <MultiSelectChips
-            title="Industry"
+            title="Industrie"
             options={industries}
             selectedIds={selectedIndustryIds}
             onToggle={(id) => setSelectedIndustryIds(toggleSelection(selectedIndustryIds, id))}
           />
           <MultiSelectChips
-            title="Business Model"
+            title="Geschaeftsmodell"
             options={businessModels}
             selectedIds={selectedBusinessModelIds}
             onToggle={(id) => setSelectedBusinessModelIds(toggleSelection(selectedBusinessModelIds, id))}
           />
           <MultiSelectChips
-            title="Operating Model"
+            title="Betriebsmodell"
             options={operatingModels}
             selectedIds={selectedOperatingModelIds}
             onToggle={(id) => setSelectedOperatingModelIds(toggleSelection(selectedOperatingModelIds, id))}

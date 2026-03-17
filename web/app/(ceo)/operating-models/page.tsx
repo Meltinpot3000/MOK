@@ -3,6 +3,8 @@ import {
   createOperatingModel,
   linkOperatingModelToBusinessModel,
   linkOperatingModelToIndustry,
+  unlinkOperatingModelFromBusinessModel,
+  unlinkOperatingModelFromIndustry,
 } from "@/app/(ceo)/strategy-dimensions/actions";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
@@ -22,8 +24,9 @@ type OperatingModelsPageProps = {
 function getMessage(error?: string, success?: string) {
   if (error === "missing-name") return { type: "error", text: "Name ist erforderlich." };
   if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung waehlen." };
-  if (success === "saved") return { type: "success", text: "Operating Model wurde gespeichert." };
+  if (success === "saved") return { type: "success", text: "Betriebsmodell wurde gespeichert." };
   if (success === "linked") return { type: "success", text: "Verknuepfung wurde gespeichert." };
+  if (success === "unlinked") return { type: "success", text: "Verknuepfung wurde entfernt." };
   return null;
 }
 
@@ -71,9 +74,9 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Core Strategy Dimensions</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Operating Models</h1>
-        <p className="mt-1 text-sm text-zinc-600">Operating Model Canvas inkl. Verknuepfung zu Industry und Business Model.</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Betriebsmodelle</h1>
+        <p className="mt-1 text-sm text-zinc-600">Definiere Betriebsmodelle und ordne sie passend zu Industrien und Geschaeftsmodellen zu.</p>
       </header>
 
       <OrganizationTabs />
@@ -86,32 +89,68 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Neues Operating Model</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Neues Betriebsmodell</h2>
           <form action={createOperatingModel} className="mt-4 space-y-2">
-            <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <textarea name="description" rows={2} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Name</span>
+              <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Beschreibung</span>
+              <textarea name="description" rows={2} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
             <div className="grid grid-cols-2 gap-2">
-              <select name="status" defaultValue="active" className="rounded-md border border-zinc-300 px-2 py-2 text-sm">
-                <option value="draft">draft</option>
-                <option value="active">active</option>
-                <option value="archived">archived</option>
-              </select>
-              <input type="number" min={1} name="version_no" defaultValue={1} className="rounded-md border border-zinc-300 px-2 py-2 text-sm" />
+              <label className="block space-y-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Status</span>
+                <select name="status" defaultValue="active" className="w-full rounded-md border border-zinc-300 px-2 py-2 text-sm">
+                  <option value="draft">Entwurf</option>
+                  <option value="active">Aktiv</option>
+                  <option value="archived">Archiviert</option>
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Version</span>
+                <input type="number" min={1} name="version_no" defaultValue={1} className="w-full rounded-md border border-zinc-300 px-2 py-2 text-sm" />
+              </label>
             </div>
-            <textarea name="processes" rows={2} placeholder="processes (Zeilen oder komma-separiert)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="organization_design" rows={2} placeholder="organization" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="capabilities" rows={2} placeholder="capabilities" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="technology" rows={2} placeholder="technology" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="data_assets" rows={2} placeholder="data" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="governance" rows={2} placeholder="governance" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="locations" rows={2} placeholder="locations" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <textarea name="partners" rows={2} placeholder="partners" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
-            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Operating Model speichern</button>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Prozesse</span>
+              <textarea name="processes" rows={2} placeholder="Prozesse (Zeilen oder komma-separiert)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Organisationsdesign</span>
+              <textarea name="organization_design" rows={2} placeholder="Organisationsdesign" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Faehigkeiten</span>
+              <textarea name="capabilities" rows={2} placeholder="Faehigkeiten" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Technologie</span>
+              <textarea name="technology" rows={2} placeholder="Technologie" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Datenressourcen</span>
+              <textarea name="data_assets" rows={2} placeholder="Datenressourcen" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Governance</span>
+              <textarea name="governance" rows={2} placeholder="Governance" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Standorte</span>
+              <textarea name="locations" rows={2} placeholder="Standorte" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Partner</span>
+              <textarea name="partners" rows={2} placeholder="Partner" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+            </label>
+            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Betriebsmodell speichern</button>
           </form>
         </article>
 
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Modelle ({models.length})</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Betriebsmodelle ({models.length})</h2>
           <div className="mt-3 space-y-3">
             {models.length === 0 ? (
               <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Eintraege vorhanden.</p>
@@ -125,33 +164,71 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                   <div key={model.id} className="brand-surface p-3 space-y-2">
                     <p className="text-sm font-semibold text-zinc-900">{model.name} (v{model.version_no})</p>
                     <p className="text-xs text-zinc-600">Status: {model.status}</p>
-                    <p className="text-xs text-zinc-600">Processes: {asList(model.processes) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Capabilities: {asList(model.capabilities) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Technology: {asList(model.technology) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Industries: {linkedIndustries.map((i) => i.name).join(", ") || "-"}</p>
-                    <p className="text-xs text-zinc-600">Business Models: {linkedBusinessModels.map((bm) => bm.name).join(", ") || "-"}</p>
+                    <p className="text-xs text-zinc-600">Prozesse: {asList(model.processes) || "-"}</p>
+                    <p className="text-xs text-zinc-600">Faehigkeiten: {asList(model.capabilities) || "-"}</p>
+                    <p className="text-xs text-zinc-600">Technologie: {asList(model.technology) || "-"}</p>
+                    <p className="text-xs text-zinc-600">Industrien: {linkedIndustries.map((i) => i.name).join(", ") || "-"}</p>
+                    <p className="text-xs text-zinc-600">Geschaeftsmodelle: {linkedBusinessModels.map((bm) => bm.name).join(", ") || "-"}</p>
 
-                    <div className="flex flex-wrap gap-2">
-                      <form action={linkOperatingModelToIndustry} className="flex gap-2">
-                        <input type="hidden" name="operating_model_id" value={model.id} />
-                        <select name="industry_id" defaultValue="" className="min-w-[210px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                          <option value="">Industry verknuepfen</option>
-                          {industries.map((industry) => (
-                            <option key={industry.id} value={industry.id}>{industry.name}</option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">Link</button>
-                      </form>
-                      <form action={linkOperatingModelToBusinessModel} className="flex gap-2">
-                        <input type="hidden" name="operating_model_id" value={model.id} />
-                        <select name="business_model_id" defaultValue="" className="min-w-[230px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                          <option value="">Business Model verknuepfen</option>
-                          {businessModels.map((bm) => (
-                            <option key={bm.id} value={bm.id}>{bm.name} (v{bm.version_no})</option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">Link</button>
-                      </form>
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknuepfen/entfernen</p>
+                        <div className="flex flex-wrap gap-2">
+                          {industries.map((industry) => {
+                            const isLinked = industryIds.has(industry.id);
+                            return (
+                              <form
+                                key={`${model.id}-industry-${industry.id}`}
+                                action={isLinked ? unlinkOperatingModelFromIndustry : linkOperatingModelToIndustry}
+                                className="inline-flex"
+                              >
+                                <input type="hidden" name="operating_model_id" value={model.id} />
+                                <input type="hidden" name="industry_id" value={industry.id} />
+                                <button
+                                  type="submit"
+                                  disabled={!canWrite}
+                                  className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                                    isLinked
+                                      ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+                                      : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
+                                  }`}
+                                >
+                                  {isLinked ? `Entfernen: ${industry.name}` : industry.name}
+                                </button>
+                              </form>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Geschaeftsmodelle verknuepfen/entfernen</p>
+                        <div className="flex flex-wrap gap-2">
+                          {businessModels.map((bm) => {
+                            const isLinked = bmIds.has(bm.id);
+                            return (
+                              <form
+                                key={`${model.id}-bm-${bm.id}`}
+                                action={isLinked ? unlinkOperatingModelFromBusinessModel : linkOperatingModelToBusinessModel}
+                                className="inline-flex"
+                              >
+                                <input type="hidden" name="operating_model_id" value={model.id} />
+                                <input type="hidden" name="business_model_id" value={bm.id} />
+                                <button
+                                  type="submit"
+                                  disabled={!canWrite}
+                                  className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                                    isLinked
+                                      ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+                                      : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
+                                  }`}
+                                >
+                                  {isLinked ? `Entfernen: ${bm.name}` : `${bm.name} (v${bm.version_no})`}
+                                </button>
+                              </form>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );

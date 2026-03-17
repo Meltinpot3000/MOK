@@ -21,6 +21,28 @@ function cycleLinkClass(isActive: boolean): string {
 
 export function CycleSidebar({ cycles, branding, productName, permissions, nowIso }: CycleSidebarProps) {
   const pathname = usePathname();
+  const brandingConfig =
+    branding?.branding_config && typeof branding.branding_config === "object"
+      ? (branding.branding_config as Record<string, unknown>)
+      : {};
+  const logoPositionX = Math.max(
+    0,
+    Math.min(
+      100,
+      typeof brandingConfig.logo_position_x === "number"
+        ? brandingConfig.logo_position_x
+        : Number(brandingConfig.logo_position_x ?? 50)
+    )
+  );
+  const logoPositionY = Math.max(
+    0,
+    Math.min(
+      100,
+      typeof brandingConfig.logo_position_y === "number"
+        ? brandingConfig.logo_position_y
+        : Number(brandingConfig.logo_position_y ?? 50)
+    )
+  );
   const isDashboardRoot = pathname === "/dashboard";
   const topLevelCycles = cycles.filter((cycle) => (cycle.level_no ?? 1) === 1);
   const topLevelScope = topLevelCycles.some((cycle) => cycle.is_active_scheme)
@@ -59,29 +81,22 @@ export function CycleSidebar({ cycles, branding, productName, permissions, nowIs
   return (
     <aside className="w-72 border-r border-zinc-200 bg-white p-4">
       <div className="mb-6">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           {branding?.logo_url ? (
             <span
-              className="inline-block h-6 w-6 rounded bg-zinc-100 bg-cover bg-center"
-              style={{ backgroundImage: `url("${branding.logo_url}")` }}
-              aria-label="Tenant-Logo"
+              className="inline-block h-[41px] w-16 rounded bg-zinc-100"
+              style={{
+                backgroundImage: `url("${branding.logo_url}")`,
+                backgroundRepeat: "no-repeat",
+                backgroundSize: "contain",
+                backgroundPosition: `${logoPositionX}% ${logoPositionY}%`,
+              }}
+              aria-label="Mandantenlogo"
               title={branding.logo_url}
             />
           ) : null}
-          <span
-            className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: branding?.primary_color ?? "#18181B" }}
-          />
-          <h1 className="truncate text-lg font-semibold text-zinc-900" title={productName}>
-            {productName}
-          </h1>
         </div>
-        {branding?.logo_url ? (
-          <p className="mt-1 truncate text-xs text-zinc-500" title={branding.logo_url}>
-            Logo: {branding.logo_url}
-          </p>
-        ) : null}
-        <p className="mt-1 text-sm text-zinc-500">Rollende Mittelfristplanung</p>
+        <h1 className="mt-2.5 break-words text-lg font-semibold leading-tight text-zinc-900">{productName}</h1>
         <a
           href="/logout"
           className="mt-3 inline-block rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
@@ -152,7 +167,7 @@ export function CycleSidebar({ cycles, branding, productName, permissions, nowIs
 
       <div className="mt-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Administration
+          Verwaltung
         </p>
         <div className="space-y-1">
           {adminItems.map((item) => (

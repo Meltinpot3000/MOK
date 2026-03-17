@@ -225,10 +225,10 @@ export default async function OrganizationPage() {
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Aufbauorganisation</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Aufbauorganisation</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Flexible Hierarchie mit frei konfigurierbaren Organisationstypen und Parent-Child-Struktur.
+          Pflege hier Organisationseinheiten, verschiebe sie in der Hierarchie und halte die Struktur aktuell.
         </p>
       </header>
 
@@ -252,7 +252,7 @@ export default async function OrganizationPage() {
 
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
-          Diese Rolle hat nur Leserechte für Aufbauorganisation.
+          Diese Rolle hat nur Leserechte für Organisationsstruktur.
         </p>
       ) : null}
 
@@ -269,7 +269,6 @@ export default async function OrganizationPage() {
             unitTypes={unitTypes}
             canWrite={canWrite}
             updateAction={updateOrganizationUnit}
-            createChildAction={createOrganizationUnit}
             moveAction={moveOrganizationUnit}
             archiveAction={archiveOrganizationUnit}
           />

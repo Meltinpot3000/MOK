@@ -49,11 +49,11 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
     label: "Initiativen / Programme",
     section: "phase1",
   },
-  { id: "organization", href: "/organization", label: "Aufbauorganisation", section: "phase0" },
+  { id: "organization", href: "/organization", label: "Organisationsstruktur", section: "phase0" },
   { id: "access-control", href: "/access-control", label: "Rollenrechte", section: "admin" },
   { id: "llm-usage", href: "/llm-usage", label: "Systemkonfiguration und -information", section: "admin" },
-  { id: "branding", href: "/branding", label: "Branding", section: "admin" },
-  { id: "invitations", href: "/invitations", label: "Einladungen", section: "admin" },
+  { id: "branding", href: "/branding", label: "Markenauftritt", section: "admin" },
+  { id: "invitations", href: "/invitations", label: "Benutzer", section: "admin" },
   { id: "planning-cycles", href: "/planning-cycles", label: "Neuer Planungszyklus", section: "cycles" },
 ];
 

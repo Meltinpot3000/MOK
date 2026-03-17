@@ -88,7 +88,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Administration</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Systemkonfiguration und -information</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Systemkonfiguration und -information</h1>
         <p className="mt-1 text-sm text-zinc-600">
           Zentrale Uebersicht und Konfiguration fuer LLM-Verbrauch, Feature-Freigaben und Modell-Health.
@@ -134,7 +134,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.quality_scoring}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Quality Scoring
+              Qualitaetsbewertung
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -143,7 +143,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.link_draft_generation}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Link Draft Generation
+              Link-Entwurfsgenerierung
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -152,7 +152,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.cluster_assessment}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Cluster Assessment
+              Cluster-Bewertung
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -161,7 +161,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.gap_assessment}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Gap Assessment
+              Luecken-Bewertung
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -170,7 +170,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.challenge_recommendation}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Challenge Recommendation
+              Empfehlungslogik fuer Herausforderungen
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -179,12 +179,12 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.model_health_checks}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Model Health Checks
+              Modell-Gesundheitspruefungen
             </label>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Daily soft token limit</span>
+              <span className="mb-1 block text-xs text-zinc-600">Taegliches Soft-Token-Limit</span>
               <input
                 type="number"
                 min={0}
@@ -195,7 +195,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Monthly hard token limit</span>
+              <span className="mb-1 block text-xs text-zinc-600">Monatliches Hard-Token-Limit</span>
               <input
                 type="number"
                 min={0}
@@ -206,7 +206,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Default max output tokens</span>
+              <span className="mb-1 block text-xs text-zinc-600">Standardwert maximale Ausgabetokens</span>
               <input
                 type="number"
                 min={64}
@@ -217,7 +217,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Quality Scoring</span>
+              <span className="mb-1 block text-xs text-zinc-600">Qualitaetsbewertung</span>
               <input
                 type="number"
                 min={64}
@@ -228,7 +228,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Link Draft Generation</span>
+              <span className="mb-1 block text-xs text-zinc-600">Link-Entwurfsgenerierung</span>
               <input
                 type="number"
                 min={64}
@@ -239,7 +239,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Cluster Assessment</span>
+              <span className="mb-1 block text-xs text-zinc-600">Cluster-Bewertung</span>
               <input
                 type="number"
                 min={64}
@@ -250,7 +250,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Gap Assessment</span>
+              <span className="mb-1 block text-xs text-zinc-600">Luecken-Bewertung</span>
               <input
                 type="number"
                 min={64}
@@ -261,7 +261,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Challenge Recommendation</span>
+              <span className="mb-1 block text-xs text-zinc-600">Empfehlungslogik fuer Herausforderungen</span>
               <input
                 type="number"
                 min={64}
@@ -272,7 +272,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Model Health Checks</span>
+              <span className="mb-1 block text-xs text-zinc-600">Modell-Gesundheitspruefungen</span>
               <input
                 type="number"
                 min={64}

@@ -7,7 +7,7 @@ export default function AuthErrorPage() {
         <p className="text-xs font-semibold uppercase tracking-wide text-red-600">Authentifizierung</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Link ungültig oder abgelaufen</h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Der Login- oder Passwort-Link konnte nicht verarbeitet werden. Bitte fordere einen neuen Link
+          Der Anmelde- oder Passwortlink konnte nicht verarbeitet werden. Bitte fordere einen neuen Link
           an.
         </p>
 

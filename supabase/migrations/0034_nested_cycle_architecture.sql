@@ -1,3 +1,6 @@
+-- 0034_nested_cycle_architecture.sql
+-- migrate:up
+
 begin;
 
 create table if not exists app.cycle_schemes (
@@ -348,7 +351,7 @@ select
   p.organization_id,
   'Legacy Migration Scheme',
   'LEGACY',
-  true,
+  false,
   min(p.start_date),
   greatest(
     1,
@@ -357,7 +360,9 @@ select
 from app.planning_cycles p
 group by p.organization_id
 on conflict (organization_id, code) do update
-set is_active = excluded.is_active;
+set
+  starts_on = excluded.starts_on,
+  top_level_duration_months = excluded.top_level_duration_months;
 
 insert into app.cycle_scheme_levels (
   cycle_scheme_id,
@@ -736,3 +741,6 @@ $$;
 drop function if exists public.clone_planning_cycle_full_snapshot(uuid, uuid, text, text, date, date, uuid);
 
 commit;
+
+-- migrate:down
+-- irreversible migration (no-op)

@@ -7,7 +7,7 @@ export default function ForgotPasswordSentPage() {
         <p className="text-xs font-semibold uppercase tracking-wide text-green-700">E-Mail gesendet</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Postfach pruefen</h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Wenn ein Konto mit dieser E-Mail existiert, wurde ein Reset-Link versendet.
+          Wenn ein Konto mit dieser E-Mail existiert, wurde ein Ruecksetzlink versendet.
         </p>
 
         <div className="mt-6">

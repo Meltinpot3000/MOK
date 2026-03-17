@@ -68,7 +68,7 @@ export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
       <section className="w-full rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">CITADEL Login</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">CITADEL Anmeldung</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Plattform-Zugang</h1>
         <p className="mt-2 text-sm text-zinc-600">
           Anmeldung erfolgt per Firmen-Einladung. Ohne Einladung kann kein Konto erstellt werden.
@@ -123,7 +123,7 @@ export default function LoginPage() {
 
         <p className="mt-4 text-sm text-zinc-600">
           Keine Einladung erhalten?{" "}
-          <span className="font-medium text-zinc-900">Bitte an den Organisations-Admin wenden.</span>
+          <span className="font-medium text-zinc-900">Bitte an die Organisations-Administration wenden.</span>
         </p>
       </section>
     </main>

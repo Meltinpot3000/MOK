@@ -1,4 +1,6 @@
-begin;
+-- 0035_cycle_hierarchy_rls.sql
+-- migrate:up
+
 
 insert into rbac.permissions (code, name, description)
 values
@@ -113,4 +115,6 @@ with check (
   )
 );
 
-commit;
+
+-- migrate:down
+-- irreversible migration (no-op)

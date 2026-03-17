@@ -50,11 +50,11 @@ export function Toolbar({
         onChange={(event) => setViewMode(event.target.value as VisualizationViewMode)}
         className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
       >
-        <option value="constellation">Constellation View</option>
-        <option value="influence">Influence View</option>
-        <option value="cluster">Cluster View</option>
-        <option value="terrain">Strategic Terrain Map</option>
-        <option value="table">Table View</option>
+        <option value="constellation">Konstellationsansicht</option>
+        <option value="influence">Einflussansicht</option>
+        <option value="cluster">Clusteransicht</option>
+        <option value="terrain">Strategische Terrainkarte</option>
+        <option value="table">Tabellenansicht</option>
       </select>
 
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
@@ -63,7 +63,7 @@ export function Toolbar({
           checked={showLabels}
           onChange={(event) => setShowLabels(event.target.checked)}
         />
-        Labels
+        Beschriftungen
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input
@@ -71,15 +71,15 @@ export function Toolbar({
           checked={showLinks}
           onChange={(event) => setShowLinks(event.target.checked)}
         />
-        Links
+        Verbindungen
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input type="checkbox" checked={is3D} onChange={(event) => setIs3D(event.target.checked)} />
-        3D Explore
+        3D-Ansicht
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input type="checkbox" checked={showDensity} onChange={(event) => setShowDensity(event.target.checked)} />
-        Density
+        Dichte
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input
@@ -87,7 +87,7 @@ export function Toolbar({
           checked={showClusterLabels}
           onChange={(event) => setShowClusterLabels(event.target.checked)}
         />
-        Cluster Labels
+        Cluster-Beschriftungen
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input
@@ -95,7 +95,7 @@ export function Toolbar({
           checked={showChallengeLayer}
           onChange={(event) => setShowChallengeLayer(event.target.checked)}
         />
-        Challenge Layer
+        Herausforderungsebene
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input
@@ -103,7 +103,7 @@ export function Toolbar({
           checked={showDirectionLayer}
           onChange={(event) => setShowDirectionLayer(event.target.checked)}
         />
-        Direction Layer
+        Stossrichtungsebene
       </label>
       <select
         value={linkScope}
@@ -111,7 +111,7 @@ export function Toolbar({
         className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
       >
         <option value="approved">Nur freigegebene</option>
-        <option value="draft">Nur Drafts</option>
+        <option value="draft">Nur Entwuerfe</option>
         <option value="both">Beide</option>
       </select>
     </div>

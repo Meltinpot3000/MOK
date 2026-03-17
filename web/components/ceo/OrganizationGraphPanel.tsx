@@ -23,13 +23,13 @@ export async function OrganizationGraphPanel({
           <h2 className="text-lg font-semibold text-zinc-900">Organisationsgraph (hierarchisch)</h2>
           <p className="mt-1 text-xs text-zinc-600">
             Farbcodierte Marker zeigen je Einheit verknuepfte Verantwortliche, Industrien und
-            Business Models.
+            Geschaeftsmodelle.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="graph-legend graph-legend-resp">RESP</span>
-          <span className="graph-legend graph-legend-ind">IND</span>
-          <span className="graph-legend graph-legend-bm">BM</span>
+          <span className="graph-legend graph-legend-resp">Verantwortliche</span>
+          <span className="graph-legend graph-legend-ind">Industrien</span>
+          <span className="graph-legend graph-legend-bm">Geschaeftsmodelle</span>
         </div>
       </div>
       {!cycleInstanceId ? (

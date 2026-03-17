@@ -6,7 +6,6 @@ type OrganizationUnitTreeProps = {
   unitTypes: OrganizationUnitType[];
   canWrite: boolean;
   updateAction: (formData: FormData) => void;
-  createChildAction: (formData: FormData) => void;
   moveAction: (formData: FormData) => void;
   archiveAction: (formData: FormData) => void;
 };
@@ -32,7 +31,6 @@ export function OrganizationUnitTree({
   unitTypes,
   canWrite,
   updateAction,
-  createChildAction,
   moveAction,
   archiveAction,
 }: OrganizationUnitTreeProps) {
@@ -54,7 +52,6 @@ export function OrganizationUnitTree({
           childMap={childMap}
           canWrite={canWrite}
           updateAction={updateAction}
-          createChildAction={createChildAction}
           moveAction={moveAction}
           archiveAction={archiveAction}
         />

@@ -19,6 +19,7 @@ export type QualityScoreWeights = {
 export type QualityScoreResult = {
   score: number;
   source: "rule" | "llm";
+  fallbackReason: "llm_not_requested" | "llm_no_result" | null;
   explanation: string | null;
   provider: string | null;
   model: string | null;
@@ -122,6 +123,7 @@ export async function calculateQualityScoreWithFallback(
     return {
       score: fallbackScore,
       source: "rule",
+      fallbackReason: "llm_not_requested",
       explanation: null,
       provider: null,
       model: null,
@@ -137,6 +139,7 @@ export async function calculateQualityScoreWithFallback(
     return {
       score: fallbackScore,
       source: "rule",
+      fallbackReason: "llm_no_result",
       explanation: null,
       provider: null,
       model: null,
@@ -147,6 +150,7 @@ export async function calculateQualityScoreWithFallback(
   return {
     score: llmResponse.result.qualityScore,
     source: "llm",
+    fallbackReason: null,
     explanation: llmResponse.result.explanation,
     provider: llmResponse.result.provider,
     model: llmResponse.result.model,

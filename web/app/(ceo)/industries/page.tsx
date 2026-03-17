@@ -19,6 +19,8 @@ type IndustriesPageProps = {
 
 function getMessage(error?: string, success?: string) {
   if (error === "missing-name") return { type: "error", text: "Name ist erforderlich." };
+  if (error === "link-failed") return { type: "error", text: "Industrie konnte Organisationseinheit nicht zugeordnet werden." };
+  if (error === "save-failed") return { type: "error", text: "Industrie konnte nicht gespeichert werden." };
   if (success === "saved") return { type: "success", text: "Industrie wurde gespeichert." };
   if (success === "linked") return { type: "success", text: "Industrie wurde Organisationseinheit zugeordnet." };
   if (success === "unlinked") return { type: "success", text: "Zuordnung zur Organisationseinheit wurde entfernt." };
@@ -52,9 +54,9 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Core Strategy Dimensions</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Industries</h1>
-        <p className="mt-1 text-sm text-zinc-600">Marktkontext pro Planungszyklus verwalten und strategisch priorisieren.</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Industrien</h1>
+        <p className="mt-1 text-sm text-zinc-600">Wahle relevante Industrien aus und verknupfe sie direkt mit den zustandigen Organisationseinheiten.</p>
       </header>
 
       <OrganizationTabs />
@@ -69,19 +71,41 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
         <article className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Neue Industrie</h2>
           <form action={createIndustry} className="mt-4 space-y-3">
-            <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <textarea name="description" rows={3} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <textarea name="market_characteristics" rows={3} placeholder="Market Characteristics" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <input type="number" step="0.001" name="growth_rate" placeholder="Growth Rate (z. B. 0.045)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
-            <select name="strategic_importance" defaultValue="medium" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm">
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-            <select name="status" defaultValue="active" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm">
-              <option value="active">active</option>
-              <option value="archived">archived</option>
-            </select>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Name</span>
+              <input name="name" required placeholder="Name" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Beschreibung</span>
+              <textarea name="description" rows={3} placeholder="Beschreibung" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Marktmerkmale</span>
+              <textarea name="market_characteristics" rows={3} placeholder="Market Characteristics" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Wachstumsrate</span>
+              <input type="number" step="0.001" name="growth_rate" placeholder="Growth Rate (z. B. 0.045)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Portfolio-Anteil</span>
+              <input type="number" step="0.001" name="portfolio_share" placeholder="Portfolio-Anteil (z. B. 0.250)" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Strategische Relevanz</span>
+              <select name="strategic_importance" defaultValue="medium" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm">
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Status</span>
+              <select name="status" defaultValue="active" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm">
+                <option value="active">active</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
             <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Industrie speichern</button>
           </form>
         </article>
@@ -95,7 +119,8 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
               industries.map((industry) => (
                 <div key={industry.id} className="brand-surface p-3">
                   <p className="text-sm font-semibold text-zinc-900">{industry.name}</p>
-                  <p className="mt-1 text-xs text-zinc-600">Status: {industry.status} | Importance: {industry.strategic_importance}</p>
+                  <p className="mt-1 text-xs text-zinc-600">Status: {industry.status} | Relevanz: {industry.strategic_importance}</p>
+                  <p className="mt-1 text-xs text-zinc-600">Portfolio-Anteil: {industry.portfolio_share ?? "-"}</p>
                   {industry.description ? <p className="mt-1 text-xs text-zinc-600">{industry.description}</p> : null}
                   <p className="mt-2 text-xs text-zinc-600">
                     Zugeordnete Organisationen:{" "}
@@ -106,50 +131,36 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
                       .map((unit) => `${unit.code} (${unit.name})`)
                       .join(", ") || "-"}
                   </p>
-                  <form action={linkIndustryToOrganizationUnit} className="mt-2 flex gap-2">
-                    <input type="hidden" name="industry_id" value={industry.id} />
-                    <select
-                      name="organization_unit_id"
-                      defaultValue=""
-                      className="min-w-[240px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                    >
-                      <option value="">Organisationseinheit zuordnen</option>
-                      {orgUnits.map((unit) => (
-                        <option key={unit.id} value={unit.id}>
-                          {unit.code} - {unit.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      disabled={!canWrite}
-                      className="brand-btn-secondary px-3 py-1.5 text-xs"
-                    >
-                      Link
-                    </button>
-                  </form>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {orgUnits
-                      .filter((unit) =>
-                        (linkedUnitsByIndustry.get(industry.id) ?? []).includes(unit.id)
-                      )
-                      .map((unit) => (
-                        <form
-                          key={`${industry.id}-${unit.id}`}
-                          action={unlinkIndustryFromOrganizationUnit}
-                          className="inline-flex"
-                        >
-                          <input type="hidden" name="industry_id" value={industry.id} />
-                          <input type="hidden" name="organization_unit_id" value={unit.id} />
-                          <button
-                            type="submit"
-                            disabled={!canWrite}
-                            className="rounded-md border border-red-300 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      Organisationseinheiten verknuepfen/entfernen
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {orgUnits.map((unit) => {
+                        const isLinked = (linkedUnitsByIndustry.get(industry.id) ?? []).includes(unit.id);
+                        return (
+                          <form
+                            key={`${industry.id}-${unit.id}`}
+                            action={isLinked ? unlinkIndustryFromOrganizationUnit : linkIndustryToOrganizationUnit}
+                            className="inline-flex"
                           >
-                            Entfernen: {unit.code}
-                          </button>
-                        </form>
-                      ))}
+                            <input type="hidden" name="industry_id" value={industry.id} />
+                            <input type="hidden" name="organization_unit_id" value={unit.id} />
+                            <button
+                              type="submit"
+                              disabled={!canWrite}
+                              className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                                isLinked
+                                  ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+                                  : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
+                              }`}
+                            >
+                              {isLinked ? `Entfernen: ${unit.code}` : `${unit.code} - ${unit.name}`}
+                            </button>
+                          </form>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ))

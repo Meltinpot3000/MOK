@@ -89,7 +89,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Einladung nicht mehr gueltig</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Die Einladung wurde widerrufen oder ist abgelaufen. Bitte Admin um eine neue Einladung.
+            Die Einladung wurde widerrufen oder ist abgelaufen. Bitte die Administration um eine neue Einladung.
           </p>
         </section>
       </main>
@@ -137,7 +137,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Mitgliedschaft fehlgeschlagen</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Deine Mitgliedschaft konnte nicht angelegt werden. Bitte Admin kontaktieren.
+            Deine Mitgliedschaft konnte nicht angelegt werden. Bitte die Administration kontaktieren.
           </p>
         </section>
       </main>
@@ -168,7 +168,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
       <section className="w-full rounded-xl border border-green-200 bg-white p-6 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Einladung angenommen</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Willkommen im Workspace</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Willkommen im Arbeitsbereich</h1>
         <p className="mt-2 text-sm text-zinc-600">
           Dein Zugriff wurde erfolgreich aktiviert. Du kannst jetzt direkt ins Dashboard wechseln.
         </p>

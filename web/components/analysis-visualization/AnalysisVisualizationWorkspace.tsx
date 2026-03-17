@@ -594,9 +594,9 @@ export function AnalysisVisualizationWorkspace({
 
   return (
     <section className="brand-card p-6">
-      <h2 className="text-lg font-semibold text-zinc-900">Analysis Visualization</h2>
+      <h2 className="text-lg font-semibold text-zinc-900">Analyse-Visualisierung</h2>
       <p className="mt-1 text-xs text-zinc-600">
-        Explorative Netzwerkansicht mit Cluster-, Einfluss- und optionalem 3D-Explore-Modus.
+        Explorative Netzwerkansicht mit Cluster-, Einfluss- und optionalem 3D-Modus.
       </p>
       <div className="mt-3">
         <Toolbar
@@ -625,7 +625,7 @@ export function AnalysisVisualizationWorkspace({
           Verbindungen sichtbar: {filteredEdges.length}
         </span>
         <span className="rounded border border-zinc-300 bg-white px-2 py-0.5">
-          Scope: {linkScope === "approved" ? "freigegeben" : linkScope === "draft" ? "draft" : "beide"}
+          Umfang: {linkScope === "approved" ? "freigegeben" : linkScope === "draft" ? "Entwurf" : "beide"}
         </span>
       </div>
       {undoCandidate ? (
@@ -638,7 +638,7 @@ export function AnalysisVisualizationWorkspace({
             }}
             className="rounded border border-amber-400 bg-white px-2 py-1 text-xs"
           >
-            Undo
+            Rueckgaengig
           </button>
         </div>
       ) : null}
@@ -766,7 +766,7 @@ export function AnalysisVisualizationWorkspace({
       </div>
       {viewMode === "terrain" ? (
         <p className="mt-3 text-xs text-zinc-500">
-          Terrain Layers aktiv: Raw Items, Cluster/Bridges, Challenge-Ringe und Direction-Marker ({strategicDirections.length} Directions im Zyklus).
+          Terrain-Ebenen aktiv: Rohpunkte, Cluster/Bruecken, Herausforderungs-Ringe und Stossrichtungs-Marker ({strategicDirections.length} Stossrichtungen im Zyklus).
         </p>
       ) : null}
     </section>

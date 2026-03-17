@@ -9,9 +9,10 @@ export default async function OkrWorkspacePage() {
 
   return (
     <AreaPlaceholder
-      title="OKR Workspace"
-      purpose="Einfache Arbeitsoberfläche für Teams zur operativen Umsetzung über 3-Monats-Zyklen, Check-ins und Confidence."
-      audience="Teams, Team Leads, OKR Owner"
+      eyebrow="OKR Zyklus"
+      title="OKR Arbeitsbereich"
+      purpose="Einfache Arbeitsoberflaeche fuer Teams zur operativen Umsetzung ueber 3-Monats-Zyklen, Check-ins und Zuversicht."
+      audience="Teams, Teamleitungen, OKR-Verantwortliche"
     />
   );
 }

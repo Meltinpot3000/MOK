@@ -1,4 +1,5 @@
 import type { OrganizationUnit, OrganizationUnitType } from "@/lib/phase0/queries";
+import { OrganizationUnitEditForm } from "@/components/ceo/OrganizationUnitEditForm";
 
 type OrganizationUnitNodeProps = {
   unit: OrganizationUnit;
@@ -7,7 +8,6 @@ type OrganizationUnitNodeProps = {
   childMap: Map<string | null, OrganizationUnit[]>;
   canWrite: boolean;
   updateAction: (formData: FormData) => void;
-  createChildAction: (formData: FormData) => void;
   moveAction: (formData: FormData) => void;
   archiveAction: (formData: FormData) => void;
 };
@@ -33,7 +33,6 @@ export function OrganizationUnitNode({
   childMap,
   canWrite,
   updateAction,
-  createChildAction,
   moveAction,
   archiveAction,
 }: OrganizationUnitNodeProps) {
@@ -58,91 +57,14 @@ export function OrganizationUnitNode({
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <form action={updateAction} className="space-y-2 rounded-md border border-zinc-200 p-3">
-          <input type="hidden" name="id" value={unit.id} />
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Bearbeiten</p>
-          <input
-            name="name"
-            required
-            defaultValue={unit.name}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="code"
-            required
-            defaultValue={unit.code}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <select
-            name="organization_unit_type_id"
-            required
-            defaultValue={unit.organization_unit_type_id}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          >
-            {unitTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-          <textarea
-            name="description"
-            defaultValue={unit.description ?? ""}
-            rows={2}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!canWrite}
-            className="brand-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Bearbeiten
-          </button>
-        </form>
+        <OrganizationUnitEditForm
+          unit={unit}
+          unitTypes={unitTypes}
+          canWrite={canWrite}
+          updateAction={updateAction}
+        />
 
         <div className="space-y-3">
-          <form action={createChildAction} className="space-y-2 rounded-md border border-zinc-200 p-3">
-            <input type="hidden" name="parent_id" value={unit.id} />
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Kind anlegen</p>
-            <input
-              name="name"
-              required
-              placeholder="Name"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            />
-            <input
-              name="code"
-              required
-              placeholder="Code"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            />
-            <select
-              name="organization_unit_type_id"
-              required
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            >
-              <option value="">Organisationstyp auswählen</option>
-              {unitTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.name}
-                </option>
-              ))}
-            </select>
-            <textarea
-              name="description"
-              rows={2}
-              placeholder="Beschreibung"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={!canWrite}
-              className="brand-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Kind erstellen
-            </button>
-          </form>
-
           <form action={moveAction} className="space-y-2 rounded-md border border-zinc-200 p-3">
             <input type="hidden" name="id" value={unit.id} />
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Verschieben</p>
@@ -191,7 +113,6 @@ export function OrganizationUnitNode({
               childMap={childMap}
               canWrite={canWrite}
               updateAction={updateAction}
-              createChildAction={createChildAction}
               moveAction={moveAction}
               archiveAction={archiveAction}
             />

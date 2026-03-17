@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { buildNodeLabelPlacements } from "@/components/analysis-visualization/label-layout";
 import type { PositionedNode, VisualizationEdge, VisualizationViewMode } from "@/components/analysis-visualization/types";
 
 type GraphCanvas2DProps = {
@@ -78,33 +79,10 @@ export function GraphCanvas2D({
   const centerY = height / 2;
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const visibleLabelNodeIds = useMemo(() => {
-    if (!showLabels) return new Set<string>();
-    if (zoom < 0.7) return selectedNodeId ? new Set([selectedNodeId]) : new Set<string>();
-
-    const sorted = [...nodes].sort((a, b) => {
-      if (a.id === selectedNodeId) return -1;
-      if (b.id === selectedNodeId) return 1;
-      return b.impact - a.impact;
-    });
-    const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-    const accepted = new Set<string>();
-    for (const node of sorted) {
-      const text = node.label.length > 38 ? `${node.label.slice(0, 38)}...` : node.label;
-      const x = (centerX + node.x + 10) * zoom + pan.x;
-      const y = (centerY + node.y + 4) * zoom + pan.y;
-      const width = Math.max(36, text.length * 6.2) * zoom;
-      const height = 12 * zoom;
-      const box = { x1: x, y1: y - height, x2: x + width, y2: y + 2 };
-      const overlaps = placed.some(
-        (p) => !(box.x2 < p.x1 || box.x1 > p.x2 || box.y2 < p.y1 || box.y1 > p.y2)
-      );
-      if (overlaps && node.id !== selectedNodeId) continue;
-      accepted.add(node.id);
-      placed.push(box);
-    }
-    return accepted;
-  }, [showLabels, zoom, selectedNodeId, nodes, centerX, centerY, pan.x, pan.y]);
+  const labelPlacements = useMemo(
+    () => (showLabels ? buildNodeLabelPlacements(nodes, selectedNodeId, centerX, centerY, 38) : new Map()),
+    [showLabels, nodes, selectedNodeId, centerX, centerY]
+  );
   const renderedEdges = useMemo(
     () =>
       edges
@@ -226,33 +204,55 @@ export function GraphCanvas2D({
                 ))
               : null}
 
-            {nodes.map((node) => (
-              <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y})`}>
-                <circle
-                  r={Math.max(3, (5 + node.impact * 1.9) * 0.5)}
-                  fill={getNodeColor(node)}
-                  stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
-                  strokeWidth={selectedNodeId === node.id ? 3 : 1.5}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedNodeId(node.id);
-                    setSelectedEdgeId(null);
-                    if (wrapperRef.current && onSelectNode) {
-                      const rect = wrapperRef.current.getBoundingClientRect();
-                      onSelectNode(node.id, {
-                        x: event.clientX - rect.left,
-                        y: event.clientY - rect.top,
-                      });
-                    }
-                  }}
-                />
-                {showLabels && visibleLabelNodeIds.has(node.id) ? (
-                  <text x={10} y={4} fontSize={11} fill="#111827">
-                    {node.label.length > 38 ? `${node.label.slice(0, 38)}...` : node.label}
-                  </text>
-                ) : null}
-              </g>
-            ))}
+            {nodes.map((node) => {
+              const placement = labelPlacements.get(node.id);
+              return (
+                <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y})`}>
+                  <circle
+                    r={Math.max(3, (5 + node.impact * 1.9) * 0.5)}
+                    fill={getNodeColor(node)}
+                    stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
+                    strokeWidth={selectedNodeId === node.id ? 3 : 1.5}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedNodeId(node.id);
+                      setSelectedEdgeId(null);
+                      if (wrapperRef.current && onSelectNode) {
+                        const rect = wrapperRef.current.getBoundingClientRect();
+                        onSelectNode(node.id, {
+                          x: event.clientX - rect.left,
+                          y: event.clientY - rect.top,
+                        });
+                      }
+                    }}
+                  />
+                  {showLabels && placement ? (
+                    <>
+                      <line
+                        x1={placement.lineX1}
+                        y1={placement.lineY1}
+                        x2={placement.lineX2}
+                        y2={placement.lineY2}
+                        stroke="#94a3b8"
+                        strokeWidth={1}
+                      />
+                      <rect
+                        x={placement.boxX}
+                        y={placement.boxY}
+                        width={placement.boxWidth}
+                        height={placement.boxHeight}
+                        rx={3}
+                        fill="#ffffff"
+                        fillOpacity={0.78}
+                      />
+                      <text x={placement.textX} y={placement.textY} fontSize={11} fill="#111827">
+                        {placement.text}
+                      </text>
+                    </>
+                  ) : null}
+                </g>
+              );
+            })}
           </g>
         </svg>
       </div>

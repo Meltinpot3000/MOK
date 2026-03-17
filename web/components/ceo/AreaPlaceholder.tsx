@@ -1,14 +1,15 @@
 type AreaPlaceholderProps = {
+  eyebrow: string;
   title: string;
   purpose: string;
   audience: string;
 };
 
-export function AreaPlaceholder({ title, purpose, audience }: AreaPlaceholderProps) {
+export function AreaPlaceholder({ eyebrow, title, purpose, audience }: AreaPlaceholderProps) {
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Fachbereich</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{eyebrow}</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">{title}</h1>
         <p className="mt-1 text-sm text-zinc-600">{purpose}</p>
       </header>

@@ -43,6 +43,14 @@ export default async function CeoDashboardPage() {
     );
   }
 
+  const cycleMainName =
+    data.selectedCycle.cycle_scheme_name?.trim() ||
+    data.selectedCycle.name
+      .replace(/\s*-\s*L\d+\b.*$/i, "")
+      .replace(/\s*\(L\d+\).*$/i, "")
+      .replace(/\s*-\s*\d{3}(?:-\d{3})+$/i, "")
+      .trim();
+
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
@@ -50,16 +58,16 @@ export default async function CeoDashboardPage() {
           Dashboard
         </p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">
-          {data.selectedCycle.name}
+          {cycleMainName || data.selectedCycle.name}
         </h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Zykluscode: {data.selectedCycle.code} | Status: {data.selectedCycle.status}
+          Behalte den aktiven Zyklus im Blick und springe von hier direkt in die Detailanalyse.
         </p>
         <Link
           href={`/dashboard/cycles/${data.selectedCycle.id}`}
           className="brand-btn mt-4 inline-flex px-4 py-2 text-sm"
         >
-          Zum Zyklus-Drilldown
+          Zur Zyklus-Detailansicht
         </Link>
       </header>
 

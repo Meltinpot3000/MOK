@@ -10,8 +10,8 @@ type TreeNode = OrganizationUnit & { children: TreeNode[] };
 type PositionedNode = TreeNode & { x: number; y: number };
 type Edge = { from: PositionedNode; to: PositionedNode };
 
-const NODE_WIDTH = 190;
-const NODE_HEIGHT = 122;
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 132;
 const H_GAP = 44;
 const V_GAP = 58;
 const PADDING = 24;
@@ -83,13 +83,57 @@ function layoutTree(root: TreeNode, rootOffsetX: number) {
 }
 
 function nodeLabel(typeName: string | null | undefined): string {
-  return typeName && typeName.length > 0 ? typeName : "-";
+  if (!typeName || typeName.length === 0) return "-";
+  const normalized = typeName.trim().toLowerCase();
+  const translations: Record<string, string> = {
+    organization: "Organisation",
+    division: "Bereich",
+    "business unit": "Geschaeftseinheit",
+    business_unit: "Geschaeftseinheit",
+    function: "Funktion",
+    department: "Abteilung",
+    team: "Team",
+    program: "Programm",
+    region: "Region",
+    legal_entity: "Rechtseinheit",
+    "legal entity": "Rechtseinheit",
+  };
+  return translations[normalized] ?? typeName;
 }
 
 function preview(values: string[]): string {
   if (values.length === 0) return "keine";
   if (values.length <= 2) return values.join(", ");
   return `${values[0]}, ${values[1]} +${values.length - 2}`;
+}
+
+function splitLabel(text: string, maxCharsPerLine: number, maxLines = 2): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return ["-"];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxCharsPerLine) {
+      current = next;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = word;
+    } else {
+      lines.push(word.slice(0, Math.max(1, maxCharsPerLine - 1)) + "…");
+      current = "";
+    }
+    if (lines.length === maxLines) break;
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  if (lines.length > maxLines) return lines.slice(0, maxLines);
+  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
+    const last = lines[maxLines - 1];
+    lines[maxLines - 1] = last.length >= maxCharsPerLine ? `${last.slice(0, Math.max(1, maxCharsPerLine - 1))}…` : `${last}…`;
+  }
+  return lines;
 }
 
 export function OrganizationHierarchyGraph({ units, overlays = {} }: OrganizationHierarchyGraphProps) {
@@ -141,9 +185,9 @@ export function OrganizationHierarchyGraph({ units, overlays = {} }: Organizatio
         {allNodes.map((node) => (
           <g key={node.id} transform={`translate(${node.x - NODE_WIDTH / 2}, ${node.y})`}>
             <title>{`${node.name}
-RESP: ${preview(overlays[node.id]?.responsibles ?? [])}
-IND: ${preview(overlays[node.id]?.industries ?? [])}
-BM: ${preview(overlays[node.id]?.businessModels ?? [])}`}</title>
+Verantwortliche: ${preview(overlays[node.id]?.responsibles ?? [])}
+Industrien: ${preview(overlays[node.id]?.industries ?? [])}
+Geschaeftsmodelle: ${preview(overlays[node.id]?.businessModels ?? [])}`}</title>
             <rect
               width={NODE_WIDTH}
               height={NODE_HEIGHT}
@@ -164,34 +208,38 @@ BM: ${preview(overlays[node.id]?.businessModels ?? [])}`}</title>
             </text>
             <text
               x={NODE_WIDTH / 2}
-              y={44}
+              y={40}
               textAnchor="middle"
-              fontSize="20"
+              fontSize="13"
               fill="color-mix(in srgb, var(--brand-secondary) 80%, #18181b)"
               style={{ fontWeight: 600 }}
             >
-              {node.name}
+              {splitLabel(node.name, 28, 2).map((line, index) => (
+                <tspan key={`${node.id}-name-${index}`} x={NODE_WIDTH / 2} dy={index === 0 ? 0 : 14}>
+                  {line}
+                </tspan>
+              ))}
             </text>
             <text
               x={NODE_WIDTH / 2}
-              y={60}
+              y={70}
               textAnchor="middle"
               fontSize="10"
               fill="color-mix(in srgb, var(--brand-secondary) 60%, #52525b)"
             >
               {nodeLabel(node.unit_type?.name ?? node.unit_type?.code)}
             </text>
-            <rect x={12} y={74} width={54} height={18} rx={9} fill="#dbeafe" />
-            <text x={39} y={86} textAnchor="middle" fontSize="9" fill="#1d4ed8" style={{ fontWeight: 700 }}>
-              RESP {overlays[node.id]?.responsibles.length ?? 0}
+            <rect x={12} y={74} width={74} height={18} rx={9} fill="#dbeafe" />
+            <text x={49} y={86} textAnchor="middle" fontSize="9" fill="#1d4ed8" style={{ fontWeight: 700 }}>
+              Verantwortl. {overlays[node.id]?.responsibles.length ?? 0}
             </text>
-            <rect x={68} y={74} width={54} height={18} rx={9} fill="#fef3c7" />
-            <text x={95} y={86} textAnchor="middle" fontSize="9" fill="#b45309" style={{ fontWeight: 700 }}>
-              IND {overlays[node.id]?.industries.length ?? 0}
+            <rect x={92} y={74} width={74} height={18} rx={9} fill="#fef3c7" />
+            <text x={129} y={86} textAnchor="middle" fontSize="9" fill="#b45309" style={{ fontWeight: 700 }}>
+              Industrien {overlays[node.id]?.industries.length ?? 0}
             </text>
-            <rect x={124} y={74} width={54} height={18} rx={9} fill="#d1fae5" />
-            <text x={151} y={86} textAnchor="middle" fontSize="9" fill="#047857" style={{ fontWeight: 700 }}>
-              BM {overlays[node.id]?.businessModels.length ?? 0}
+            <rect x={172} y={74} width={76} height={18} rx={9} fill="#d1fae5" />
+            <text x={210} y={86} textAnchor="middle" fontSize="9" fill="#047857" style={{ fontWeight: 700 }}>
+              Modelle {overlays[node.id]?.businessModels.length ?? 0}
             </text>
             <text
               x={NODE_WIDTH / 2}
