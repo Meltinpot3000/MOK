@@ -66,6 +66,7 @@ type AnalysisVisualizationWorkspaceProps = {
   promotedEntryIds: string[];
   entryDirectionIdsByEntryId: Record<string, string[]>;
   strategicDirections: Array<{ id: string; title: string }>;
+  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number; reason?: string }>;
   canWrite: boolean;
 };
 
@@ -151,12 +152,25 @@ function fallbackTriScoresFromEdge(edge: VisualizationEdge): NonNullable<Visuali
   };
 }
 
-function buildForceLayout(nodes: VisualizationNode[], edges: VisualizationEdge[]): PositionedNode[] {
+function buildForceLayout(
+  nodes: VisualizationNode[],
+  edges: VisualizationEdge[],
+  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>
+): PositionedNode[] {
   const positioned = nodes.map((node) => ({
     ...node,
-    x: bucketX(node.analysisType) + (hashToUnit(node.id) - 0.5) * 120,
-    y: (3 - node.impact) * 80 + (hashToUnit(`${node.id}-y`) - 0.5) * 160,
-    z: 0,
+    x:
+      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].x)
+        ? llmLayoutByEntryId[node.id].x * 360
+        : bucketX(node.analysisType) + (hashToUnit(node.id) - 0.5) * 120,
+    y:
+      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].y)
+        ? llmLayoutByEntryId[node.id].y * 240
+        : (3 - node.impact) * 80 + (hashToUnit(`${node.id}-y`) - 0.5) * 160,
+    z:
+      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].z)
+        ? llmLayoutByEntryId[node.id].z * 180
+        : 0,
   }));
   const idxById = new Map(positioned.map((node, idx) => [node.id, idx]));
   const linkPairs = edges
@@ -214,7 +228,10 @@ function buildForceLayout(nodes: VisualizationNode[], edges: VisualizationEdge[]
   return positioned;
 }
 
-function buildClusterLayout(nodes: VisualizationNode[]): PositionedNode[] {
+function buildClusterLayout(
+  nodes: VisualizationNode[],
+  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>
+): PositionedNode[] {
   const clusterBuckets = new Map<string, VisualizationNode[]>();
   for (const node of nodes) {
     const key = node.clusterId ?? "isolated";
@@ -229,16 +246,26 @@ function buildClusterLayout(nodes: VisualizationNode[]): PositionedNode[] {
     const clusterCenterX = -350 + (clusterIdx % 4) * 230;
     const clusterCenterY = -170 + Math.floor(clusterIdx / 4) * 180;
     const localSeed = hashToUnit(node.id);
+    const llmAnchor = llmLayoutByEntryId?.[node.id];
     return {
       ...node,
-      x: clusterCenterX + (localSeed - 0.5) * 90,
-      y: clusterCenterY + (hashToUnit(`${node.id}-c`) - 0.5) * 90,
-      z: 0,
+      x:
+        llmAnchor && Number.isFinite(llmAnchor.x)
+          ? llmAnchor.x * 360
+          : clusterCenterX + (localSeed - 0.5) * 90,
+      y:
+        llmAnchor && Number.isFinite(llmAnchor.y)
+          ? llmAnchor.y * 240
+          : clusterCenterY + (hashToUnit(`${node.id}-c`) - 0.5) * 90,
+      z: llmAnchor && Number.isFinite(llmAnchor.z) ? llmAnchor.z * 180 : 0,
     };
   });
 }
 
-function buildTerrainLayout(nodes: VisualizationNode[]): PositionedNode[] {
+function buildTerrainLayout(
+  nodes: VisualizationNode[],
+  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>
+): PositionedNode[] {
   return nodes.map((node) => {
     const externalWeight =
       node.analysisType === "environment" || node.analysisType === "competitor"
@@ -247,11 +274,18 @@ function buildTerrainLayout(nodes: VisualizationNode[]): PositionedNode[] {
           ? 0.15
           : -1;
     const strategicWeight = ((node.impact - 3) * 0.72 + (node.uncertainty - 3) * 0.38);
+    const llmAnchor = llmLayoutByEntryId?.[node.id];
     return {
       ...node,
-      x: externalWeight * 220 + (hashToUnit(node.id) - 0.5) * 170,
-      y: -(strategicWeight * 70) + (hashToUnit(`${node.id}-terrain-y`) - 0.5) * 90,
-      z: 0,
+      x:
+        llmAnchor && Number.isFinite(llmAnchor.x)
+          ? llmAnchor.x * 360
+          : externalWeight * 220 + (hashToUnit(node.id) - 0.5) * 170,
+      y:
+        llmAnchor && Number.isFinite(llmAnchor.y)
+          ? llmAnchor.y * 240
+          : -(strategicWeight * 70) + (hashToUnit(`${node.id}-terrain-y`) - 0.5) * 90,
+      z: llmAnchor && Number.isFinite(llmAnchor.z) ? llmAnchor.z * 180 : 0,
     };
   });
 }
@@ -267,6 +301,7 @@ export function AnalysisVisualizationWorkspace({
   promotedEntryIds,
   entryDirectionIdsByEntryId,
   strategicDirections,
+  llmLayoutByEntryId,
   canWrite,
 }: AnalysisVisualizationWorkspaceProps) {
   const [viewMode, setViewMode] = useState<VisualizationViewMode>("constellation");
@@ -307,7 +342,9 @@ export function AnalysisVisualizationWorkspace({
 
   const graphNodes = useMemo<VisualizationNode[]>(
     () =>
-      entries.map((entry) => {
+      entries
+        .filter((entry) => entry.qualityScore > 0)
+        .map((entry) => {
         const dimensions = entryDimensions[entry.id] ?? {
           industries: [],
           businessModels: [],
@@ -428,10 +465,10 @@ export function AnalysisVisualizationWorkspace({
   const positionedNodes = useMemo<PositionedNode[]>(() => {
     const base =
       viewMode === "cluster"
-        ? buildClusterLayout(filteredNodes)
+        ? buildClusterLayout(filteredNodes, llmLayoutByEntryId)
         : viewMode === "terrain"
-          ? buildTerrainLayout(filteredNodes)
-          : buildForceLayout(filteredNodes, filteredEdges);
+          ? buildTerrainLayout(filteredNodes, llmLayoutByEntryId)
+          : buildForceLayout(filteredNodes, filteredEdges, llmLayoutByEntryId);
     return base.map((node) => {
       const internalExternal =
         node.analysisType === "company" || node.analysisType === "swot" ? -120 : 120;
@@ -442,7 +479,7 @@ export function AnalysisVisualizationWorkspace({
         z: horizon + internalExternal * 0.25 + (hashToUnit(`${node.id}-z`) - 0.5) * 80,
       };
     });
-  }, [filteredNodes, filteredEdges, viewMode]);
+  }, [filteredNodes, filteredEdges, viewMode, llmLayoutByEntryId]);
 
   const selectedNode = useMemo(
     () => positionedNodes.find((node) => node.id === selectedNodeId) ?? null,

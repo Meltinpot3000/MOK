@@ -6,7 +6,7 @@ export async function getAnalysisEntriesForCycle(organizationId: string, cycleIn
     .schema("app")
     .from("analysis_entries")
     .select(
-      "id, organization_id, cycle_instance_id, analysis_type, sub_type, title, description, impact_level, uncertainty_level"
+      "id, organization_id, cycle_instance_id, analysis_type, sub_type, title, description, impact_level, uncertainty_level, quality_score, quality_band, quality_source, semantic_embedding, semantic_embedding_status"
     )
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId);

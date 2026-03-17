@@ -49,6 +49,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.ANALYSIS_LLM_TIMEOUT_MS ?? 20000);
 function getFeatureTargets(): FeatureTarget[] {
   return [
     { feature: "quality_scoring", provider: "gemini", model: GEMINI_MODEL_QUALITY },
+    { feature: "graph_layout", provider: "gemini", model: GEMINI_MODEL_ASSIST },
     { feature: "link_draft_generation", provider: "gemini", model: GEMINI_MODEL_LINKS },
     { feature: "cluster_gap_assist", provider: "gemini", model: GEMINI_MODEL_ASSIST },
     { feature: "challenge_recommendation", provider: "gemini", model: GEMINI_MODEL_ASSIST },

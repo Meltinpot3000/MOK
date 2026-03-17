@@ -36,6 +36,8 @@ export type LlmQualityScore = {
   certaintyScore: number;
   evidenceScore: number;
   structureScore: number;
+  hasStrategicValue: boolean;
+  strategicValueReason: string;
   explanation: string;
   provider: "gemini" | "groq";
   model: string;
@@ -69,16 +71,58 @@ export type LlmChallengeCandidate = {
   sourceRef: string;
 };
 
+export type LlmGraphLayoutNode = {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  confidence: number;
+  reason?: string;
+};
+
+export type LlmGraphLayout = {
+  layoutVersion: string;
+  nodes: LlmGraphLayoutNode[];
+  globalReasoning: string;
+  provider: "gemini" | "groq";
+  model: string;
+  promptVersion: string;
+};
+
 const LINK_PROMPT_VERSION = "analysis-link-v3";
 const QUALITY_PROMPT_VERSION = "analysis-quality-v1";
 const CLUSTER_PROMPT_VERSION = "analysis-cluster-v1";
 const GAP_PROMPT_VERSION = "analysis-gap-v1";
+const GRAPH_LAYOUT_PROMPT_VERSION = "analysis-graph-layout-v1";
 
 export const GEMINI_MODEL_QUALITY = process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro";
 export const GEMINI_MODEL_LINKS = process.env.ANALYSIS_LLM_MODEL_GEMINI_LINKS ?? "gemini-2.5-flash";
 export const GEMINI_MODEL_ASSIST = process.env.ANALYSIS_LLM_MODEL_GEMINI_ASSIST ?? GEMINI_MODEL_QUALITY;
 export const GROQ_MODEL = process.env.ANALYSIS_LLM_MODEL_GROQ ?? "llama-3.3-70b-versatile";
 const REQUEST_TIMEOUT_MS = Number(process.env.ANALYSIS_LLM_TIMEOUT_MS ?? 20000);
+const GEMINI_MIN_INTERVAL_MS = Number(process.env.ANALYSIS_LLM_MIN_INTERVAL_MS_GEMINI ?? 900);
+const GROQ_MIN_INTERVAL_MS = Number(process.env.ANALYSIS_LLM_MIN_INTERVAL_MS_GROQ ?? 450);
+const RETRY_BASE_DELAY_MS = Number(process.env.ANALYSIS_LLM_RETRY_BASE_DELAY_MS ?? 1200);
+const RETRY_MAX_ATTEMPTS = Number(process.env.ANALYSIS_LLM_RETRY_MAX_ATTEMPTS ?? 3);
+const lastRequestAtByProvider: Record<"gemini" | "groq", number> = {
+  gemini: 0,
+  groq: 0,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.round(ms))));
+}
+
+async function enforceProviderRateLimit(provider: "gemini" | "groq"): Promise<void> {
+  const minIntervalMs = provider === "gemini" ? GEMINI_MIN_INTERVAL_MS : GROQ_MIN_INTERVAL_MS;
+  if (minIntervalMs <= 0) return;
+  const now = Date.now();
+  const elapsed = now - lastRequestAtByProvider[provider];
+  if (elapsed < minIntervalMs) {
+    await sleep(minIntervalMs - elapsed);
+  }
+  lastRequestAtByProvider[provider] = Date.now();
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -142,10 +186,12 @@ function buildPrompt(
 function buildQualityPrompt(entry: QualityEntryInput, strategyReferenceText?: string | null): string {
   return withStrategyReference(
     [
-    "Bewerte die Qualitaet eines strategischen Analyse-Findings (0-100).",
+    "Pruefe zuerst, ob dieses Finding einen echten strategischen Nutzen hat.",
     "Antwort nur als valides JSON (ohne Markdown).",
-    'Schema: {"qualityScore":0-100,"impactScore":0-100,"certaintyScore":0-100,"evidenceScore":0-100,"structureScore":0-100,"explanation":"max 240 Zeichen"}',
+    'Schema: {"strategicValue":true|false,"strategicValueReason":"max 180 Zeichen","qualityScore":0-100,"impactScore":0-100,"certaintyScore":0-100,"evidenceScore":0-100,"structureScore":0-100,"explanation":"max 240 Zeichen"}',
     "Regeln:",
+    "- strategicValue=false, wenn Aussage inhaltlich leer, zu generisch, ohne strategische Implikation oder als Test/Platzhalter erkennbar ist",
+    "- Wenn strategicValue=false, dann qualityScore=0 und alle Teil-Scores=0",
     "- impactScore: strategische Relevanz aus impact/inhalt",
     "- certaintyScore: Verlaesslichkeit (niedrige Unsicherheit => hoher Score)",
     "- evidenceScore: Belastbarkeit der Beschreibung/Evidenz",
@@ -235,6 +281,71 @@ function buildChallengeCandidatesPrompt(input: {
   );
 }
 
+function buildGraphLayoutPrompt(input: {
+  nodes: Array<{
+    id: string;
+    title: string;
+    analysisType: string;
+    subType: string | null;
+    impact: number;
+    uncertainty: number;
+    description: string | null;
+    qualityScore: number;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    linkType: string;
+    confidence: number;
+    strength: number;
+    triScores?: { proximityScore: number; supportScore: number; repulsionScore: number } | null;
+  }>;
+  strategyReferenceText?: string | null;
+}): string {
+  const compactNodes = input.nodes.map((node) => ({
+    id: node.id,
+    type: node.analysisType,
+    subType: node.subType ?? "",
+    impact: node.impact,
+    uncertainty: node.uncertainty,
+    quality: node.qualityScore,
+    title: node.title.slice(0, 120),
+    description: String(node.description ?? "").slice(0, 220),
+  }));
+  const compactEdges = input.edges.slice(0, 120).map((edge) => ({
+    source: edge.source,
+    target: edge.target,
+    type: edge.linkType,
+    confidence: Number(edge.confidence.toFixed(3)),
+    strength: edge.strength,
+    triScores: edge.triScores
+      ? {
+          proximityScore: Number(edge.triScores.proximityScore.toFixed(3)),
+          supportScore: Number(edge.triScores.supportScore.toFixed(3)),
+          repulsionScore: Number(edge.triScores.repulsionScore.toFixed(3)),
+        }
+      : null,
+  }));
+  return withStrategyReference(
+    [
+      "Berechne eine strategisch sinnvolle 3D-Layout-Position fuer alle Knoten.",
+      "Antwort nur als valides JSON.",
+      'Schema: {"layoutVersion":"analysis-graph-layout-v1","nodes":[{"id":"...","x":-1..1,"y":-1..1,"z":-1..1,"confidence":0..1}],"globalReasoning":"max 240 Zeichen"}',
+      "Regeln:",
+      "- Jeder input-node muss GENAU EINMAL in nodes enthalten sein.",
+      "- x-Achse: extern (environment/competitor) eher negativ, intern (company/swot) eher positiv.",
+      "- y-Achse: hoher Impact und geringere Unsicherheit eher hoch.",
+      "- z-Achse: stark vernetzte Querschnittsthemen eher hoch.",
+      "- Semantisch nahe oder unterstuetzende Knoten naeher, widerspruechliche eher weiter entfernt.",
+      "- Keine Koordinaten ausserhalb [-1,1].",
+      "",
+      `NodesJSON: ${JSON.stringify(compactNodes)}`,
+      `EdgesJSON: ${JSON.stringify(compactEdges)}`,
+    ],
+    input.strategyReferenceText
+  );
+}
+
 function parseJsonPayload(raw: string): {
   proximityScore: number;
   supportScore: number;
@@ -297,6 +408,45 @@ function parseGenericJson(raw: string): Record<string, unknown> | null {
   }
 }
 
+function parseGraphLayoutJson(raw: string, expectedNodeIds: string[]): {
+  layoutVersion: string;
+  nodes: LlmGraphLayoutNode[];
+  globalReasoning: string;
+} | null {
+  const json = parseGenericJson(raw);
+  if (!json) return null;
+  const rawNodes = Array.isArray(json.nodes) ? json.nodes : [];
+  const parsedNodes: LlmGraphLayoutNode[] = [];
+  const expected = new Set(expectedNodeIds);
+  const seen = new Set<string>();
+  for (const rawNode of rawNodes) {
+    if (!rawNode || typeof rawNode !== "object") continue;
+    const node = rawNode as Record<string, unknown>;
+    const id = String(node.id ?? "").trim();
+    if (!id || !expected.has(id) || seen.has(id)) continue;
+    const x = clamp(Number(node.x ?? 0), -1, 1);
+    const y = clamp(Number(node.y ?? 0), -1, 1);
+    const z = clamp(Number(node.z ?? 0), -1, 1);
+    const confidence = clamp(Number(node.confidence ?? 0.5), 0, 1);
+    parsedNodes.push({
+      id,
+      x: Number.isFinite(x) ? x : 0,
+      y: Number.isFinite(y) ? y : 0,
+      z: Number.isFinite(z) ? z : 0,
+      confidence: Number.isFinite(confidence) ? confidence : 0.5,
+      reason: String(node.reason ?? "").trim().slice(0, 140) || undefined,
+    });
+    seen.add(id);
+  }
+  const minimumAccepted = Math.max(1, Math.ceil(expectedNodeIds.length * 0.5));
+  if (parsedNodes.length < minimumAccepted) return null;
+  return {
+    layoutVersion: String(json.layoutVersion ?? GRAPH_LAYOUT_PROMPT_VERSION).trim().slice(0, 80),
+    nodes: parsedNodes,
+    globalReasoning: String(json.globalReasoning ?? "").trim().slice(0, 300),
+  };
+}
+
 function parseUsageFromGeminiResponse(responseBody: Record<string, unknown>): LlmUsage {
   const usage = (responseBody.usageMetadata as Record<string, unknown> | undefined) ?? {};
   const promptTokens = Number(usage.promptTokenCount ?? NaN);
@@ -343,11 +493,22 @@ async function fetchWithTimeout(input: string, init: RequestInit): Promise<Respo
   }
 }
 
-async function fetchWithRetry(input: string, init: RequestInit, retries = 1): Promise<Response | null> {
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
+async function fetchWithRetry(
+  input: string,
+  init: RequestInit,
+  provider: "gemini" | "groq",
+  retries = RETRY_MAX_ATTEMPTS
+): Promise<Response | null> {
+  for (let attempt = 0; attempt <= Math.max(0, retries); attempt += 1) {
+    await enforceProviderRateLimit(provider);
     const response = await fetchWithTimeout(input, init).catch(() => null);
     if (response?.ok) return response;
     if (attempt === retries) return response;
+    const shouldRetry =
+      !response || response.status === 429 || response.status >= 500 || response.status === 408;
+    if (!shouldRetry) return response;
+    const retryDelayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt) + Math.round(Math.random() * 250);
+    await sleep(retryDelayMs);
   }
   return null;
 }
@@ -375,7 +536,8 @@ async function scoreWithGemini(
             : {}),
         },
       }),
-    }
+    },
+    "gemini"
   );
 
   if (!response?.ok) return null;
@@ -398,25 +560,29 @@ async function scoreWithGroq(
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return null;
 
-  const response = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const response = await fetchWithRetry(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.1,
+        ...(Number.isFinite(maxOutputTokens) && Number(maxOutputTokens) > 0
+          ? { max_tokens: Math.round(Number(maxOutputTokens)) }
+          : {}),
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "Du gibst nur valides JSON zurueck." },
+          { role: "user", content: prompt },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      ...(Number.isFinite(maxOutputTokens) && Number(maxOutputTokens) > 0
-        ? { max_tokens: Math.round(Number(maxOutputTokens)) }
-        : {}),
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "Du gibst nur valides JSON zurueck." },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
+    "groq"
+  );
 
   if (!response?.ok) return null;
   const data = (await response.json()) as {
@@ -484,19 +650,23 @@ export async function scoreEntryQualityWithLlm(
   if (geminiRaw) {
     const json = parseGenericJson(geminiRaw.text);
     if (json) {
+      const hasStrategicValue = Boolean(json.strategicValue ?? true);
       const qualityScore = clamp(Number(json.qualityScore ?? 50), 0, 100);
       const impactScore = clamp(Number(json.impactScore ?? qualityScore), 0, 100);
       const certaintyScore = clamp(Number(json.certaintyScore ?? qualityScore), 0, 100);
       const evidenceScore = clamp(Number(json.evidenceScore ?? qualityScore), 0, 100);
       const structureScore = clamp(Number(json.structureScore ?? qualityScore), 0, 100);
+      const enforcedZeroScore = hasStrategicValue ? Math.round(qualityScore) : 0;
       return {
         result: {
-          qualityScore: Math.round(qualityScore),
-          impactScore: Math.round(impactScore),
-          certaintyScore: Math.round(certaintyScore),
-          evidenceScore: Math.round(evidenceScore),
-          structureScore: Math.round(structureScore),
-          explanation: String(json.explanation ?? "").trim().slice(0, 240),
+          qualityScore: enforcedZeroScore,
+          impactScore: hasStrategicValue ? Math.round(impactScore) : 0,
+          certaintyScore: hasStrategicValue ? Math.round(certaintyScore) : 0,
+          evidenceScore: hasStrategicValue ? Math.round(evidenceScore) : 0,
+          structureScore: hasStrategicValue ? Math.round(structureScore) : 0,
+          hasStrategicValue,
+          strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
+          explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
           provider: "gemini",
           model: GEMINI_MODEL_QUALITY,
           promptVersion: QUALITY_PROMPT_VERSION,
@@ -509,15 +679,27 @@ export async function scoreEntryQualityWithLlm(
   if (!groqRaw) return { result: null, usage: null };
   const json = parseGenericJson(groqRaw.text);
   if (!json) return { result: null, usage: groqRaw.usage };
+  const hasStrategicValue = Boolean(json.strategicValue ?? true);
   const qualityScore = clamp(Number(json.qualityScore ?? 50), 0, 100);
+  const enforcedZeroScore = hasStrategicValue ? Math.round(qualityScore) : 0;
   return {
     result: {
-      qualityScore: Math.round(qualityScore),
-      impactScore: Math.round(clamp(Number(json.impactScore ?? qualityScore), 0, 100)),
-      certaintyScore: Math.round(clamp(Number(json.certaintyScore ?? qualityScore), 0, 100)),
-      evidenceScore: Math.round(clamp(Number(json.evidenceScore ?? qualityScore), 0, 100)),
-      structureScore: Math.round(clamp(Number(json.structureScore ?? qualityScore), 0, 100)),
-      explanation: String(json.explanation ?? "").trim().slice(0, 240),
+      qualityScore: enforcedZeroScore,
+      impactScore: hasStrategicValue
+        ? Math.round(clamp(Number(json.impactScore ?? qualityScore), 0, 100))
+        : 0,
+      certaintyScore: hasStrategicValue
+        ? Math.round(clamp(Number(json.certaintyScore ?? qualityScore), 0, 100))
+        : 0,
+      evidenceScore: hasStrategicValue
+        ? Math.round(clamp(Number(json.evidenceScore ?? qualityScore), 0, 100))
+        : 0,
+      structureScore: hasStrategicValue
+        ? Math.round(clamp(Number(json.structureScore ?? qualityScore), 0, 100))
+        : 0,
+      hasStrategicValue,
+      strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
+      explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
       provider: "groq",
       model: GROQ_MODEL,
       promptVersion: QUALITY_PROMPT_VERSION,
@@ -615,4 +797,59 @@ export async function proposeChallengeCandidatesWithLlm(input: {
     });
   }
   return { result: candidates.slice(0, 8), usage: geminiRaw.usage };
+}
+
+export async function proposeGraphLayoutWithLlm(input: {
+  nodes: Array<{
+    id: string;
+    title: string;
+    analysisType: string;
+    subType: string | null;
+    impact: number;
+    uncertainty: number;
+    description: string | null;
+    qualityScore: number;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    linkType: string;
+    confidence: number;
+    strength: number;
+    triScores?: { proximityScore: number; supportScore: number; repulsionScore: number } | null;
+  }>;
+  strategyReferenceText?: string | null;
+  maxOutputTokens?: number;
+}): Promise<LlmScoreResponse<LlmGraphLayout>> {
+  if (input.nodes.length === 0) return { result: null, usage: null };
+  const expectedNodeIds = input.nodes.map((node) => node.id);
+  const prompt = buildGraphLayoutPrompt(input);
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
+  if (geminiRaw) {
+    const parsed = parseGraphLayoutJson(geminiRaw.text, expectedNodeIds);
+    if (parsed) {
+      return {
+        result: {
+          ...parsed,
+          provider: "gemini",
+          model: GEMINI_MODEL_ASSIST,
+          promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
+        },
+        usage: geminiRaw.usage,
+      };
+    }
+  }
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
+  if (!groqRaw) return { result: null, usage: null };
+  const parsed = parseGraphLayoutJson(groqRaw.text, expectedNodeIds);
+  if (!parsed) return { result: null, usage: groqRaw.usage };
+  return {
+    result: {
+      ...parsed,
+      provider: "groq",
+      model: GROQ_MODEL,
+      promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
+    },
+    usage: groqRaw.usage,
+  };
 }

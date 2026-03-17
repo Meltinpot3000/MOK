@@ -2,9 +2,11 @@ import { redirect } from "next/navigation";
 import {
   approveLinkDraft,
   attachFindingToChallenge,
+  createStrategicChallengeInCycle,
   createPipInitiativeInCycle,
   createAnalysisEntry,
   createStrategicDirectionInCycle,
+  backfillEntryQuality,
   dismissChallengeCandidate,
   deleteAnalysisEntry,
   generateLinkDrafts,
@@ -14,36 +16,33 @@ import {
   promoteClusterToStrategicChallenge,
   promoteToStrategicChallenge,
   recomputeClusters,
+  recomputeGraphLayout,
   recomputeGaps,
   rejectLinkDraft,
   saveStrategyReferenceText,
+  linkStrategicChallengeToBusinessModelInCycle,
+  linkStrategicChallengeToIndustryInCycle,
+  linkStrategicDirectionToBusinessModelInCycle,
+  linkStrategicDirectionToIndustryInCycle,
+  unlinkStrategicChallengeFromBusinessModelInCycle,
+  unlinkStrategicChallengeFromIndustryInCycle,
+  unlinkStrategicDirectionFromBusinessModelInCycle,
+  unlinkStrategicDirectionFromIndustryInCycle,
   unlinkDirectionChallengePredecessor,
   unlinkInitiativeTargetPredecessor,
+  updateStrategicChallengeAssessment,
+  updateStrategicDirectionAssessment,
   updateAnalysisEntry,
 } from "@/app/(ceo)/strategy-cycle/actions";
 import StrategyMatrixPage from "@/app/(ceo)/strategy-matrix/page";
 import { AnalysisVisualizationWorkspace } from "@/components/analysis-visualization/AnalysisVisualizationWorkspace";
+import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
 import { LiveRangeInput } from "@/components/ceo/LiveRangeInput";
-import { evaluateLlmBudgetStatus } from "@/lib/analysis-network/budget";
 import { getTenantBranding } from "@/lib/ceo/queries";
-import {
-  isLlmFeatureEnabled,
-  readAnalysisNetworkLlmPolicy,
-  resolveLlmMaxOutputTokens,
-} from "@/lib/analysis-network/policy";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
-import {
-  calculateQualityScoreWithFallback,
-  calculateQualityScore,
-  getQualityWeightsFromBrandingConfig,
-} from "@/lib/strategy-cycle/quality-score";
-import {
-  buildStrategyReferenceText,
-  readStrategyReferenceFieldsFromBrandingConfig,
-} from "@/lib/strategy-cycle/strategy-reference";
+import { readStrategyReferenceFieldsFromBrandingConfig } from "@/lib/strategy-cycle/strategy-reference";
 import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type StrategyCycleViewPageProps = {
   searchParams: Promise<{
@@ -199,14 +198,26 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Cluster wurden neu berechnet." };
   if (success === "gaps-recomputed")
     return { type: "success", text: "Lueckenanalyse wurde neu berechnet." };
+  if (success === "graph-layout-recomputed")
+    return { type: "success", text: "Graph-Layout wurde neu berechnet." };
+  if (success === "quality-backfilled")
+    return { type: "success", text: "Bestehende Analysepunkte wurden neu bewertet und im Graph aktualisiert." };
+  if (success === "graph-layout-queued")
+    return { type: "success", text: "Graph-Layout Job wurde gestartet und laeuft im Hintergrund." };
+  if (success === "quality-backfill-queued")
+    return { type: "success", text: "Quality-Backfill Job wurde gestartet und laeuft im Hintergrund." };
   if (success === "cluster-promoted")
     return { type: "success", text: "Cluster wurde als strategische Herausforderung uebernommen." };
   if (success === "finding-linked")
     return { type: "success", text: "Befund wurde einer bestehenden Herausforderung zugeordnet." };
   if (success === "direction-created")
     return { type: "success", text: "Strategische Stossrichtung wurde erstellt." };
+  if (success === "challenge-created")
+    return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
   if (success === "initiative-created")
     return { type: "success", text: "PIP wurde erstellt." };
+  if (success === "assessment-updated")
+    return { type: "success", text: "Relevanz- und Risiko-Bewertung wurde gespeichert." };
   if (success === "linked")
     return { type: "success", text: "Predecessor-Verknuepfung wurde gespeichert." };
   if (success === "unlinked")
@@ -225,10 +236,17 @@ function getPriorityZone(impact: number | null, uncertainty: number | null) {
   return "Weiter analysieren / priorisieren";
 }
 
-function getQualityBand(score: number) {
-  if (score >= 75) return "high";
-  if (score >= 50) return "medium";
-  return "low";
+function getRiskPriorityScore(relevance: number | null | undefined, risk: number | null | undefined) {
+  const normalizedRelevance = Number.isFinite(Number(relevance)) ? Math.max(1, Math.min(5, Number(relevance))) : 3;
+  const normalizedRisk = Number.isFinite(Number(risk)) ? Math.max(1, Math.min(5, Number(risk))) : 3;
+  return normalizedRelevance * normalizedRisk;
+}
+
+function getMatrixCellClass(score: number) {
+  if (score >= 75) return "border-emerald-300 bg-emerald-50 text-emerald-900";
+  if (score >= 50) return "border-amber-300 bg-amber-50 text-amber-900";
+  if (score >= 25) return "border-zinc-300 bg-zinc-100 text-zinc-800";
+  return "border-zinc-200 bg-white text-zinc-700";
 }
 
 function getQualityBandLabel(band: string) {
@@ -237,112 +255,10 @@ function getQualityBandLabel(band: string) {
   return "Niedrige Qualitaet";
 }
 
-async function enrichEntriesWithQuality<
-  T extends {
-    id: string;
-    analysis_type: string;
-    sub_type: string | null;
-    title: string;
-    description: string | null;
-    impact_level: number | null;
-    uncertainty_level: number | null;
-  }
->(
-  entries: T[],
-  scoreWeights: ReturnType<typeof getQualityWeightsFromBrandingConfig>,
-  options: {
-    llmEnabled: boolean;
-    maxLlmItems: number;
-    strategyReferenceText?: string | null;
-    maxOutputTokens?: number;
-  }
-) {
-  const prioritizedIds = [...entries]
-    .sort((a, b) => (b.impact_level ?? 3) - (a.impact_level ?? 3))
-    .slice(0, Math.max(0, options.maxLlmItems))
-    .map((entry) => entry.id);
-  const llmEligible = new Set(prioritizedIds);
-
-  const usageEvents: Array<{
-    provider: string;
-    model: string;
-    promptVersion: string;
-    promptTokens: number | null;
-    completionTokens: number | null;
-    totalTokens: number | null;
-    usageMissing: boolean;
-  }> = [];
-
-  const enriched = await Promise.all(
-    entries.map(async (entry) => {
-      if (!options.llmEnabled) {
-        const score = calculateQualityScore(
-          entry.impact_level,
-          entry.uncertainty_level,
-          entry.description,
-          entry.sub_type,
-          scoreWeights
-        );
-        return {
-          ...entry,
-          qualityScore: score,
-          qualityBand: getQualityBand(score),
-          qualitySource: "rule" as const,
-          qualityExplanation: null,
-        };
-      }
-      const llmRequestedForEntry = llmEligible.has(entry.id);
-      if (process.env.NODE_ENV !== "production" && !llmRequestedForEntry) {
-        console.info("[quality-scoring] fallback(rule): entry not in llm-eligible top-N", {
-          entryId: entry.id,
-          title: entry.title,
-          impactLevel: entry.impact_level ?? 3,
-          maxLlmItems: options.maxLlmItems,
-        });
-      }
-      const result = await calculateQualityScoreWithFallback(entry, scoreWeights, {
-        llmEnabled: options.llmEnabled && llmRequestedForEntry,
-        strategyReferenceText: options.strategyReferenceText,
-        maxOutputTokens: options.maxOutputTokens,
-      });
-      if (
-        process.env.NODE_ENV !== "production" &&
-        llmRequestedForEntry &&
-        result.source === "rule"
-      ) {
-        console.info("[quality-scoring] fallback(rule): llm returned no usable result", {
-          entryId: entry.id,
-          title: entry.title,
-          fallbackReason: result.fallbackReason,
-          hasUsage: Boolean(result.usage),
-          promptTokens: result.usage?.promptTokens ?? null,
-          completionTokens: result.usage?.completionTokens ?? null,
-          totalTokens: result.usage?.totalTokens ?? null,
-          usageMissing: result.usage?.usageMissing ?? null,
-        });
-      }
-      if (result.source === "llm" && result.usage && result.provider && result.model && result.promptVersion) {
-        usageEvents.push({
-          provider: result.provider,
-          model: result.model,
-          promptVersion: result.promptVersion,
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          totalTokens: result.usage.totalTokens,
-          usageMissing: result.usage.usageMissing,
-        });
-      }
-      return {
-        ...entry,
-        qualityScore: result.score,
-        qualityBand: getQualityBand(result.score),
-        qualitySource: result.source,
-        qualityExplanation: result.explanation,
-      };
-    })
-  );
-
-  return { enriched, usageEvents };
+function deriveQualityBand(score: number): "high" | "medium" | "low" {
+  if (score >= 75) return "high";
+  if (score >= 50) return "medium";
+  return "low";
 }
 
 function readTriScores(metadata: unknown) {
@@ -402,28 +318,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
   const workspace = await getStrategyCycleWorkspaceData(context.organizationId, selectedCycle.id);
   const branding = await getTenantBranding(context.organizationId);
-  const scoreWeights = getQualityWeightsFromBrandingConfig(branding?.branding_config ?? null);
-  const analysisNetworkConfig =
-    branding?.branding_config &&
-    typeof branding.branding_config === "object" &&
-    (branding.branding_config as Record<string, unknown>).analysis_network &&
-    typeof (branding.branding_config as Record<string, unknown>).analysis_network === "object"
-      ? ((branding.branding_config as Record<string, unknown>).analysis_network as Record<string, unknown>)
-      : {};
-  const llmPolicy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
-  const supabase = await createSupabaseServerClient();
-  const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase,
-    organizationId: context.organizationId,
-    policy: llmPolicy,
-  });
-  const canUseQualityLlm = budgetStatus.allowed && isLlmFeatureEnabled(llmPolicy, "quality_scoring");
   const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
-  const strategyReferenceText = buildStrategyReferenceText(strategyReferenceFields);
-  const maxQualityLlmItems = Math.max(
-    0,
-    Math.min(80, Number(analysisNetworkConfig.max_quality_llm_items ?? 40))
-  );
   const entries = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number])
     ? workspace.grouped[activeTab as keyof typeof workspace.grouped] ?? []
     : [];
@@ -437,13 +332,19 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ? resolvedSearchParams.quality_band
       : "all";
 
-  const enrichedAllEntriesResult = await enrichEntriesWithQuality(workspace.entries, scoreWeights, {
-    llmEnabled: canUseQualityLlm,
-    maxLlmItems: maxQualityLlmItems,
-    strategyReferenceText,
-    maxOutputTokens: resolveLlmMaxOutputTokens(llmPolicy, "quality_scoring"),
+  const enrichedAllEntries = workspace.entries.map((entry) => {
+    const qualityScore =
+      typeof entry.quality_score === "number" && Number.isFinite(entry.quality_score)
+        ? entry.quality_score
+        : 0;
+    return {
+      ...entry,
+      qualityScore,
+      qualityBand: entry.quality_band ?? deriveQualityBand(qualityScore),
+      qualitySource: entry.quality_source ?? "rule",
+      qualityExplanation: entry.quality_explanation ?? null,
+    };
   });
-  const enrichedAllEntries = enrichedAllEntriesResult.enriched;
   const activeEntryIds = new Set(entries.map((entry) => entry.id));
   const enrichedEntries = enrichedAllEntries.filter((entry) => activeEntryIds.has(entry.id));
 
@@ -457,7 +358,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
   const statusMessage = getStatusMessage(resolvedSearchParams.error, resolvedSearchParams.success);
   const challengeOptions = (workspace.existingChallenges ?? [])
-    .map((challenge) => ({ id: challenge.id, title: challenge.title }))
+    .map((challenge) => ({
+      id: challenge.id,
+      title: challenge.title,
+      sourceAnalysisEntryId: challenge.source_analysis_entry_id ?? null,
+    }))
     .filter((item, index, all) => all.findIndex((x) => x.id === item.id) === index);
   const challengeIdsByDirection = new Map<string, string[]>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
@@ -472,6 +377,30 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       (directionCountByChallengeId.get(link.strategic_challenge_id) ?? 0) + 1
     );
   }
+  const directionIndustryIdsById = new Map<string, string[]>();
+  for (const row of workspace.directionIndustries ?? []) {
+    const current = directionIndustryIdsById.get(row.strategic_direction_id) ?? [];
+    current.push(row.industry_id);
+    directionIndustryIdsById.set(row.strategic_direction_id, current);
+  }
+  const directionBusinessModelIdsById = new Map<string, string[]>();
+  for (const row of workspace.directionBusinessModels ?? []) {
+    const current = directionBusinessModelIdsById.get(row.strategic_direction_id) ?? [];
+    current.push(row.business_model_id);
+    directionBusinessModelIdsById.set(row.strategic_direction_id, current);
+  }
+  const challengeIndustryIdsById = new Map<string, string[]>();
+  for (const row of workspace.challengeIndustries ?? []) {
+    const current = challengeIndustryIdsById.get(row.strategic_challenge_id) ?? [];
+    current.push(row.industry_id);
+    challengeIndustryIdsById.set(row.strategic_challenge_id, current);
+  }
+  const challengeBusinessModelIdsById = new Map<string, string[]>();
+  for (const row of workspace.challengeBusinessModels ?? []) {
+    const current = challengeBusinessModelIdsById.get(row.strategic_challenge_id) ?? [];
+    current.push(row.business_model_id);
+    challengeBusinessModelIdsById.set(row.strategic_challenge_id, current);
+  }
   const targetIdsByInitiative = new Map<string, string[]>();
   for (const link of workspace.initiativeTargetLinks ?? []) {
     const current = targetIdsByInitiative.get(link.initiative_id) ?? [];
@@ -481,6 +410,84 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const entryDimensionsRecord = Object.fromEntries(workspace.entryDimensionsByEntryId.entries());
   const entryDirectionIdsRecord = Object.fromEntries(workspace.entryDirectionIdsByEntryId.entries());
   const promotedEntryIds = [...workspace.promotedBySourceId.keys()];
+  const llmLayoutByEntryId: Record<
+    string,
+    { x: number; y: number; z: number; confidence: number; reason?: string }
+  > = Object.fromEntries(
+    enrichedAllEntries
+      .filter(
+        (entry) =>
+          typeof entry.graph_layout_x === "number" &&
+          typeof entry.graph_layout_y === "number" &&
+          typeof entry.graph_layout_z === "number"
+      )
+      .map((entry) => [
+        entry.id,
+        {
+          x: entry.graph_layout_x as number,
+          y: entry.graph_layout_y as number,
+          z: entry.graph_layout_z as number,
+          confidence:
+            typeof entry.graph_layout_confidence === "number" ? entry.graph_layout_confidence : 0.5,
+          reason: entry.graph_layout_reason ?? undefined,
+        },
+      ])
+  );
+  const graphLayoutLlmCount = enrichedAllEntries.filter((entry) => entry.graph_layout_source === "llm").length;
+  const graphLayoutRuleCount = enrichedAllEntries.filter((entry) => entry.graph_layout_source === "rule").length;
+  const activeOrFailedJobs = (workspace.backgroundJobs ?? []).filter(
+    (job) => job.status === "pending" || job.status === "running" || job.status === "failed"
+  );
+  const runningJobs = activeOrFailedJobs.filter((job) => job.status === "pending" || job.status === "running");
+  const hasRunningQualityBackfill = runningJobs.some((job) => job.job_type === "quality_backfill");
+  const hasRunningGraphLayout = runningJobs.some((job) => job.job_type === "graph_layout_recompute");
+  const contributionWeightByPair = new Map<string, number>();
+  for (const link of workspace.challengeDirectionLinks ?? []) {
+    const key = `${link.strategic_challenge_id}:${link.strategic_direction_id}`;
+    const contribution = String((link as { contribution_level?: string }).contribution_level ?? "medium");
+    const weight = contribution === "high" ? 3 : contribution === "low" ? 1 : 2;
+    contributionWeightByPair.set(key, weight);
+  }
+  const strategicMatrixRows = (workspace.challenges ?? []).map((challenge) => {
+    const challengeRiskPriority = getRiskPriorityScore(challenge.relevance_level ?? 3, challenge.risk_level ?? 3);
+    const challengeIndustrySet = new Set(challengeIndustryIdsById.get(challenge.id) ?? []);
+    const challengeBusinessModelSet = new Set(challengeBusinessModelIdsById.get(challenge.id) ?? []);
+    const cells = (workspace.strategicDirections ?? []).map((direction) => {
+      const pairKey = `${challenge.id}:${direction.id}`;
+      const isLinked = contributionWeightByPair.has(pairKey);
+      const contributionWeight = contributionWeightByPair.get(pairKey) ?? 0;
+      const directionRiskPriority = getRiskPriorityScore(direction.relevance_level ?? 3, direction.risk_level ?? 3);
+      const normalizedRisk = Math.min(1, (challengeRiskPriority + directionRiskPriority) / 50);
+      const directionIndustrySet = new Set(directionIndustryIdsById.get(direction.id) ?? []);
+      const directionBusinessModelSet = new Set(directionBusinessModelIdsById.get(direction.id) ?? []);
+      const industryOverlap = [...challengeIndustrySet].filter((id) => directionIndustrySet.has(id)).length;
+      const businessOverlap = [...challengeBusinessModelSet].filter((id) => directionBusinessModelSet.has(id)).length;
+      const overlapTotal =
+        Math.max(challengeIndustrySet.size, directionIndustrySet.size) +
+        Math.max(challengeBusinessModelSet.size, directionBusinessModelSet.size);
+      const overlapRatio = overlapTotal > 0 ? (industryOverlap + businessOverlap) / overlapTotal : 0;
+      const score = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round((isLinked ? 45 : 10) + normalizedRisk * 35 + overlapRatio * 20 + contributionWeight * 4)
+        )
+      );
+      return {
+        directionId: direction.id,
+        directionTitle: direction.title,
+        isLinked,
+        contributionWeight,
+        overlapCount: industryOverlap + businessOverlap,
+        score,
+      };
+    });
+    return {
+      challengeId: challenge.id,
+      challengeTitle: challenge.title,
+      cells,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -546,13 +553,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               ))}
             </div>
             <p className="text-sm text-zinc-600">{getStGallenHint(activeTab)}</p>
-            {activeTab !== "strategy-matrix" ? (
-              <p className="text-xs text-zinc-500">
-                Bewertungsgewichte: Wirkung {Math.round(scoreWeights.impact * 100)}% | Sicherheit{" "}
-                {Math.round(scoreWeights.certainty * 100)}% | Evidenz {Math.round(scoreWeights.evidence * 100)}
-                % | Struktur {Math.round(scoreWeights.structure * 100)}%
-              </p>
-            ) : null}
           </>
         ) : null}
       </section>
@@ -627,50 +627,238 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
       {activeL1 === "strategic-directions" ? (
         <section className="space-y-4">
-          <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">Strategische Herausforderungen</h2>
-            <p className="mt-1 text-sm text-zinc-600">
-              Diese Challenges stammen aus Corporate Strategy und bilden die Basis fuer die Stossrichtungen.
-            </p>
-            <div className="mt-4 space-y-2">
-              {(workspace.challenges ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">
-                  Noch keine strategischen Herausforderungen vorhanden.
-                </p>
-              ) : (
-                (workspace.challenges ?? []).map((challenge) => (
-                  <div key={challenge.id} className="brand-surface flex items-center justify-between gap-2 p-3">
-                    <p className="text-sm font-medium text-zinc-900">{challenge.title}</p>
-                    <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                      Verknuepfte Stossrichtungen: {directionCountByChallengeId.get(challenge.id) ?? 0}
-                    </span>
-                  </div>
-                ))
-              )}
+          <article className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Strategische Herausforderung erfassen</h2>
+              <p className="mt-1 text-sm text-zinc-600">Manuell oder unabhaengig von Analyse-Eintraegen anlegen und bewerten.</p>
+              <form action={createStrategicChallengeInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <input
+                  name="title"
+                  required
+                  placeholder="Neue strategische Herausforderung"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
+                <label className="text-xs text-zinc-600">
+                  Prioritaet
+                  <input
+                    type="number"
+                    name="priority"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Relevanz
+                  <input
+                    type="number"
+                    name="relevance_level"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Risiko
+                  <input
+                    type="number"
+                    name="risk_level"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <div className="md:col-span-2">
+                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                    Herausforderung speichern
+                  </button>
+                </div>
+              </form>
+            </div>
+            <div className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtung erfassen</h2>
+              <p className="mt-1 text-sm text-zinc-600">Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.</p>
+              <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <input
+                  name="title"
+                  required
+                  placeholder="Neue strategische Stossrichtung"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
+                <label className="text-xs text-zinc-600">
+                  Prioritaet
+                  <input
+                    type="number"
+                    name="priority"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Relevanz
+                  <input
+                    type="number"
+                    name="relevance_level"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Risiko
+                  <input
+                    type="number"
+                    name="risk_level"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <div className="md:col-span-2">
+                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                    Stossrichtung speichern
+                  </button>
+                </div>
+              </form>
             </div>
           </article>
 
           <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtungen</h2>
-            <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-              <input
-                name="title"
-                required
-                placeholder="Neue strategische Stossrichtung"
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-              />
-              <input
-                type="number"
-                name="priority"
-                defaultValue={3}
-                min={1}
-                max={5}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-              />
-              <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                Speichern
-              </button>
-            </form>
+            <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
+            <div className="mt-4 space-y-3">
+              {(workspace.challenges ?? []).length === 0 ? (
+                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Herausforderungen vorhanden.</p>
+              ) : (
+                (workspace.challenges ?? []).map((challenge) => {
+                  const relevanceLevel = challenge.relevance_level ?? 3;
+                  const riskLevel = challenge.risk_level ?? 3;
+                  const challengeIndustryIds = new Set(challengeIndustryIdsById.get(challenge.id) ?? []);
+                  const challengeBusinessModelIds = new Set(challengeBusinessModelIdsById.get(challenge.id) ?? []);
+                  return (
+                    <div key={challenge.id} className="brand-surface space-y-3 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-zinc-900">{challenge.title}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                            Verknuepfte Stossrichtungen: {directionCountByChallengeId.get(challenge.id) ?? 0}
+                          </span>
+                          <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                            Risiko-Prioritaet: {getRiskPriorityScore(relevanceLevel, riskLevel)}
+                          </span>
+                        </div>
+                      </div>
+                      <form action={updateStrategicChallengeAssessment} className="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
+                        <label className="text-xs text-zinc-600">
+                          Relevanz
+                          <input
+                            type="number"
+                            name="relevance_level"
+                            defaultValue={relevanceLevel}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Risiko
+                          <input
+                            type="number"
+                            name="risk_level"
+                            defaultValue={riskLevel}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Bewertung speichern
+                        </button>
+                      </form>
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        <form action={linkStrategicChallengeToIndustryInCycle} className="flex gap-2">
+                          <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
+                          <select
+                            name="industry_id"
+                            defaultValue=""
+                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Industrie verknuepfen</option>
+                            {(workspace.availableDimensions.industries ?? []).map((industry) => (
+                              <option key={industry.id} value={industry.id}>
+                                {industry.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                            Verknuepfen
+                          </button>
+                        </form>
+                        <form action={linkStrategicChallengeToBusinessModelInCycle} className="flex gap-2">
+                          <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
+                          <select
+                            name="business_model_id"
+                            defaultValue=""
+                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Geschaeftsmodell verknuepfen</option>
+                            {(workspace.availableDimensions.businessModels ?? []).map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                            Verknuepfen
+                          </button>
+                        </form>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(workspace.availableDimensions.industries ?? [])
+                          .filter((industry) => challengeIndustryIds.has(industry.id))
+                          .map((industry) => (
+                            <form
+                              key={`${challenge.id}-industry-${industry.id}`}
+                              action={unlinkStrategicChallengeFromIndustryInCycle}
+                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
+                              <input type="hidden" name="industry_id" value={industry.id} />
+                              <span>{industry.name}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                        {(workspace.availableDimensions.businessModels ?? [])
+                          .filter((model) => challengeBusinessModelIds.has(model.id))
+                          .map((model) => (
+                            <form
+                              key={`${challenge.id}-business-${model.id}`}
+                              action={unlinkStrategicChallengeFromBusinessModelInCycle}
+                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
+                              <input type="hidden" name="business_model_id" value={model.id} />
+                              <span>{model.name}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </article>
 
           <article className="brand-card p-6">
@@ -681,6 +869,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               ) : (
                 (workspace.strategicDirections ?? []).map((direction) => {
                   const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
+                  const directionIndustryIds = new Set(directionIndustryIdsById.get(direction.id) ?? []);
+                  const directionBusinessModelIds = new Set(directionBusinessModelIdsById.get(direction.id) ?? []);
+                  const relevanceLevel = direction.relevance_level ?? 3;
+                  const riskLevel = direction.risk_level ?? 3;
                   const coverage = workspace.directionCoverageById.get(direction.id) ?? {
                     linked: 0,
                     total: workspace.challenges.length,
@@ -690,10 +882,43 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     <div key={direction.id} className="brand-surface space-y-2 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-semibold text-zinc-900">{direction.title}</p>
-                        <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                          Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                            Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
+                          </span>
+                          <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                            Risiko-Prioritaet: {getRiskPriorityScore(relevanceLevel, riskLevel)}
+                          </span>
+                        </div>
                       </div>
+                      <form action={updateStrategicDirectionAssessment} className="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                        <label className="text-xs text-zinc-600">
+                          Relevanz
+                          <input
+                            type="number"
+                            name="relevance_level"
+                            defaultValue={relevanceLevel}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Risiko
+                          <input
+                            type="number"
+                            name="risk_level"
+                            defaultValue={riskLevel}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Bewertung speichern
+                        </button>
+                      </form>
                       <form action={linkDirectionToChallengePredecessor} className="flex flex-wrap gap-2">
                         <input type="hidden" name="strategic_direction_id" value={direction.id} />
                         <select
@@ -712,6 +937,44 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           Verknuepfen
                         </button>
                       </form>
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        <form action={linkStrategicDirectionToIndustryInCycle} className="flex gap-2">
+                          <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                          <select
+                            name="industry_id"
+                            defaultValue=""
+                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Industrie verknuepfen</option>
+                            {(workspace.availableDimensions.industries ?? []).map((industry) => (
+                              <option key={industry.id} value={industry.id}>
+                                {industry.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                            Verknuepfen
+                          </button>
+                        </form>
+                        <form action={linkStrategicDirectionToBusinessModelInCycle} className="flex gap-2">
+                          <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                          <select
+                            name="business_model_id"
+                            defaultValue=""
+                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Geschaeftsmodell verknuepfen</option>
+                            {(workspace.availableDimensions.businessModels ?? []).map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                            Verknuepfen
+                          </button>
+                        </form>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {(workspace.challenges ?? [])
                           .filter((challenge) => linkedChallengeIds.has(challenge.id))
@@ -729,12 +992,102 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                               </button>
                             </form>
                           ))}
+                        {(workspace.availableDimensions.industries ?? [])
+                          .filter((industry) => directionIndustryIds.has(industry.id))
+                          .map((industry) => (
+                            <form
+                              key={`${direction.id}-industry-${industry.id}`}
+                              action={unlinkStrategicDirectionFromIndustryInCycle}
+                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                              <input type="hidden" name="industry_id" value={industry.id} />
+                              <span>{industry.name}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                        {(workspace.availableDimensions.businessModels ?? [])
+                          .filter((model) => directionBusinessModelIds.has(model.id))
+                          .map((model) => (
+                            <form
+                              key={`${direction.id}-business-${model.id}`}
+                              action={unlinkStrategicDirectionFromBusinessModelInCycle}
+                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                              <input type="hidden" name="business_model_id" value={model.id} />
+                              <span>{model.name}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
                       </div>
                     </div>
                   );
                 })
               )}
             </div>
+          </article>
+
+          <article className="brand-card p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-zinc-900">Mapping-Matrix Herausforderungen x Stossrichtungen</h3>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-900">hoch</span>
+                <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">mittel</span>
+                <span className="rounded border border-zinc-300 bg-zinc-100 px-2 py-1 text-zinc-800">niedrig</span>
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-zinc-600">
+              Score kombiniert Link-Status, Relevanz/Risiko und Ueberschneidungen bei Industrie/Geschaeftsmodell.
+            </p>
+            {(workspace.challenges ?? []).length === 0 || (workspace.strategicDirections ?? []).length === 0 ? (
+              <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
+                Fuer die Matrix werden mindestens eine Herausforderung und eine Stossrichtung benoetigt.
+              </p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-[860px] border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs font-semibold text-zinc-700">
+                        Herausforderung
+                      </th>
+                      {(workspace.strategicDirections ?? []).map((direction) => (
+                        <th key={direction.id} className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700">
+                          {direction.title}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {strategicMatrixRows.map((row) => (
+                      <tr key={row.challengeId}>
+                        <td className="sticky left-0 z-10 border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-800">
+                          {row.challengeTitle}
+                        </td>
+                        {row.cells.map((cell) => (
+                          <td key={`${row.challengeId}-${cell.directionId}`} className="border border-zinc-200 p-1 align-top">
+                            <div className={`rounded border px-2 py-1 text-xs ${getMatrixCellClass(cell.score)}`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span>Score {cell.score}</span>
+                                <span>{cell.isLinked ? "verknuepft" : "offen"}</span>
+                              </div>
+                              <div className="mt-1 text-[11px] opacity-80">
+                                Beitrag {cell.contributionWeight}/3 | Overlap {cell.overlapCount}
+                              </div>
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </article>
         </section>
       ) : null}
@@ -831,6 +1184,36 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
+        <section className="brand-card p-4">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-medium text-zinc-700">Node-Einordnung:</span>
+            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700">
+              LLM: {graphLayoutLlmCount}
+            </span>
+            <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-zinc-700">
+              Rule-Fallback: {graphLayoutRuleCount}
+            </span>
+            {activeOrFailedJobs.length > 0 ? (
+              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-amber-700">
+                Hintergrundjobs: {activeOrFailedJobs.length}
+              </span>
+            ) : null}
+          </div>
+          {activeOrFailedJobs.length > 0 ? (
+            <div className="mt-2 space-y-1 text-xs text-zinc-600">
+              {activeOrFailedJobs.slice(0, 4).map((job) => (
+                <p key={job.id}>
+                  {job.job_type} - {job.status}
+                  {job.progress_total > 0 ? ` (${job.progress_done}/${job.progress_total})` : ""}
+                  {job.last_error ? ` - ${job.last_error}` : ""}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
         <AnalysisVisualizationWorkspace
           entries={enrichedAllEntries}
           approvedLinks={workspace.approvedLinks}
@@ -842,6 +1225,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           promotedEntryIds={promotedEntryIds}
           entryDirectionIdsByEntryId={entryDirectionIdsRecord}
           strategicDirections={workspace.strategicDirections}
+          llmLayoutByEntryId={llmLayoutByEntryId}
           canWrite={canWrite}
         />
       ) : null}
@@ -915,18 +1299,58 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
               Link-Entwuerfe generieren
             </button>
+            <AiWaitOverlay
+              title="AI Agent analysiert Verknuepfungen"
+              description="Wir erzeugen Link-Entwuerfe und gewichten sie fuer das Netzwerk."
+            />
           </form>
           <form action={recomputeClusters}>
             <input type="hidden" name="analysis_type" value={actionTab} />
             <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
               Cluster neu berechnen
             </button>
+            <AiWaitOverlay
+              title="AI Agent bewertet Cluster"
+              description="Cluster-Labels und Zusammenfassungen werden jetzt neu bewertet."
+            />
           </form>
           <form action={recomputeGaps}>
             <input type="hidden" name="analysis_type" value={actionTab} />
             <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
               Luecken neu berechnen
             </button>
+            <AiWaitOverlay
+              title="AI Agent bewertet Luecken"
+              description="Wir priorisieren Gaps und erzeugen Challenge-Kandidaten."
+            />
+          </form>
+          <form action={recomputeGraphLayout}>
+            <input type="hidden" name="analysis_type" value={actionTab} />
+            <button
+              type="submit"
+              disabled={!canWrite || hasRunningGraphLayout}
+              className="brand-btn-secondary px-3 py-1.5 text-xs"
+            >
+              Graph-Layout jetzt neu berechnen
+            </button>
+            <AiWaitOverlay
+              title="AI Agent ordnet den Graphen neu"
+              description="Node-Positionen werden neu berechnet und persistent gespeichert."
+            />
+          </form>
+          <form action={backfillEntryQuality}>
+            <input type="hidden" name="analysis_type" value={actionTab} />
+            <button
+              type="submit"
+              disabled={!canWrite || hasRunningQualityBackfill}
+              className="brand-btn-secondary px-3 py-1.5 text-xs"
+            >
+              Bestehende Punkte neu bewerten
+            </button>
+            <AiWaitOverlay
+              title="AI Agent bewertet alle bestehenden Punkte"
+              description="Wir rechnen Quality fuer alle vorhandenen Eintraege neu und aktualisieren den Graph."
+            />
           </form>
         </div>
 
@@ -1134,6 +1558,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
               Eintrag speichern
             </button>
+            <AiWaitOverlay
+              title="AI Agent berechnet Qualitaet"
+              description="Der Qualitaetswert wird berechnet und direkt in der Datenbank gespeichert."
+            />
           </form>
         </article>
 
@@ -1305,6 +1733,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         >
                           Speichern
                         </button>
+                        <AiWaitOverlay
+                          title="AI Agent berechnet Qualitaet"
+                          description="Wir rechnen den Qualitaetswert neu und speichern ihn persistent."
+                        />
                         <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
                           Qualitaetswert: {entry.qualityScore}
                         </span>
@@ -1325,6 +1757,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
                           Zone: {getPriorityZone(entry.impact_level, entry.uncertainty_level)}
                         </span>
+                        {entry.qualityScore === 0 ? (
+                          <span className="rounded-md border border-rose-300 bg-rose-50 px-2 py-1 text-xs text-rose-700">
+                            Kein strategischer Nutzen erkannt - erscheint nicht im Graph
+                          </span>
+                        ) : null}
                       </div>
                     </form>
 
@@ -1338,25 +1775,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                           className="brand-btn-secondary px-3 py-1.5 text-xs"
                         >
                           {promotedChallengeId ? "Bereits als Herausforderung uebernommen" : "Als Herausforderung uebernehmen"}
-                        </button>
-                      </form>
-                      <form action={attachFindingToChallenge} className="flex items-center gap-1">
-                        <input type="hidden" name="analysis_entry_id" value={entry.id} />
-                        <input type="hidden" name="analysis_type" value={activeTab} />
-                        <select
-                          name="challenge_id"
-                          defaultValue=""
-                          className="rounded border border-zinc-300 px-2 py-1 text-xs"
-                        >
-                          <option value="">Herausforderung zuordnen</option>
-                          {challengeOptions.map((challenge) => (
-                            <option key={challenge.id} value={challenge.id}>
-                              {challenge.title}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1 text-xs">
-                          Zuordnen
                         </button>
                       </form>
                       <form action={deleteAnalysisEntry}>
@@ -1373,6 +1791,38 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       <span className="text-xs text-zinc-500">
                         Aktualisiert: {updatedAtLabel || "-"}
                       </span>
+                    </div>
+                    <div className="mt-2">
+                      <p className="mb-1 text-xs font-medium text-zinc-600">Bestehender Herausforderung zuordnen</p>
+                      <div className="flex flex-wrap gap-2">
+                        {challengeOptions.length === 0 ? (
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-500">
+                            Keine Herausforderungen verfuegbar
+                          </span>
+                        ) : (
+                          challengeOptions.map((challenge) => {
+                            const isCurrent = challenge.sourceAnalysisEntryId === entry.id;
+                            return (
+                              <form key={`${entry.id}-${challenge.id}`} action={attachFindingToChallenge}>
+                                <input type="hidden" name="analysis_entry_id" value={entry.id} />
+                                <input type="hidden" name="analysis_type" value={activeTab} />
+                                <input type="hidden" name="challenge_id" value={challenge.id} />
+                                <button
+                                  type="submit"
+                                  disabled={!canWrite}
+                                  className={`rounded-full border px-3 py-1 text-xs ${
+                                    isCurrent
+                                      ? "border-zinc-900 bg-zinc-900 text-white"
+                                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                                  }`}
+                                >
+                                  {challenge.title}
+                                </button>
+                              </form>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

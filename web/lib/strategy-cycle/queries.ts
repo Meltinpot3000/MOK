@@ -8,6 +8,30 @@ export type AnalysisEntry = {
   description: string | null;
   impact_level: number | null;
   uncertainty_level: number | null;
+  quality_score: number | null;
+  quality_band: "high" | "medium" | "low" | null;
+  quality_source: "llm" | "rule" | null;
+  quality_explanation: string | null;
+  quality_calculated_at: string | null;
+  quality_fallback_reason: "llm_not_requested" | "llm_no_result" | null;
+  quality_provider: string | null;
+  quality_model: string | null;
+  quality_prompt_version: string | null;
+  graph_layout_x: number | null;
+  graph_layout_y: number | null;
+  graph_layout_z: number | null;
+  graph_layout_confidence: number | null;
+  graph_layout_reason: string | null;
+  graph_layout_source: "llm" | "rule" | null;
+  graph_layout_fallback_reason: "llm_not_requested" | "llm_no_result" | null;
+  graph_layout_provider: string | null;
+  graph_layout_model: string | null;
+  graph_layout_prompt_version: string | null;
+  graph_layout_calculated_at: string | null;
+  semantic_embedding_model: string | null;
+  semantic_embedding_version: string | null;
+  semantic_embedding_calculated_at: string | null;
+  semantic_embedding_status: "pending" | "ready" | "failed" | null;
   created_at: string;
   updated_at: string;
 };
@@ -23,6 +47,8 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     clusterMembersResult,
     gapFindingsResult,
     challengeDirectionLinksResult,
+    challengeIndustriesResult,
+    challengeBusinessModelsResult,
     directionIndustriesResult,
     directionBusinessModelsResult,
     directionOperatingModelsResult,
@@ -34,12 +60,13 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     initiativesResult,
     initiativeTargetLinksResult,
     challengeCandidatesResult,
+    backgroundJobsResult,
   ] = await Promise.all([
     supabase
       .schema("app")
       .from("analysis_entries")
       .select(
-        "id, analysis_type, sub_type, title, description, impact_level, uncertainty_level, created_at, updated_at"
+        "id, analysis_type, sub_type, title, description, impact_level, uncertainty_level, quality_score, quality_band, quality_source, quality_explanation, quality_calculated_at, quality_fallback_reason, quality_provider, quality_model, quality_prompt_version, graph_layout_x, graph_layout_y, graph_layout_z, graph_layout_confidence, graph_layout_reason, graph_layout_source, graph_layout_fallback_reason, graph_layout_provider, graph_layout_model, graph_layout_prompt_version, graph_layout_calculated_at, semantic_embedding_model, semantic_embedding_version, semantic_embedding_calculated_at, semantic_embedding_status, created_at, updated_at"
       )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
@@ -47,7 +74,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     supabase
       .schema("app")
       .from("strategic_challenges")
-      .select("id, title, source_analysis_entry_id")
+      .select("id, title, source_analysis_entry_id, relevance_level, risk_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("created_at", { ascending: false }),
@@ -101,6 +128,18 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
+      .from("strategic_challenge_industries")
+      .select("strategic_challenge_id, industry_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("strategic_challenge_business_models")
+      .select("strategic_challenge_id, business_model_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
       .from("strategic_direction_industries")
       .select("strategic_direction_id, industry_id")
       .eq("organization_id", organizationId)
@@ -138,7 +177,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     supabase
       .schema("app")
       .from("strategic_directions")
-      .select("id, title")
+      .select("id, title, relevance_level, risk_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -169,6 +208,15 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
       .eq("cycle_instance_id", cycleInstanceId)
       .order("priority", { ascending: false })
       .order("created_at", { ascending: false }),
+    supabase
+      .schema("app")
+      .from("analysis_background_jobs")
+      .select("id, job_type, status, progress_done, progress_total, last_error, created_at, started_at, finished_at")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .in("status", ["pending", "running", "failed"])
+      .order("created_at", { ascending: false })
+      .limit(12),
   ]);
 
   const promotedBySourceId = new Map<string, string>();
@@ -207,6 +255,18 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     const current = directionIdsByChallengeId.get(link.strategic_challenge_id) ?? [];
     current.push(link.strategic_direction_id);
     directionIdsByChallengeId.set(link.strategic_challenge_id, current);
+  }
+  const industryIdsByChallengeId = new Map<string, string[]>();
+  for (const row of challengeIndustriesResult.data ?? []) {
+    const current = industryIdsByChallengeId.get(row.strategic_challenge_id) ?? [];
+    current.push(row.industry_id);
+    industryIdsByChallengeId.set(row.strategic_challenge_id, current);
+  }
+  const businessModelIdsByChallengeId = new Map<string, string[]>();
+  for (const row of challengeBusinessModelsResult.data ?? []) {
+    const current = businessModelIdsByChallengeId.get(row.strategic_challenge_id) ?? [];
+    current.push(row.business_model_id);
+    businessModelIdsByChallengeId.set(row.strategic_challenge_id, current);
   }
   const industryIdsByDirectionId = new Map<string, string[]>();
   for (const row of directionIndustriesResult.data ?? []) {
@@ -282,7 +342,12 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     entryDirectionIdsByEntryId.set(entry.id, [...directionIds]);
   }
 
-  const challenges = promotedResult.data ?? [];
+  const challenges = (promotedResult.data ?? []).map((challenge) => ({
+    ...challenge,
+    relevance_level:
+      Number.isFinite(Number(challenge.relevance_level)) ? Math.max(1, Math.min(5, Number(challenge.relevance_level))) : 3,
+    risk_level: Number.isFinite(Number(challenge.risk_level)) ? Math.max(1, Math.min(5, Number(challenge.risk_level))) : 3,
+  }));
   const strategicDirections = strategicDirectionsResult.data ?? [];
   const annualTargets = annualTargetsResult.data ?? [];
   const initiatives = initiativesResult.data ?? [];
@@ -336,10 +401,17 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     annualTargets,
     initiatives,
     challengeDirectionLinks,
+    directionIndustries: directionIndustriesResult.data ?? [],
+    directionBusinessModels: directionBusinessModelsResult.data ?? [],
+    challengeIndustries: challengeIndustriesResult.data ?? [],
+    challengeBusinessModels: challengeBusinessModelsResult.data ?? [],
     initiativeTargetLinks,
     challengeCandidates: challengeCandidatesResult.data ?? [],
+    backgroundJobs: backgroundJobsResult.data ?? [],
     directionCoverageById,
     initiativeCoverageById,
+    industryIdsByChallengeId,
+    businessModelIdsByChallengeId,
     entryDimensionsByEntryId,
     entryDirectionIdsByEntryId,
     availableDimensions: {

@@ -42,6 +42,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
 
   const llmEnabled = String(formData.get("llm_enabled") ?? "off") === "on";
   const llmFeatureQualityScoring = String(formData.get("llm_feature_quality_scoring") ?? "off") === "on";
+  const llmFeatureGraphLayout = String(formData.get("llm_feature_graph_layout") ?? "off") === "on";
   const llmFeatureLinkDraft = String(formData.get("llm_feature_link_draft_generation") ?? "off") === "on";
   const llmFeatureCluster = String(formData.get("llm_feature_cluster_assessment") ?? "off") === "on";
   const llmFeatureGap = String(formData.get("llm_feature_gap_assessment") ?? "off") === "on";
@@ -50,6 +51,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
   const llmFeatureModelHealth = String(formData.get("llm_feature_model_health_checks") ?? "off") === "on";
   const llmDefaultMaxOutputTokens = Number(formData.get("llm_max_output_tokens_default") ?? 700);
   const llmMaxOutputQuality = Number(formData.get("llm_max_output_tokens_quality_scoring") ?? 500);
+  const llmMaxOutputGraphLayout = Number(formData.get("llm_max_output_tokens_graph_layout") ?? 1000);
   const llmMaxOutputLink = Number(formData.get("llm_max_output_tokens_link_draft_generation") ?? 420);
   const llmMaxOutputCluster = Number(formData.get("llm_max_output_tokens_cluster_assessment") ?? 380);
   const llmMaxOutputGap = Number(formData.get("llm_max_output_tokens_gap_assessment") ?? 380);
@@ -80,6 +82,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
     llm_enabled: llmEnabled,
     llm_feature_flags: {
       quality_scoring: llmFeatureQualityScoring,
+      graph_layout: llmFeatureGraphLayout,
       link_draft_generation: llmFeatureLinkDraft,
       cluster_assessment: llmFeatureCluster,
       gap_assessment: llmFeatureGap,
@@ -89,6 +92,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
     llm_max_output_tokens_default: clampInt(llmDefaultMaxOutputTokens, 700, 64, 4096),
     llm_max_output_tokens_by_feature: {
       quality_scoring: clampInt(llmMaxOutputQuality, 500, 64, 4096),
+      graph_layout: clampInt(llmMaxOutputGraphLayout, 1000, 64, 4096),
       link_draft_generation: clampInt(llmMaxOutputLink, 420, 64, 4096),
       cluster_assessment: clampInt(llmMaxOutputCluster, 380, 64, 4096),
       gap_assessment: clampInt(llmMaxOutputGap, 380, 64, 4096),

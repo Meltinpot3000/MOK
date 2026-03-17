@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/llm-health",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/internal/strategy-cycle-jobs",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

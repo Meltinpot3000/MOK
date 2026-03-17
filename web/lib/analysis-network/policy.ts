@@ -1,5 +1,6 @@
 type LlmFeatureKey =
   | "quality_scoring"
+  | "graph_layout"
   | "link_draft_generation"
   | "cluster_assessment"
   | "gap_assessment"
@@ -57,6 +58,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
 
   const featureFlags: Record<LlmFeatureKey, boolean> = {
     quality_scoring: readBoolean(featureFlagsRaw.quality_scoring, false),
+    graph_layout: readBoolean(featureFlagsRaw.graph_layout, true),
     link_draft_generation: readBoolean(featureFlagsRaw.link_draft_generation, true),
     cluster_assessment: readBoolean(featureFlagsRaw.cluster_assessment, true),
     gap_assessment: readBoolean(featureFlagsRaw.gap_assessment, true),
@@ -66,6 +68,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
 
   const maxOutputTokensByFeature: Record<LlmFeatureKey, number> = {
     quality_scoring: readNumber(outputByFeatureRaw.quality_scoring, 500, 64, 4096),
+    graph_layout: readNumber(outputByFeatureRaw.graph_layout, 1000, 64, 4096),
     link_draft_generation: readNumber(outputByFeatureRaw.link_draft_generation, 420, 64, 4096),
     cluster_assessment: readNumber(outputByFeatureRaw.cluster_assessment, 380, 64, 4096),
     gap_assessment: readNumber(outputByFeatureRaw.gap_assessment, 380, 64, 4096),

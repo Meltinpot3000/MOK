@@ -1,4 +1,5 @@
 import type { AnalysisEntryRecord } from "@/lib/analysis-network/types";
+import { cosineSimilarity } from "@/lib/analysis-network/embeddings";
 
 export type ApprovedLinkRecord = {
   source_analysis_item_id: string;
@@ -44,6 +45,17 @@ export function computeClusters(
   for (const link of approvedLinks) {
     adjacency.get(link.source_analysis_item_id)?.add(link.target_analysis_item_id);
     adjacency.get(link.target_analysis_item_id)?.add(link.source_analysis_item_id);
+  }
+  const semanticThreshold = 0.78;
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const left = entries[i];
+      const right = entries[j];
+      const similarity = cosineSimilarity(left.semantic_embedding, right.semantic_embedding);
+      if (similarity == null || similarity < semanticThreshold) continue;
+      adjacency.get(left.id)?.add(right.id);
+      adjacency.get(right.id)?.add(left.id);
+    }
   }
 
   const visited = new Set<string>();

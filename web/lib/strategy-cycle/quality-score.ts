@@ -151,7 +151,9 @@ export async function calculateQualityScoreWithFallback(
     score: llmResponse.result.qualityScore,
     source: "llm",
     fallbackReason: null,
-    explanation: llmResponse.result.explanation,
+    explanation: llmResponse.result.hasStrategicValue
+      ? llmResponse.result.explanation
+      : `Kein strategischer Nutzen erkennbar. ${llmResponse.result.strategicValueReason}`.trim(),
     provider: llmResponse.result.provider,
     model: llmResponse.result.model,
     promptVersion: llmResponse.result.promptVersion,

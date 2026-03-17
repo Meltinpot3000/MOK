@@ -1,8 +1,9 @@
 import type { AnalysisEntryRecord } from "@/lib/analysis-network/types";
+import { cosineSimilarity } from "@/lib/analysis-network/embeddings";
 
 export type GapFinding = {
   dimension: string;
-  gapType: "coverage" | "connectivity" | "traceability" | "evidence";
+  gapType: "coverage" | "connectivity" | "traceability" | "evidence" | "semantic";
   severity: number;
   recommendation: string;
   metadata?: Record<string, unknown>;
@@ -102,6 +103,45 @@ export function computeGapFindings(
       severity: 2,
       recommendation: "Inkonsistente Verbindungen im Netzwerk erkannt. Bitte Link-Entwuerfe pruefen.",
       metadata: { invalidLinks: duplicates.length },
+    });
+  }
+
+  const missingEmbeddingCount = entries.filter((entry) => !entry.semantic_embedding?.length).length;
+  if (missingEmbeddingCount > 0) {
+    findings.push({
+      dimension: "semantic-embedding",
+      gapType: "semantic",
+      severity: clamp(Math.round(missingEmbeddingCount / 4) + 1, 2, 5),
+      recommendation: `${missingEmbeddingCount} Findings haben noch kein Embedding. Semantische Anreicherung nachziehen.`,
+      metadata: { missingEmbeddingCount },
+    });
+  }
+
+  const isolatedSemantic: string[] = [];
+  const threshold = 0.72;
+  for (const entry of entries) {
+    if (!entry.semantic_embedding?.length) continue;
+    let hasNeighbor = false;
+    for (const other of entries) {
+      if (other.id === entry.id || !other.semantic_embedding?.length) continue;
+      const sim = cosineSimilarity(entry.semantic_embedding, other.semantic_embedding);
+      if (sim != null && sim >= threshold) {
+        hasNeighbor = true;
+        break;
+      }
+    }
+    if (!hasNeighbor && (entry.impact_level ?? 3) >= 4) {
+      isolatedSemantic.push(entry.id);
+    }
+  }
+  if (isolatedSemantic.length > 0) {
+    findings.push({
+      dimension: "semantic-coverage",
+      gapType: "semantic",
+      severity: clamp(Math.round(isolatedSemantic.length / 2) + 2, 2, 5),
+      recommendation:
+        "Mehr semantische Anschluss-Findings oder Gegenthese erfassen, damit isolierte High-Impact Themen belastbar eingeordnet werden.",
+      metadata: { isolatedEntryIds: isolatedSemantic },
     });
   }
 

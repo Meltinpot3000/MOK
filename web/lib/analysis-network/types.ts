@@ -8,6 +8,8 @@ export type AnalysisEntryRecord = {
   description: string | null;
   impact_level: number | null;
   uncertainty_level: number | null;
+  semantic_embedding?: number[] | null;
+  semantic_embedding_status?: "pending" | "ready" | "failed" | null;
 };
 
 export type AnalysisLinkType =

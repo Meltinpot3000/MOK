@@ -139,6 +139,15 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
                 type="checkbox"
+                name="llm_feature_graph_layout"
+                defaultChecked={llmPolicy.featureFlags.graph_layout}
+                className="h-4 w-4 rounded border-zinc-300"
+              />
+              Graph-Layout (Node-Einordnung)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-700">
+              <input
+                type="checkbox"
                 name="llm_feature_link_draft_generation"
                 defaultChecked={llmPolicy.featureFlags.link_draft_generation}
                 className="h-4 w-4 rounded border-zinc-300"
@@ -224,6 +233,17 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 max={4096}
                 name="llm_max_output_tokens_quality_scoring"
                 defaultValue={llmPolicy.maxOutputTokensByFeature.quality_scoring}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-zinc-600">Graph-Layout (Node-Einordnung)</span>
+              <input
+                type="number"
+                min={64}
+                max={4096}
+                name="llm_max_output_tokens_graph_layout"
+                defaultValue={llmPolicy.maxOutputTokensByFeature.graph_layout}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
               />
             </label>

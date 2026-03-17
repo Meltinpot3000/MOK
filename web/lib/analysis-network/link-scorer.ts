@@ -2,6 +2,7 @@ import {
   scorePairWithLlmDetailed,
   type LlmUsage,
 } from "@/lib/analysis-network/providers";
+import { cosineSimilarity } from "@/lib/analysis-network/embeddings";
 import { buildRuleCandidates } from "@/lib/analysis-network/rules";
 import type { AnalysisEntryRecord, LinkCandidate } from "@/lib/analysis-network/types";
 
@@ -91,6 +92,7 @@ export async function generateHybridLinkCandidates(
     maxLlmPairs?: number;
     minRuleConfidence?: number;
     fusionWeights?: FusionWeights;
+    semanticWeight?: number;
     strategyReferenceText?: string | null;
     maxOutputTokens?: number;
   }
@@ -98,6 +100,7 @@ export async function generateHybridLinkCandidates(
   const maxLlmPairs = opts?.maxLlmPairs ?? 22;
   const minRuleConfidence = opts?.minRuleConfidence ?? 0.22;
   const fusionWeights = opts?.fusionWeights ?? { rule: 0.55, llm: 0.45 };
+  const semanticWeight = clamp(Number(opts?.semanticWeight ?? 0.15), 0, 0.6);
   const weightSum = Math.max(0.001, fusionWeights.rule + fusionWeights.llm);
   const wr = fusionWeights.rule / weightSum;
   const wl = fusionWeights.llm / weightSum;
@@ -138,6 +141,8 @@ export async function generateHybridLinkCandidates(
         usage: llmResponse.usage,
       });
     }
+    const semanticSimilarity = cosineSimilarity(pair.left.semantic_embedding, pair.right.semantic_embedding);
+    const semanticNormalized = semanticSimilarity == null ? null : clamp((semanticSimilarity + 1) / 2, 0, 1);
     const mergedTri: TriScores = llmResult
       ? {
           proximityScore: clamp(ruleTri.proximityScore * wr + llmResult.proximityScore * wl, 0, 1),
@@ -145,6 +150,18 @@ export async function generateHybridLinkCandidates(
           repulsionScore: clamp(ruleTri.repulsionScore * wr + llmResult.repulsionScore * wl, 0, 1),
         }
       : ruleTri;
+    if (semanticNormalized != null) {
+      mergedTri.proximityScore = clamp(
+        mergedTri.proximityScore * (1 - semanticWeight) + semanticNormalized * semanticWeight,
+        0,
+        1
+      );
+      mergedTri.supportScore = clamp(
+        mergedTri.supportScore * (1 - semanticWeight * 0.6) + semanticNormalized * (semanticWeight * 0.6),
+        0,
+        1
+      );
+    }
 
     const meta = candidate.metadata ?? {};
     const causeEvidence = clamp(Number((meta.causeEvidence as number | undefined) ?? 0), 0, 1);
@@ -194,6 +211,11 @@ export async function generateHybridLinkCandidates(
           consistency: Number(consistency.toFixed(4)),
           suggestedByLlm: llmResult?.suggestedLinkType ?? null,
           directionHint: llmResult?.directionHint ?? "none",
+        },
+        semantic: {
+          similarity: semanticSimilarity == null ? null : Number(semanticSimilarity.toFixed(4)),
+          normalized: semanticNormalized == null ? null : Number(semanticNormalized.toFixed(4)),
+          weight: Number(semanticWeight.toFixed(4)),
         },
       },
     });
