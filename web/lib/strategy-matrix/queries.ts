@@ -53,7 +53,7 @@ export type MatrixAnalysisSuggestion = {
   impact_level: number | null;
 };
 
-export async function getMatrixWorkspaceData(organizationId: string, planningCycleId: string) {
+export async function getMatrixWorkspaceData(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
 
   const [
@@ -72,19 +72,19 @@ export async function getMatrixWorkspaceData(organizationId: string, planningCyc
       .from("strategic_challenges")
       .select("id, title, priority, visibility, created_at")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_directions")
       .select("id, title, owner_membership_id, priority, status, grouping, created_at")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("challenge_direction_links")
       .select("id, strategic_direction_id, strategic_challenge_id, contribution_level, note")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("annual_targets")
@@ -92,13 +92,13 @@ export async function getMatrixWorkspaceData(organizationId: string, planningCyc
         "id, strategic_direction_id, title, baseline, current_measure, progress_percent, comment, is_primary, updated_at"
       )
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("dashboard_comments")
       .select("id, object_type, object_id, comment_text, created_at")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("created_at", { ascending: false })
       .limit(300),
     supabase
@@ -106,13 +106,13 @@ export async function getMatrixWorkspaceData(organizationId: string, planningCyc
       .from("dashboard_column_config")
       .select("challenge_id, display_order")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("dashboard_row_config")
       .select("direction_id, display_order")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("responsibles")
@@ -125,7 +125,7 @@ export async function getMatrixWorkspaceData(organizationId: string, planningCyc
       .from("analysis_entries")
       .select("id, analysis_type, sub_type, title, description, impact_level")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("created_at", { ascending: false }),
   ]);
 

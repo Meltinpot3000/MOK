@@ -6,8 +6,8 @@ import { ResponsibleCreateForm } from "@/components/ceo/ResponsibleCreateForm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   getOrganizationUnits,
+  getActivePlanningCycle,
   getPhase0Context,
-  getPlanningCycles,
   getResponsibles,
 } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
@@ -103,10 +103,10 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
     redirect("/no-access");
   }
 
-  const [responsibles, orgUnits, cycles, assignments] = await Promise.all([
+  const [responsibles, orgUnits, activeCycle, assignments] = await Promise.all([
     getResponsibles(context.organizationId),
     getOrganizationUnits(context.organizationId),
-    getPlanningCycles(context.organizationId),
+    getActivePlanningCycle(context.organizationId),
     getResponsibleAssignments(context.organizationId),
   ]);
   const params = await searchParams;
@@ -434,7 +434,7 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
 
       <OrganizationGraphPanel
         organizationId={context.organizationId}
-        planningCycleId={cycles[0]?.id ?? null}
+        cycleInstanceId={activeCycle?.id ?? null}
       />
 
       <section className="brand-card p-6">

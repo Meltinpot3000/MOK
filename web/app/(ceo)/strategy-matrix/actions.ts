@@ -12,12 +12,13 @@ type MatrixContext = {
 };
 
 async function getMatrixContextOrRedirect(): Promise<MatrixContext> {
-  const access = await getSidebarAccessContext("strategy-matrix");
+  const access = await getSidebarAccessContext("strategy-cycle");
   if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
   return getMatrixCycleContextOrRedirect();
 }
 
-function done(path = "/strategy-matrix"): never {
+function done(path = "/strategy-cycle?l1=corporate-strategy&l2=strategy-matrix"): never {
+  revalidatePath("/strategy-cycle");
   revalidatePath("/strategy-matrix");
   redirect(path);
 }

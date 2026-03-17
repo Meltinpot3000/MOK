@@ -10,6 +10,7 @@ type CycleSidebarProps = {
   branding: TenantBranding | null;
   productName: string;
   permissions: SidebarPermissionMap;
+  nowIso: string;
 };
 
 function cycleLinkClass(isActive: boolean): string {
@@ -18,11 +19,32 @@ function cycleLinkClass(isActive: boolean): string {
     : "block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100";
 }
 
-export function CycleSidebar({ cycles, branding, productName, permissions }: CycleSidebarProps) {
+export function CycleSidebar({ cycles, branding, productName, permissions, nowIso }: CycleSidebarProps) {
   const pathname = usePathname();
   const isDashboardRoot = pathname === "/dashboard";
+  const topLevelCycles = cycles.filter((cycle) => (cycle.level_no ?? 1) === 1);
+  const topLevelScope = topLevelCycles.some((cycle) => cycle.is_active_scheme)
+    ? topLevelCycles.filter((cycle) => cycle.is_active_scheme)
+    : topLevelCycles;
+  const nowMs = Date.parse(nowIso);
+  const activeTopLevelCycle =
+    topLevelScope
+      .filter((cycle) => Date.parse(cycle.start_date) <= nowMs && nowMs < Date.parse(cycle.end_date))
+      .sort((a, b) => Date.parse(b.start_date) - Date.parse(a.start_date))[0] ??
+    topLevelScope
+      .filter((cycle) => Date.parse(cycle.start_date) > nowMs)
+      .sort((a, b) => Date.parse(a.start_date) - Date.parse(b.start_date))[0] ??
+    topLevelScope
+      .filter((cycle) => Date.parse(cycle.end_date) <= nowMs)
+      .sort((a, b) => Date.parse(b.end_date) - Date.parse(a.end_date))[0] ??
+    null;
   const phase1Items = SIDEBAR_ITEMS.filter(
-    (item) => item.section === "phase1" && permissions[item.id].read
+    (item) =>
+      item.section === "phase1" &&
+      permissions[item.id].read &&
+      item.id !== "strategic-directions" &&
+      item.id !== "initiatives" &&
+      item.id !== "annual-targets"
   );
   const phase0Items = SIDEBAR_ITEMS.filter(
     (item) => item.section === "phase0" && permissions[item.id].read
@@ -107,21 +129,22 @@ export function CycleSidebar({ cycles, branding, productName, permissions }: Cyc
           ))}
         </div>
         <div className="space-y-2">
-          {cycles.map((cycle) => {
-            const href = `/dashboard/cycles/${cycle.id}`;
-            const isActive = pathname === href;
-
-            return (
-              <Link key={cycle.id} href={href} className={cycleLinkClass(isActive)}>
-                <div className="truncate">{cycle.name}</div>
-                <div className="mt-1 text-xs opacity-80">{cycle.code}</div>
-              </Link>
-            );
-          })}
+          {activeTopLevelCycle ? (
+            (() => {
+              const href = `/dashboard/cycles/${activeTopLevelCycle.id}`;
+              const isActive = pathname === href;
+              return (
+                <Link href={href} className={cycleLinkClass(isActive)}>
+                  <div className="truncate">{activeTopLevelCycle.name}</div>
+                  <div className="mt-1 text-xs opacity-80">{activeTopLevelCycle.code}</div>
+                </Link>
+              );
+            })()
+          ) : null}
         </div>
-        {cycles.length === 0 ? (
+        {!activeTopLevelCycle ? (
           <p className="rounded-md border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500">
-            Noch keine Planungszyklen vorhanden.
+            Kein aktiver Hauptzyklus vorhanden.
           </p>
         ) : null}
       </div>

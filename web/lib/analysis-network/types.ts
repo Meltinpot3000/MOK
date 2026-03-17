@@ -1,7 +1,7 @@
 export type AnalysisEntryRecord = {
   id: string;
   organization_id: string;
-  planning_cycle_id: string;
+  cycle_instance_id: string;
   analysis_type: string;
   sub_type: string | null;
   title: string;

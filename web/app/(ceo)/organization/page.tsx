@@ -7,8 +7,8 @@ import { OrganizationUnitTree } from "@/components/ceo/OrganizationUnitTree";
 import {
   getOrganizationUnits,
   getOrganizationUnitTypes,
+  getActivePlanningCycle,
   getPhase0Context,
-  getPlanningCycles,
 } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -86,10 +86,10 @@ export default async function OrganizationPage() {
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
 
-  const [units, unitTypes, cycles] = await Promise.all([
+  const [units, unitTypes, activeCycle] = await Promise.all([
     getOrganizationUnits(context.organizationId),
     getOrganizationUnitTypes(),
-    getPlanningCycles(context.organizationId),
+    getActivePlanningCycle(context.organizationId),
   ]);
 
   async function createOrganizationUnit(formData: FormData) {
@@ -258,7 +258,7 @@ export default async function OrganizationPage() {
 
       <OrganizationGraphPanel
         organizationId={context.organizationId}
-        planningCycleId={cycles[0]?.id ?? null}
+        cycleInstanceId={activeCycle?.id ?? null}
       />
 
       <section className="brand-card p-6">

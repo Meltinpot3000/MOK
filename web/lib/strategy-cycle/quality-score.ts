@@ -1,8 +1,29 @@
+import { scoreEntryQualityWithLlm, type LlmUsage } from "@/lib/analysis-network/providers";
+type QualityScoringInput = {
+  id: string;
+  analysis_type: string;
+  sub_type: string | null;
+  title: string;
+  description: string | null;
+  impact_level: number | null;
+  uncertainty_level: number | null;
+};
+
 export type QualityScoreWeights = {
   impact: number;
   certainty: number;
   evidence: number;
   structure: number;
+};
+
+export type QualityScoreResult = {
+  score: number;
+  source: "rule" | "llm";
+  explanation: string | null;
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+  usage: LlmUsage | null;
 };
 
 export const DEFAULT_QUALITY_WEIGHTS: QualityScoreWeights = {
@@ -83,4 +104,53 @@ export function calculateQualityScore(
   );
 
   return Math.max(0, Math.min(100, score));
+}
+
+export async function calculateQualityScoreWithFallback(
+  entry: QualityScoringInput,
+  weights: QualityScoreWeights,
+  options?: { llmEnabled?: boolean; strategyReferenceText?: string | null; maxOutputTokens?: number }
+): Promise<QualityScoreResult> {
+  const fallbackScore = calculateQualityScore(
+    entry.impact_level,
+    entry.uncertainty_level,
+    entry.description,
+    entry.sub_type,
+    weights
+  );
+  if (!options?.llmEnabled) {
+    return {
+      score: fallbackScore,
+      source: "rule",
+      explanation: null,
+      provider: null,
+      model: null,
+      promptVersion: null,
+      usage: null,
+    };
+  }
+  const llmResponse = await scoreEntryQualityWithLlm(entry, {
+    strategyReferenceText: options?.strategyReferenceText,
+    maxOutputTokens: options?.maxOutputTokens,
+  });
+  if (!llmResponse.result) {
+    return {
+      score: fallbackScore,
+      source: "rule",
+      explanation: null,
+      provider: null,
+      model: null,
+      promptVersion: null,
+      usage: llmResponse.usage,
+    };
+  }
+  return {
+    score: llmResponse.result.qualityScore,
+    source: "llm",
+    explanation: llmResponse.result.explanation,
+    provider: llmResponse.result.provider,
+    model: llmResponse.result.model,
+    promptVersion: llmResponse.result.promptVersion,
+    usage: llmResponse.usage,
+  };
 }

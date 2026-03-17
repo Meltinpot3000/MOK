@@ -37,6 +37,7 @@ export default async function BrandingPage() {
     const qualityCertainty = Number(formData.get("quality_weight_certainty") ?? 25);
     const qualityEvidence = Number(formData.get("quality_weight_evidence") ?? 30);
     const qualityStructure = Number(formData.get("quality_weight_structure") ?? 10);
+
     const rawWeights = [
       Math.max(0, Number.isFinite(qualityImpact) ? qualityImpact : 35),
       Math.max(0, Number.isFinite(qualityCertainty) ? qualityCertainty : 25),

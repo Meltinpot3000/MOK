@@ -75,6 +75,33 @@ export function TerrainMap2D({
   const centerY = height / 2;
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const visibleLabelNodeIds = useMemo(() => {
+    if (!showLabels) return new Set<string>();
+    if (zoom < 0.75) return selectedNodeId ? new Set([selectedNodeId]) : new Set<string>();
+
+    const sorted = [...nodes].sort((a, b) => {
+      if (a.id === selectedNodeId) return -1;
+      if (b.id === selectedNodeId) return 1;
+      return b.impact - a.impact;
+    });
+    const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    const accepted = new Set<string>();
+    for (const node of sorted) {
+      const text = node.label.length > 36 ? `${node.label.slice(0, 36)}...` : node.label;
+      const x = (centerX + node.x + 10) * zoom + pan.x;
+      const y = (centerY + node.y + 4) * zoom + pan.y;
+      const width = Math.max(36, text.length * 6.2) * zoom;
+      const height = 12 * zoom;
+      const box = { x1: x, y1: y - height, x2: x + width, y2: y + 2 };
+      const overlaps = placed.some(
+        (p) => !(box.x2 < p.x1 || box.x1 > p.x2 || box.y2 < p.y1 || box.y1 > p.y2)
+      );
+      if (overlaps && node.id !== selectedNodeId) continue;
+      accepted.add(node.id);
+      placed.push(box);
+    }
+    return accepted;
+  }, [showLabels, zoom, selectedNodeId, nodes, centerX, centerY, pan.x, pan.y]);
   const renderedEdges = useMemo(
     () =>
       edges
@@ -172,11 +199,27 @@ export function TerrainMap2D({
         className="relative overflow-hidden rounded border border-zinc-200 bg-zinc-50"
         style={{ height }}
         onWheel={(event) => {
+          if (!event.shiftKey) {
+            return;
+          }
           event.preventDefault();
-          const delta = event.deltaY > 0 ? -0.08 : 0.08;
-          setZoom((prev) => Math.max(0.35, Math.min(2.4, prev + delta)));
+          event.stopPropagation();
+          if (!wrapperRef.current) return;
+          const rect = wrapperRef.current.getBoundingClientRect();
+          const mouseX = event.clientX - rect.left;
+          const mouseY = event.clientY - rect.top;
+          const prevZoom = zoom;
+          const nextZoom = Math.max(0.35, Math.min(2.4, prevZoom + (event.deltaY > 0 ? -0.08 : 0.08)));
+          const worldX = (mouseX - pan.x) / prevZoom;
+          const worldY = (mouseY - pan.y) / prevZoom;
+          setZoom(nextZoom);
+          setPan({
+            x: mouseX - worldX * nextZoom,
+            y: mouseY - worldY * nextZoom,
+          });
         }}
         onMouseDown={(event) => {
+          if (event.button !== 0) return;
           setDragStart({ x: event.clientX, y: event.clientY });
           setPanStart({ ...pan });
         }}
@@ -196,6 +239,18 @@ export function TerrainMap2D({
           setPanStart(null);
         }}
       >
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] text-zinc-700 shadow-sm">
+          <span className="font-semibold text-zinc-800">Legende:</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" />Umfeld</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-500" />Unternehmen</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" />Wettbewerb</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />SWOT</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Workshop</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-500" />Sonstige</span>
+        </div>
+        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700 shadow-sm">
+          Zoom: Shift + Scroll
+        </div>
         <svg width={width} height={height} className="absolute left-0 top-0">
           <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
             <line x1={centerX - 420} y1={centerY} x2={centerX + 420} y2={centerY} stroke="#cbd5e1" strokeWidth={1.5} />
@@ -285,7 +340,7 @@ export function TerrainMap2D({
             {nodes.map((node) => (
               <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y})`}>
                 <circle
-                  r={Math.max(5, 5 + node.impact * 1.9)}
+                  r={Math.max(3, (5 + node.impact * 1.9) * 0.5)}
                   fill={getNodeColor(node.analysisType)}
                   fillOpacity={0.9}
                   stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
@@ -316,7 +371,7 @@ export function TerrainMap2D({
                     transform="rotate(45)"
                   />
                 ) : null}
-                {showLabels ? (
+                {showLabels && visibleLabelNodeIds.has(node.id) ? (
                   <text x={10} y={4} fontSize={11} fill="#111827">
                     {node.label.length > 36 ? `${node.label.slice(0, 36)}...` : node.label}
                   </text>
@@ -327,7 +382,7 @@ export function TerrainMap2D({
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Strategic Terrain Map: X internal/external | Y operational/strategic | Zoom + Pan per Maus.
+        Strategic Terrain Map: X internal/external | Y operational/strategic | Zoom mit Shift + Wheel, Pan per Drag.
       </p>
     </div>
   );

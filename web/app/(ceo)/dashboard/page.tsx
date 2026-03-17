@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { KpiCards } from "@/components/ceo/KpiCards";
+import { CyclePulseOverview } from "@/components/ceo/CyclePulseOverview";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getAuthenticatedUserId,
@@ -61,6 +62,8 @@ export default async function CeoDashboardPage() {
           Zum Zyklus-Drilldown
         </Link>
       </header>
+
+      <CyclePulseOverview cycles={data.cycles} nowIso={new Date().toISOString()} />
 
       <KpiCards items={data.kpis} />
 

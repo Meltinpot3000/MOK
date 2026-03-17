@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/llm-health",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}

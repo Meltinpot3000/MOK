@@ -9,7 +9,7 @@ export type OrganizationUnitDimensionLinks = {
   }>;
 };
 
-export async function getIndustries(organizationId: string, planningCycleId: string) {
+export async function getIndustries(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .schema("app")
@@ -18,12 +18,12 @@ export async function getIndustries(organizationId: string, planningCycleId: str
       "id, name, description, market_characteristics, growth_rate, strategic_importance, status, updated_at"
     )
     .eq("organization_id", organizationId)
-    .eq("planning_cycle_id", planningCycleId)
+    .eq("cycle_instance_id", cycleInstanceId)
     .order("name", { ascending: true });
   return data ?? [];
 }
 
-export async function getBusinessModels(organizationId: string, planningCycleId: string) {
+export async function getBusinessModels(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .schema("app")
@@ -32,12 +32,12 @@ export async function getBusinessModels(organizationId: string, planningCycleId:
       "id, name, description, status, version_no, customer_segments, value_proposition, channels, customer_relationships, revenue_streams, key_resources, key_activities, key_partners, cost_structure, updated_at"
     )
     .eq("organization_id", organizationId)
-    .eq("planning_cycle_id", planningCycleId)
+    .eq("cycle_instance_id", cycleInstanceId)
     .order("name", { ascending: true });
   return data ?? [];
 }
 
-export async function getOperatingModels(organizationId: string, planningCycleId: string) {
+export async function getOperatingModels(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .schema("app")
@@ -46,12 +46,12 @@ export async function getOperatingModels(organizationId: string, planningCycleId
       "id, name, description, status, version_no, processes, organization_design, capabilities, technology, data_assets, governance, locations, partners, updated_at"
     )
     .eq("organization_id", organizationId)
-    .eq("planning_cycle_id", planningCycleId)
+    .eq("cycle_instance_id", cycleInstanceId)
     .order("name", { ascending: true });
   return data ?? [];
 }
 
-export async function getDimensionLinks(organizationId: string, planningCycleId: string) {
+export async function getDimensionLinks(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
   const [
     businessModelIndustries,
@@ -75,93 +75,93 @@ export async function getDimensionLinks(organizationId: string, planningCycleId:
       .from("business_model_industries")
       .select("business_model_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("operating_model_industries")
       .select("operating_model_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("operating_model_business_models")
       .select("operating_model_id, business_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_industries")
       .select("strategic_direction_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_business_models")
       .select("strategic_direction_id, business_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_operating_models")
       .select("strategic_direction_id, operating_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("annual_target_industries")
       .select("annual_target_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("annual_target_business_models")
       .select("annual_target_id, business_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("annual_target_operating_models")
       .select("annual_target_id, operating_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("initiative_industries")
       .select("initiative_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("initiative_business_models")
       .select("initiative_id, business_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("initiative_operating_models")
       .select("initiative_id, operating_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_directions")
       .select("id, title")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("title", { ascending: true }),
     supabase
       .schema("app")
       .from("annual_targets")
       .select("id, title")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("title", { ascending: true }),
     supabase
       .schema("app")
       .from("initiatives")
       .select("id, title")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("title", { ascending: true }),
   ]);
 
@@ -186,7 +186,7 @@ export async function getDimensionLinks(organizationId: string, planningCycleId:
 
 export async function getOrganizationUnitDimensionLinks(
   organizationId: string,
-  planningCycleId: string
+  cycleInstanceId: string
 ): Promise<OrganizationUnitDimensionLinks> {
   const supabase = await createSupabaseServerClient();
   const [industryLinksRes, businessModelLinksRes] = await Promise.all([
@@ -195,13 +195,13 @@ export async function getOrganizationUnitDimensionLinks(
       .from("organization_unit_industries")
       .select("organization_unit_id, industry_id, industry:industry_id(name)")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("organization_unit_business_models")
       .select("organization_unit_id, business_model_id, business_model:business_model_id(name)")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
   ]);
 
   const organizationUnitIndustries = (industryLinksRes.data ?? []).map((row) => {

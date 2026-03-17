@@ -69,6 +69,7 @@ export default async function CeoLayout({
         branding={branding}
         productName={productName}
         permissions={sidebarPermissions}
+        nowIso={new Date().toISOString()}
       />
       <main className="flex-1 p-6">{children}</main>
     </div>

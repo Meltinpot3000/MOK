@@ -4,16 +4,16 @@ import { getOrganizationGraphOverlays } from "@/lib/organization-graph/queries";
 
 type OrganizationGraphPanelProps = {
   organizationId: string;
-  planningCycleId: string | null;
+  cycleInstanceId: string | null;
 };
 
 export async function OrganizationGraphPanel({
   organizationId,
-  planningCycleId,
+  cycleInstanceId,
 }: OrganizationGraphPanelProps) {
   const [units, overlays] = await Promise.all([
     getOrganizationUnits(organizationId),
-    getOrganizationGraphOverlays(organizationId, planningCycleId),
+    getOrganizationGraphOverlays(organizationId, cycleInstanceId),
   ]);
 
   return (
@@ -32,7 +32,7 @@ export async function OrganizationGraphPanel({
           <span className="graph-legend graph-legend-bm">BM</span>
         </div>
       </div>
-      {!planningCycleId ? (
+      {!cycleInstanceId ? (
         <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           Kein aktiver Planungszyklus gefunden: Es werden aktuell nur Verantwortliche im Graphen
           angezeigt.

@@ -621,14 +621,7 @@ export function AnalysisVisualizationWorkspace({
         />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
-        <span className="font-medium text-zinc-700">Legende:</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-sky-500" />Umfeld</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" />Unternehmen</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Wettbewerb</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />SWOT</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />Workshop</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" />Sonstige</span>
-        <span className="ml-2 rounded border border-zinc-300 bg-white px-2 py-0.5">
+        <span className="rounded border border-zinc-300 bg-white px-2 py-0.5">
           Verbindungen sichtbar: {filteredEdges.length}
         </span>
         <span className="rounded border border-zinc-300 bg-white px-2 py-0.5">

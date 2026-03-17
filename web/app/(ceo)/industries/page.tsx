@@ -6,7 +6,7 @@ import {
 } from "@/app/(ceo)/strategy-dimensions/actions";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
-import { getOrganizationUnits, getPhase0Context, getPlanningCycles } from "@/lib/phase0/queries";
+import { getActivePlanningCycle, getOrganizationUnits, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getIndustries,
@@ -34,8 +34,7 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const cycles = await getPlanningCycles(context.organizationId);
-  const cycle = cycles[0];
+  const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
   const [industries, orgUnits, orgUnitLinks] = await Promise.all([
     getIndustries(context.organizationId, cycle.id),
@@ -159,7 +158,7 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
         </article>
       </section>
 
-      <OrganizationGraphPanel organizationId={context.organizationId} planningCycleId={cycle.id} />
+      <OrganizationGraphPanel organizationId={context.organizationId} cycleInstanceId={cycle.id} />
     </div>
   );
 }

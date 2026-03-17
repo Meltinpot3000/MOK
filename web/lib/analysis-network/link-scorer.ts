@@ -1,4 +1,7 @@
-import { scorePairWithLlm } from "@/lib/analysis-network/providers";
+import {
+  scorePairWithLlmDetailed,
+  type LlmUsage,
+} from "@/lib/analysis-network/providers";
 import { buildRuleCandidates } from "@/lib/analysis-network/rules";
 import type { AnalysisEntryRecord, LinkCandidate } from "@/lib/analysis-network/types";
 
@@ -88,8 +91,10 @@ export async function generateHybridLinkCandidates(
     maxLlmPairs?: number;
     minRuleConfidence?: number;
     fusionWeights?: FusionWeights;
+    strategyReferenceText?: string | null;
+    maxOutputTokens?: number;
   }
-): Promise<LinkCandidate[]> {
+): Promise<{ candidates: LinkCandidate[]; usageEvents: Array<{ provider: string; model: string; promptVersion: string; usage: LlmUsage }> }> {
   const maxLlmPairs = opts?.maxLlmPairs ?? 22;
   const minRuleConfidence = opts?.minRuleConfidence ?? 0.22;
   const fusionWeights = opts?.fusionWeights ?? { rule: 0.55, llm: 0.45 };
@@ -114,12 +119,25 @@ export async function generateHybridLinkCandidates(
     .slice(0, maxLlmPairs);
 
   const llmCandidatesByPair = new Map<string, LinkCandidate>();
+  const usageEvents: Array<{ provider: string; model: string; promptVersion: string; usage: LlmUsage }> = [];
   for (const candidate of topRulePairs) {
     const key = pairKey(candidate.sourceEntryId, candidate.targetEntryId);
     const pair = pairs[key];
     if (!pair) continue;
     const ruleTri = readRuleTri(candidate);
-    const llmResult = await scorePairWithLlm(pair.left, pair.right);
+    const llmResponse = await scorePairWithLlmDetailed(pair.left, pair.right, {
+      strategyReferenceText: opts?.strategyReferenceText,
+      maxOutputTokens: opts?.maxOutputTokens,
+    });
+    const llmResult = llmResponse.result;
+    if (llmResult && llmResponse.usage) {
+      usageEvents.push({
+        provider: llmResult.provider,
+        model: llmResult.model,
+        promptVersion: llmResult.promptVersion,
+        usage: llmResponse.usage,
+      });
+    }
     const mergedTri: TriScores = llmResult
       ? {
           proximityScore: clamp(ruleTri.proximityScore * wr + llmResult.proximityScore * wl, 0, 1),
@@ -189,5 +207,8 @@ export async function generateHybridLinkCandidates(
     merged.set(key, candidate);
   }
 
-  return [...merged.values()].sort((a, b) => b.confidence - a.confidence);
+  return {
+    candidates: [...merged.values()].sort((a, b) => b.confidence - a.confidence),
+    usageEvents,
+  };
 }

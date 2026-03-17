@@ -7,12 +7,12 @@ export type SidebarItemId =
   | "initiatives"
   | "okr-workspace"
   | "reviews"
-  | "strategy-matrix"
   | "organization"
   | "planning-cycles"
   | "invitations"
   | "branding"
-  | "access-control";
+  | "access-control"
+  | "llm-usage";
 
 export type SidebarSection = "phase1" | "phase0" | "cycles" | "admin";
 
@@ -34,6 +34,8 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard", section: "phase1" },
   { id: "key-figures", href: "/key-figures", label: "Kennzahlen", section: "phase1" },
   { id: "strategy-cycle", href: "/strategy-cycle", label: "Strategiezyklus", section: "phase1" },
+  { id: "reviews", href: "/reviews", label: "Reviewzyklus", section: "phase1" },
+  { id: "okr-workspace", href: "/okr-workspace", label: "OKR Zyklus", section: "phase1" },
   {
     id: "strategic-directions",
     href: "/strategic-directions",
@@ -47,11 +49,9 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
     label: "Initiativen / Programme",
     section: "phase1",
   },
-  { id: "okr-workspace", href: "/okr-workspace", label: "OKR-Arbeitsbereich", section: "phase1" },
-  { id: "reviews", href: "/reviews", label: "Review & Retrospektive", section: "phase1" },
-  { id: "strategy-matrix", href: "/strategy-matrix", label: "Strategie-Matrix", section: "phase1" },
   { id: "organization", href: "/organization", label: "Aufbauorganisation", section: "phase0" },
   { id: "access-control", href: "/access-control", label: "Rollenrechte", section: "admin" },
+  { id: "llm-usage", href: "/llm-usage", label: "Systemkonfiguration und -information", section: "admin" },
   { id: "branding", href: "/branding", label: "Branding", section: "admin" },
   { id: "invitations", href: "/invitations", label: "Einladungen", section: "admin" },
   { id: "planning-cycles", href: "/planning-cycles", label: "Neuer Planungszyklus", section: "cycles" },
@@ -85,6 +85,10 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
 
   if (pathname.startsWith("/dashboard/cycles/")) {
     return "dashboard";
+  }
+
+  if (pathname === "/strategy-matrix") {
+    return "strategy-cycle";
   }
 
   if (

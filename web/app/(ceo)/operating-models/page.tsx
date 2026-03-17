@@ -6,7 +6,7 @@ import {
 } from "@/app/(ceo)/strategy-dimensions/actions";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
-import { getPhase0Context, getPlanningCycles } from "@/lib/phase0/queries";
+import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getBusinessModels,
@@ -43,8 +43,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const cycles = await getPlanningCycles(context.organizationId);
-  const cycle = cycles[0];
+  const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
 
   const [models, industries, businessModels, links] = await Promise.all([
@@ -162,7 +161,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
         </article>
       </section>
 
-      <OrganizationGraphPanel organizationId={context.organizationId} planningCycleId={cycle.id} />
+      <OrganizationGraphPanel organizationId={context.organizationId} cycleInstanceId={cycle.id} />
     </div>
   );
 }

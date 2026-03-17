@@ -25,7 +25,7 @@ function ensureUnitOverlay(
 
 export async function getOrganizationGraphOverlays(
   organizationId: string,
-  planningCycleId: string | null
+  cycleInstanceId: string | null
 ): Promise<OrganizationGraphOverlayMap> {
   const supabase = await createSupabaseServerClient();
   const overlays: OrganizationGraphOverlayMap = {};
@@ -62,11 +62,11 @@ export async function getOrganizationGraphOverlays(
     }
   }
 
-  if (!planningCycleId) {
+  if (!cycleInstanceId) {
     return overlays;
   }
 
-  const dimensionLinks = await getOrganizationUnitDimensionLinks(organizationId, planningCycleId);
+  const dimensionLinks = await getOrganizationUnitDimensionLinks(organizationId, cycleInstanceId);
   for (const link of dimensionLinks.organizationUnitIndustries) {
     const bucket = ensureUnitOverlay(overlays, link.organization_unit_id);
     if (!bucket.industries.includes(link.industry_name)) {

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getPhase0Context, getPlanningCycles } from "@/lib/phase0/queries";
+import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -17,14 +17,14 @@ async function getWorkspaceContextOrRedirect(
     | "organization"
     | "strategic-directions"
     | "annual-targets"
+    | "reviews"
     | "initiatives"
 ): Promise<WorkspaceContext> {
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
   const access = await getSidebarAccessContext(itemId);
   if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
-  const cycles = await getPlanningCycles(context.organizationId);
-  const cycle = cycles[0];
+  const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
   return {
     organizationId: context.organizationId,
@@ -39,6 +39,8 @@ function done(path: string): never {
   revalidatePath("/operating-models");
   revalidatePath("/organization");
   revalidatePath("/responsibles");
+  revalidatePath("/annual-targets");
+  revalidatePath("/reviews");
   redirect(path);
 }
 
@@ -301,10 +303,10 @@ export async function linkStrategicDirectionToOperatingModel(formData: FormData)
 }
 
 export async function linkAnnualTargetToIndustry(formData: FormData) {
-  const context = await getWorkspaceContextOrRedirect("annual-targets");
+  const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const industryId = String(formData.get("industry_id") ?? "");
-  if (!annualTargetId || !industryId) done("/annual-targets?error=missing-link");
+  if (!annualTargetId || !industryId) done("/reviews?tab=annual-targets&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_industries").upsert(
     {
@@ -315,14 +317,14 @@ export async function linkAnnualTargetToIndustry(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,industry_id" }
   );
-  done("/annual-targets?success=linked");
+  done("/reviews?tab=annual-targets&success=linked");
 }
 
 export async function linkAnnualTargetToBusinessModel(formData: FormData) {
-  const context = await getWorkspaceContextOrRedirect("annual-targets");
+  const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const businessModelId = String(formData.get("business_model_id") ?? "");
-  if (!annualTargetId || !businessModelId) done("/annual-targets?error=missing-link");
+  if (!annualTargetId || !businessModelId) done("/reviews?tab=annual-targets&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_business_models").upsert(
     {
@@ -333,14 +335,14 @@ export async function linkAnnualTargetToBusinessModel(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,business_model_id" }
   );
-  done("/annual-targets?success=linked");
+  done("/reviews?tab=annual-targets&success=linked");
 }
 
 export async function linkAnnualTargetToOperatingModel(formData: FormData) {
-  const context = await getWorkspaceContextOrRedirect("annual-targets");
+  const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const operatingModelId = String(formData.get("operating_model_id") ?? "");
-  if (!annualTargetId || !operatingModelId) done("/annual-targets?error=missing-link");
+  if (!annualTargetId || !operatingModelId) done("/reviews?tab=annual-targets&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_operating_models").upsert(
     {
@@ -351,7 +353,7 @@ export async function linkAnnualTargetToOperatingModel(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,operating_model_id" }
   );
-  done("/annual-targets?success=linked");
+  done("/reviews?tab=annual-targets&success=linked");
 }
 
 export async function linkInitiativeToIndustry(formData: FormData) {

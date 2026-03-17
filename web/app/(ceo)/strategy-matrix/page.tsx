@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getPhase0Context, getPlanningCycles } from "@/lib/phase0/queries";
+import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   addComment,
@@ -26,9 +26,10 @@ type StrategyMatrixPageProps = {
 };
 
 export default async function StrategyMatrixPage({ searchParams }: StrategyMatrixPageProps) {
+  const strategyMatrixBaseHref = "/strategy-cycle?l1=corporate-strategy&l2=strategy-matrix";
   const resolvedSearchParams = await searchParams;
   const drawerDirectionId = resolvedSearchParams.drawer_direction_id ?? null;
-  const pageAccess = await getSidebarAccessContext("strategy-matrix");
+  const pageAccess = await getSidebarAccessContext("strategy-cycle");
   if (pageAccess.state === "unauthenticated") redirect("/login");
   if (pageAccess.state === "forbidden") redirect("/no-access");
   const canWrite = pageAccess.canWrite;
@@ -36,8 +37,7 @@ export default async function StrategyMatrixPage({ searchParams }: StrategyMatri
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
 
-  const cycles = await getPlanningCycles(context.organizationId);
-  const selectedCycle = cycles[0] ?? null;
+  const selectedCycle = await getActivePlanningCycle(context.organizationId);
   if (!selectedCycle) {
     return (
       <section className="brand-card p-6">
@@ -371,7 +371,7 @@ export default async function StrategyMatrixPage({ searchParams }: StrategyMatri
 
                         {additionalTargets.length > 0 ? (
                           <Link
-                            href={`/strategy-matrix?drawer_direction_id=${direction.id}`}
+                            href={`${strategyMatrixBaseHref}&drawer_direction_id=${direction.id}`}
                             className="inline-block rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700"
                           >
                             Weitere Targets ({additionalTargets.length}) im Drawer
@@ -393,7 +393,7 @@ export default async function StrategyMatrixPage({ searchParams }: StrategyMatri
             <h2 className="text-base font-semibold text-zinc-900">
               Targets Detail: {drawerDirection.title}
             </h2>
-            <Link href="/strategy-matrix" className="rounded border border-zinc-300 px-2 py-1 text-xs">
+            <Link href={strategyMatrixBaseHref} className="rounded border border-zinc-300 px-2 py-1 text-xs">
               Schliessen
             </Link>
           </div>

@@ -146,3 +146,40 @@ export async function getResponsibles(organizationId: string): Promise<Responsib
 export async function getPlanningCycles(organizationId: string) {
   return getPlanningCyclesForOrganization(organizationId);
 }
+
+export async function getActivePlanningCycle(
+  organizationId: string,
+  preferredCycleId?: string | null
+) {
+  const cycles = await getPlanningCyclesForOrganization(organizationId);
+  if (cycles.length === 0) return null;
+  if (preferredCycleId) {
+    const preferred = cycles.find((cycle) => cycle.id === preferredCycleId);
+    if (preferred) return preferred;
+  }
+
+  const scope = cycles.some((cycle) => cycle.is_active_scheme)
+    ? cycles.filter((cycle) => cycle.is_active_scheme)
+    : cycles;
+
+  const nowMs = Date.now();
+  const byDeepestThenLatestStart = (a: (typeof scope)[number], b: (typeof scope)[number]) =>
+    (b.level_no ?? 1) - (a.level_no ?? 1) || Date.parse(b.start_date) - Date.parse(a.start_date);
+  const byEarliestStartThenDeepest = (a: (typeof scope)[number], b: (typeof scope)[number]) =>
+    Date.parse(a.start_date) - Date.parse(b.start_date) || (b.level_no ?? 1) - (a.level_no ?? 1);
+  const byLatestEndThenDeepest = (a: (typeof scope)[number], b: (typeof scope)[number]) =>
+    Date.parse(b.end_date) - Date.parse(a.end_date) || (b.level_no ?? 1) - (a.level_no ?? 1);
+
+  const current = scope
+    .filter((cycle) => Date.parse(cycle.start_date) <= nowMs && nowMs < Date.parse(cycle.end_date))
+    .sort(byDeepestThenLatestStart);
+  if (current.length > 0) return current[0];
+
+  const upcoming = scope.filter((cycle) => Date.parse(cycle.start_date) > nowMs).sort(byEarliestStartThenDeepest);
+  if (upcoming.length > 0) return upcoming[0];
+
+  const past = scope.filter((cycle) => Date.parse(cycle.end_date) <= nowMs).sort(byLatestEndThenDeepest);
+  if (past.length > 0) return past[0];
+
+  return scope[0] ?? null;
+}

@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   const { data: sourceEntry } = await supabase
     .schema("app")
     .from("analysis_entries")
-    .select("planning_cycle_id")
+    .select("cycle_instance_id")
     .eq("id", sourceAnalysisItemId)
     .eq("organization_id", access.access.organizationId)
     .single();
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     .upsert(
       {
         organization_id: access.access.organizationId,
-        planning_cycle_id: sourceEntry.planning_cycle_id,
+        cycle_instance_id: sourceEntry.cycle_instance_id,
         source_analysis_item_id: sourceAnalysisItemId,
         target_analysis_item_id: targetAnalysisItemId,
         link_type: linkType,
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
           restored_by_membership_id: access.access.membershipId ?? null,
         },
       },
-      { onConflict: "planning_cycle_id,source_analysis_item_id,target_analysis_item_id,link_type" }
+      { onConflict: "cycle_instance_id,source_analysis_item_id,target_analysis_item_id,link_type" }
     )
     .select("id, source_analysis_item_id, target_analysis_item_id, link_type, strength, confidence, comment, created_at, updated_at, metadata")
     .single();

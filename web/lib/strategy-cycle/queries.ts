@@ -12,7 +12,7 @@ export type AnalysisEntry = {
   updated_at: string;
 };
 
-export async function getStrategyCycleWorkspaceData(organizationId: string, planningCycleId: string) {
+export async function getStrategyCycleWorkspaceData(organizationId: string, cycleInstanceId: string) {
   const supabase = await createSupabaseServerClient();
   const [
     entriesResult,
@@ -30,6 +30,10 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
     businessModelsResult,
     operatingModelsResult,
     strategicDirectionsResult,
+    annualTargetsResult,
+    initiativesResult,
+    initiativeTargetLinksResult,
+    challengeCandidatesResult,
   ] = await Promise.all([
     supabase
       .schema("app")
@@ -38,14 +42,14 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
         "id, analysis_type, sub_type, title, description, impact_level, uncertainty_level, created_at, updated_at"
       )
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("updated_at", { ascending: false }),
     supabase
       .schema("app")
       .from("strategic_challenges")
       .select("id, title, source_analysis_entry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("created_at", { ascending: false }),
     supabase
       .schema("app")
@@ -54,7 +58,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
         "id, source_analysis_item_id, target_analysis_item_id, link_type, strength, confidence, comment, origin, provider, model, prompt_version, status, created_at, metadata"
       )
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .eq("status", "draft")
       .order("confidence", { ascending: false })
       .limit(120),
@@ -63,7 +67,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
       .from("analysis_item_link")
       .select("id, source_analysis_item_id, target_analysis_item_id, link_type, strength, confidence, comment, created_at, updated_at, metadata")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("confidence", { ascending: false })
       .limit(200),
     supabase
@@ -71,7 +75,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
       .from("analysis_clusters")
       .select("id, label, summary, cluster_score, method, created_at")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("cluster_score", { ascending: false })
       .limit(30),
     supabase
@@ -79,13 +83,13 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
       .from("analysis_cluster_members")
       .select("cluster_id, entry_id, membership_strength")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("analysis_gap_findings")
       .select("id, dimension, gap_type, severity, recommendation, status, created_at")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId)
+      .eq("cycle_instance_id", cycleInstanceId)
       .order("severity", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(40),
@@ -94,49 +98,77 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
       .from("challenge_direction_links")
       .select("strategic_challenge_id, strategic_direction_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_industries")
       .select("strategic_direction_id, industry_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_business_models")
       .select("strategic_direction_id, business_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_operating_models")
       .select("strategic_direction_id, operating_model_id")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("industries")
       .select("id, name")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("business_models")
       .select("id, name")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("operating_models")
       .select("id, name")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_directions")
       .select("id, title")
       .eq("organization_id", organizationId)
-      .eq("planning_cycle_id", planningCycleId),
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("annual_targets")
+      .select("id, title, strategic_direction_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("initiatives")
+      .select("id, title, status, priority")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .order("priority", { ascending: true })
+      .order("created_at", { ascending: false }),
+    supabase
+      .schema("app")
+      .from("initiative_target_links")
+      .select("id, initiative_id, annual_target_id, contribution_level, comment")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("analysis_challenge_candidates")
+      .select("id, title, description, priority, source_type, source_ref, status")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .order("priority", { ascending: false })
+      .order("created_at", { ascending: false }),
   ]);
 
   const promotedBySourceId = new Map<string, string>();
@@ -250,6 +282,43 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
     entryDirectionIdsByEntryId.set(entry.id, [...directionIds]);
   }
 
+  const challenges = promotedResult.data ?? [];
+  const strategicDirections = strategicDirectionsResult.data ?? [];
+  const annualTargets = annualTargetsResult.data ?? [];
+  const initiatives = initiativesResult.data ?? [];
+  const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
+  const initiativeTargetLinks = initiativeTargetLinksResult.data ?? [];
+
+  const challengeIdsByDirectionId = new Map<string, Set<string>>();
+  for (const link of challengeDirectionLinks) {
+    const current = challengeIdsByDirectionId.get(link.strategic_direction_id) ?? new Set<string>();
+    current.add(link.strategic_challenge_id);
+    challengeIdsByDirectionId.set(link.strategic_direction_id, current);
+  }
+
+  const targetIdsByInitiativeId = new Map<string, Set<string>>();
+  for (const link of initiativeTargetLinks) {
+    const current = targetIdsByInitiativeId.get(link.initiative_id) ?? new Set<string>();
+    current.add(link.annual_target_id);
+    targetIdsByInitiativeId.set(link.initiative_id, current);
+  }
+
+  const directionCoverageById = new Map<string, { linked: number; total: number; percent: number }>();
+  const totalChallenges = challenges.length;
+  for (const direction of strategicDirections) {
+    const linked = challengeIdsByDirectionId.get(direction.id)?.size ?? 0;
+    const percent = totalChallenges === 0 ? 0 : Math.round((linked / totalChallenges) * 100);
+    directionCoverageById.set(direction.id, { linked, total: totalChallenges, percent });
+  }
+
+  const initiativeCoverageById = new Map<string, { linked: number; total: number; percent: number }>();
+  const totalTargets = annualTargets.length;
+  for (const initiative of initiatives) {
+    const linked = targetIdsByInitiativeId.get(initiative.id)?.size ?? 0;
+    const percent = totalTargets === 0 ? 0 : Math.round((linked / totalTargets) * 100);
+    initiativeCoverageById.set(initiative.id, { linked, total: totalTargets, percent });
+  }
+
   return {
     entries,
     grouped,
@@ -262,7 +331,15 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, plan
     gapFindings: gapFindingsResult.data ?? [],
     entryTitleById,
     existingChallenges: promotedResult.data ?? [],
-    strategicDirections: strategicDirectionsResult.data ?? [],
+    strategicDirections,
+    challenges,
+    annualTargets,
+    initiatives,
+    challengeDirectionLinks,
+    initiativeTargetLinks,
+    challengeCandidates: challengeCandidatesResult.data ?? [],
+    directionCoverageById,
+    initiativeCoverageById,
     entryDimensionsByEntryId,
     entryDirectionIdsByEntryId,
     availableDimensions: {
