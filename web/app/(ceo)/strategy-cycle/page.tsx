@@ -70,7 +70,6 @@ type StrategyCycleViewPageProps = {
 
 const STRATEGY_CYCLE_TABS = [
   "summary",
-  "strategy-matrix",
   "environment",
   "company",
   "competitor",
@@ -85,7 +84,7 @@ const L1_TABS = [
   "strategic-directions",
   "pips",
 ] as const;
-const STRATEGIC_DESIGN_TABS = ["objectives", "challenges", "design"] as const;
+const STRATEGIC_DESIGN_TABS = ["objectives", "challenges", "design", "strategy-matrix"] as const;
 
 const ANALYSIS_TYPES = [
   "environment",
@@ -635,7 +634,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   ? "Objectives"
                   : tab === "challenges"
                     ? "Strategische Herausforderungen"
-                    : "Strategisches Design";
+                    : tab === "strategy-matrix"
+                      ? "Strategie-Matrix"
+                      : "Strategische Stossrichtungen";
               return (
                 <a
                   key={tab}
@@ -917,13 +918,13 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             ) : null}
             {activeStrategicTab === "design" ? (
             <div className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Strategisches Design erfassen</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtung erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.</p>
               <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 <input
                   name="title"
                   required
-                  placeholder="Neues strategisches Design"
+                  placeholder="Neue strategische Stossrichtung"
                   className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
                 />
                 <textarea
@@ -1019,7 +1020,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 </label>
                 <div className="md:col-span-2">
                   <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Design speichern
+                    Stossrichtung speichern
                   </button>
                 </div>
               </form>
@@ -1241,10 +1242,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
           {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Strategisches Design</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Strategische Stossrichtungen</h3>
             <div className="mt-4 space-y-3">
               {(workspace.strategicDirections ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Designs vorhanden.</p>
+                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
               ) : (
                 (workspace.strategicDirections ?? []).map((direction) => {
                   const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
@@ -1571,7 +1572,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-zinc-900">Mapping-Matrix Herausforderungen x Strategisches Design</h3>
+              <h3 className="text-base font-semibold text-zinc-900">Mapping-Matrix Herausforderungen x Strategische Stossrichtungen</h3>
               <div className="flex items-center gap-2 text-xs">
                 <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-900">hoch</span>
                 <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">mittel</span>
@@ -1583,7 +1584,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </p>
             {(workspace.challenges ?? []).length === 0 || (workspace.strategicDirections ?? []).length === 0 ? (
               <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
-                Fuer die Matrix werden mindestens eine Herausforderung und ein strategisches Design benoetigt.
+                Fuer die Matrix werden mindestens eine Herausforderung und eine strategische Stossrichtung benoetigt.
               </p>
             ) : (
               <div className="mt-4 overflow-x-auto">
@@ -1726,6 +1727,13 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             )}
           </article>
           ) : null}
+          {activeStrategicTab === "strategy-matrix" ? (
+          <StrategyMatrixPage
+            searchParams={Promise.resolve({
+              drawer_direction_id: resolvedSearchParams.drawer_direction_id,
+            })}
+          />
+          ) : null}
         </section>
       ) : null}
 
@@ -1745,7 +1753,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 defaultValue=""
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
               >
-                <option value="">Strategisches Design waehlen</option>
+                <option value="">Strategische Stossrichtung waehlen</option>
                 {(workspace.strategicDirections ?? []).map((direction) => (
                   <option key={direction.id} value={direction.id}>
                     {direction.title}
@@ -1970,7 +1978,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <h3 className="text-sm font-semibold text-zinc-900">Top 5 Directions</h3>
             <div className="mt-2 space-y-2">
               {topDirections.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch kein strategisches Design vorhanden.</p>
+                <p className="text-xs text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
               ) : (
                 topDirections.map((direction) => (
                   <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
@@ -2344,7 +2352,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               {getTabTitle(activeTab)} - Eintraege ({filteredEntries.length}/{entries.length})
             </h2>
             <a
-              href="/strategy-cycle?l1=corporate-strategy&l2=strategy-matrix"
+              href="/strategy-cycle?l1=strategic-directions&l2=strategy-matrix"
               className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700"
             >
               Zur Strategie-Matrix
@@ -2606,13 +2614,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       </section>
       ) : null}
 
-      {activeL1 === "corporate-strategy" && activeTab === "strategy-matrix" ? (
-        <StrategyMatrixPage
-          searchParams={Promise.resolve({
-            drawer_direction_id: resolvedSearchParams.drawer_direction_id,
-          })}
-        />
-      ) : null}
     </div>
   );
 }
