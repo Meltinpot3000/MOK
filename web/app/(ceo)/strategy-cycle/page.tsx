@@ -4,6 +4,7 @@ import {
   attachFindingToChallenge,
   createStrategicChallengeInCycle,
   createPipInitiativeInCycle,
+  createStrategyProgramInCycle,
   createAnalysisEntry,
   createStrategicDirectionInCycle,
   backfillEntryQuality,
@@ -11,6 +12,9 @@ import {
   deleteAnalysisEntry,
   generateLinkDrafts,
   linkDirectionToChallengePredecessor,
+  linkDirectionToClusterInCycle,
+  linkDirectionToGapInCycle,
+  linkDirectionToObjectiveInCycle,
   linkInitiativeToTargetPredecessor,
   promoteChallengeCandidate,
   promoteClusterToStrategicChallenge,
@@ -20,6 +24,7 @@ import {
   recomputeGaps,
   rejectLinkDraft,
   saveStrategyReferenceText,
+  saveClusterObjectiveRelation,
   linkStrategicChallengeToBusinessModelInCycle,
   linkStrategicChallengeToIndustryInCycle,
   linkStrategicDirectionToBusinessModelInCycle,
@@ -29,6 +34,9 @@ import {
   unlinkStrategicDirectionFromBusinessModelInCycle,
   unlinkStrategicDirectionFromIndustryInCycle,
   unlinkDirectionChallengePredecessor,
+  unlinkDirectionFromClusterInCycle,
+  unlinkDirectionFromGapInCycle,
+  unlinkDirectionFromObjectiveInCycle,
   unlinkInitiativeTargetPredecessor,
   updateStrategicChallengeAssessment,
   updateStrategicDirectionAssessment,
@@ -216,6 +224,8 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
   if (success === "initiative-created")
     return { type: "success", text: "PIP wurde erstellt." };
+  if (success === "program-created")
+    return { type: "success", text: "Programm wurde erstellt." };
   if (success === "assessment-updated")
     return { type: "success", text: "Relevanz- und Risiko-Bewertung wurde gespeichert." };
   if (success === "linked")
@@ -234,12 +244,6 @@ function getPriorityZone(impact: number | null, uncertainty: number | null) {
   if (i >= 4 && u >= 3) return "Strategische Wette (Unsicherheit managen)";
   if (i <= 2 && u >= 4) return "Beobachten / Monitoring";
   return "Weiter analysieren / priorisieren";
-}
-
-function getRiskPriorityScore(relevance: number | null | undefined, risk: number | null | undefined) {
-  const normalizedRelevance = Number.isFinite(Number(relevance)) ? Math.max(1, Math.min(5, Number(relevance))) : 3;
-  const normalizedRisk = Number.isFinite(Number(risk)) ? Math.max(1, Math.min(5, Number(risk))) : 3;
-  return normalizedRelevance * normalizedRisk;
 }
 
 function getMatrixCellClass(score: number) {
@@ -370,6 +374,36 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     current.push(link.strategic_challenge_id);
     challengeIdsByDirection.set(link.strategic_direction_id, current);
   }
+  const clusterIdsByDirection = new Map<string, string[]>();
+  for (const link of workspace.directionClusterLinks ?? []) {
+    const current = clusterIdsByDirection.get(link.strategic_direction_id) ?? [];
+    current.push(link.cluster_id);
+    clusterIdsByDirection.set(link.strategic_direction_id, current);
+  }
+  const objectiveIdsByDirection = new Map<string, string[]>();
+  for (const link of workspace.directionObjectiveLinks ?? []) {
+    const current = objectiveIdsByDirection.get(link.strategic_direction_id) ?? [];
+    current.push(link.objective_id);
+    objectiveIdsByDirection.set(link.strategic_direction_id, current);
+  }
+  const gapRelationIdsByDirection = new Map<string, string[]>();
+  for (const link of workspace.directionGapLinks ?? []) {
+    const current = gapRelationIdsByDirection.get(link.strategic_direction_id) ?? [];
+    current.push(link.cluster_objective_relation_id);
+    gapRelationIdsByDirection.set(link.strategic_direction_id, current);
+  }
+  const objectiveById = new Map(
+    (workspace.objectives ?? []).map((objective) => [objective.id, objective] as const)
+  );
+  const clusterById = new Map((workspace.clusters ?? []).map((cluster) => [cluster.id, cluster] as const));
+  const relationByClusterObjective = new Map<string, { id: string; relationStrength: number; gapScore: number }>();
+  for (const relation of workspace.clusterObjectiveRelations ?? []) {
+    relationByClusterObjective.set(`${relation.cluster_id}:${relation.objective_id}`, {
+      id: relation.id,
+      relationStrength: Number(relation.relation_strength ?? 0),
+      gapScore: Number(relation.gap_score ?? 0),
+    });
+  }
   const directionCountByChallengeId = new Map<string, number>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
     directionCountByChallengeId.set(
@@ -406,6 +440,33 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     const current = targetIdsByInitiative.get(link.initiative_id) ?? [];
     current.push(link.annual_target_id);
     targetIdsByInitiative.set(link.initiative_id, current);
+  }
+  const programsByDirectionId = new Map<string, Array<{ id: string; title: string }>>();
+  for (const program of workspace.programs ?? []) {
+    const directionId = String(program.strategic_direction_id ?? "");
+    if (!directionId) continue;
+    const current = programsByDirectionId.get(directionId) ?? [];
+    current.push({ id: program.id, title: program.title });
+    programsByDirectionId.set(directionId, current);
+  }
+  const directionById = new Map(
+    (workspace.strategicDirections ?? []).map((direction) => [direction.id, direction] as const)
+  );
+  const topChallenges = [...(workspace.challenges ?? [])]
+    .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
+    .slice(0, 5);
+  const topDirections = [...(workspace.strategicDirections ?? [])]
+    .sort((a, b) => Number(b.direction_score ?? 0) - Number(a.direction_score ?? 0))
+    .slice(0, 5);
+  const uncoveredChallenges = (workspace.challenges ?? []).filter(
+    (challenge) => (directionCountByChallengeId.get(challenge.id) ?? 0) === 0
+  );
+  const challengeHeatmapCounts = new Map<string, number>();
+  for (const challenge of workspace.challenges ?? []) {
+    const impact = Math.max(1, Math.min(5, Number(challenge.impact_score ?? 3)));
+    const urgency = Math.max(1, Math.min(5, Number(challenge.urgency_score ?? 3)));
+    const key = `${impact}:${urgency}`;
+    challengeHeatmapCounts.set(key, (challengeHeatmapCounts.get(key) ?? 0) + 1);
   }
   const entryDimensionsRecord = Object.fromEntries(workspace.entryDimensionsByEntryId.entries());
   const entryDirectionIdsRecord = Object.fromEntries(workspace.entryDirectionIdsByEntryId.entries());
@@ -449,15 +510,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     contributionWeightByPair.set(key, weight);
   }
   const strategicMatrixRows = (workspace.challenges ?? []).map((challenge) => {
-    const challengeRiskPriority = getRiskPriorityScore(challenge.relevance_level ?? 3, challenge.risk_level ?? 3);
+    const challengeScore = Number(challenge.challenge_score ?? 0);
     const challengeIndustrySet = new Set(challengeIndustryIdsById.get(challenge.id) ?? []);
     const challengeBusinessModelSet = new Set(challengeBusinessModelIdsById.get(challenge.id) ?? []);
     const cells = (workspace.strategicDirections ?? []).map((direction) => {
       const pairKey = `${challenge.id}:${direction.id}`;
       const isLinked = contributionWeightByPair.has(pairKey);
       const contributionWeight = contributionWeightByPair.get(pairKey) ?? 0;
-      const directionRiskPriority = getRiskPriorityScore(direction.relevance_level ?? 3, direction.risk_level ?? 3);
-      const normalizedRisk = Math.min(1, (challengeRiskPriority + directionRiskPriority) / 50);
+      const directionScore = Number(direction.direction_score ?? 0);
+      const normalizedScore = Math.min(1, (challengeScore + directionScore) / 10);
       const directionIndustrySet = new Set(directionIndustryIdsById.get(direction.id) ?? []);
       const directionBusinessModelSet = new Set(directionBusinessModelIdsById.get(direction.id) ?? []);
       const industryOverlap = [...challengeIndustrySet].filter((id) => directionIndustrySet.has(id)).length;
@@ -470,7 +531,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
         0,
         Math.min(
           100,
-          Math.round((isLinked ? 45 : 10) + normalizedRisk * 35 + overlapRatio * 20 + contributionWeight * 4)
+          Math.round((isLinked ? 40 : 8) + normalizedScore * 40 + overlapRatio * 12 + contributionWeight * 4)
         )
       );
       return {
@@ -638,6 +699,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   placeholder="Neue strategische Herausforderung"
                   className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
                 />
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="Problemstatement und Kontext"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
                 <label className="text-xs text-zinc-600">
                   Prioritaet
                   <input
@@ -650,10 +717,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </label>
                 <label className="text-xs text-zinc-600">
-                  Relevanz
+                  Impact
                   <input
                     type="number"
-                    name="relevance_level"
+                    name="impact_score"
                     defaultValue={3}
                     min={1}
                     max={5}
@@ -661,10 +728,32 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </label>
                 <label className="text-xs text-zinc-600">
-                  Risiko
+                  Urgency
                   <input
                     type="number"
-                    name="risk_level"
+                    name="urgency_score"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Scope
+                  <input
+                    type="number"
+                    name="scope_score"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Root Cause
+                  <input
+                    type="number"
+                    name="root_cause_score"
                     defaultValue={3}
                     min={1}
                     max={5}
@@ -688,6 +777,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   placeholder="Neue strategische Stossrichtung"
                   className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
                 />
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="Loesungslogik (solution-agnostic)"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
                 <label className="text-xs text-zinc-600">
                   Prioritaet
                   <input
@@ -700,10 +795,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </label>
                 <label className="text-xs text-zinc-600">
-                  Relevanz
+                  Strategic Value
                   <input
                     type="number"
-                    name="relevance_level"
+                    name="strategic_value_score"
                     defaultValue={3}
                     min={1}
                     max={5}
@@ -711,15 +806,67 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </label>
                 <label className="text-xs text-zinc-600">
-                  Risiko
+                  Capability Fit
                   <input
                     type="number"
-                    name="risk_level"
+                    name="capability_fit_score"
                     defaultValue={3}
                     min={1}
                     max={5}
                     className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                   />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Feasibility
+                  <input
+                    type="number"
+                    name="feasibility_score"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Risk
+                  <input
+                    type="number"
+                    name="risk_score"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Cluster (Pflicht fuer active)
+                  <select
+                    name="cluster_id"
+                    defaultValue=""
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="">Optional waehlen</option>
+                    {(workspace.clusters ?? []).map((cluster) => (
+                      <option key={cluster.id} value={cluster.id}>
+                        {cluster.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Objective (Pflicht fuer active)
+                  <select
+                    name="objective_id"
+                    defaultValue=""
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="">Optional waehlen</option>
+                    {(workspace.objectives ?? []).map((objective) => (
+                      <option key={objective.id} value={objective.id}>
+                        {objective.title}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <div className="md:col-span-2">
                   <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
@@ -737,8 +884,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Herausforderungen vorhanden.</p>
               ) : (
                 (workspace.challenges ?? []).map((challenge) => {
-                  const relevanceLevel = challenge.relevance_level ?? 3;
-                  const riskLevel = challenge.risk_level ?? 3;
+                  const impactScore = challenge.impact_score ?? 3;
+                  const urgencyScore = challenge.urgency_score ?? 3;
+                  const scopeScore = challenge.scope_score ?? 3;
+                  const rootCauseScore = challenge.root_cause_score ?? 3;
                   const challengeIndustryIds = new Set(challengeIndustryIdsById.get(challenge.id) ?? []);
                   const challengeBusinessModelIds = new Set(challengeBusinessModelIdsById.get(challenge.id) ?? []);
                   return (
@@ -750,29 +899,62 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                             Verknuepfte Stossrichtungen: {directionCountByChallengeId.get(challenge.id) ?? 0}
                           </span>
                           <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                            Risiko-Prioritaet: {getRiskPriorityScore(relevanceLevel, riskLevel)}
+                            Challenge Score: {Number(challenge.challenge_score ?? 0).toFixed(2)}
                           </span>
                         </div>
                       </div>
+                      {challenge.description ? (
+                        <p className="text-xs text-zinc-600">{challenge.description}</p>
+                      ) : null}
                       <form action={updateStrategicChallengeAssessment} className="flex flex-wrap items-end gap-2">
                         <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
                         <label className="text-xs text-zinc-600">
-                          Relevanz
+                          Beschreibung
+                          <input
+                            name="description"
+                            defaultValue={challenge.description ?? ""}
+                            className="ml-2 w-72 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Impact
                           <input
                             type="number"
-                            name="relevance_level"
-                            defaultValue={relevanceLevel}
+                            name="impact_score"
+                            defaultValue={impactScore}
                             min={1}
                             max={5}
                             className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
                           />
                         </label>
                         <label className="text-xs text-zinc-600">
-                          Risiko
+                          Urgency
                           <input
                             type="number"
-                            name="risk_level"
-                            defaultValue={riskLevel}
+                            name="urgency_score"
+                            defaultValue={urgencyScore}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Scope
+                          <input
+                            type="number"
+                            name="scope_score"
+                            defaultValue={scopeScore}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Root
+                          <input
+                            type="number"
+                            name="root_cause_score"
+                            defaultValue={rootCauseScore}
                             min={1}
                             max={5}
                             className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
@@ -860,6 +1042,47 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               )}
             </div>
           </article>
+          <article className="brand-card p-6">
+            <h3 className="text-base font-semibold text-zinc-900">Heatmap (Impact x Urgency)</h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              Hohe Werte oben rechts markieren prioritär zu adressierende Herausforderungen.
+            </p>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-[520px] border-collapse">
+                <thead>
+                  <tr>
+                    <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">Impact \\ Urgency</th>
+                    {[1, 2, 3, 4, 5].map((urgency) => (
+                      <th key={`u-${urgency}`} className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
+                        {urgency}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[5, 4, 3, 2, 1].map((impact) => (
+                    <tr key={`i-${impact}`}>
+                      <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">{impact}</th>
+                      {[1, 2, 3, 4, 5].map((urgency) => {
+                        const count = challengeHeatmapCounts.get(`${impact}:${urgency}`) ?? 0;
+                        const tone =
+                          impact >= 4 && urgency >= 4
+                            ? "bg-emerald-100 text-emerald-900"
+                            : impact >= 3 && urgency >= 3
+                              ? "bg-amber-100 text-amber-900"
+                              : "bg-white text-zinc-700";
+                        return (
+                          <td key={`${impact}-${urgency}`} className="border border-zinc-200 p-0">
+                            <div className={`px-2 py-2 text-center text-xs ${tone}`}>{count}</div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
 
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Predecessors aus Corporate Strategy</h3>
@@ -869,10 +1092,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               ) : (
                 (workspace.strategicDirections ?? []).map((direction) => {
                   const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
+                  const linkedClusterIds = new Set(clusterIdsByDirection.get(direction.id) ?? []);
+                  const linkedObjectiveIds = new Set(objectiveIdsByDirection.get(direction.id) ?? []);
+                  const linkedGapRelationIds = new Set(gapRelationIdsByDirection.get(direction.id) ?? []);
                   const directionIndustryIds = new Set(directionIndustryIdsById.get(direction.id) ?? []);
                   const directionBusinessModelIds = new Set(directionBusinessModelIdsById.get(direction.id) ?? []);
-                  const relevanceLevel = direction.relevance_level ?? 3;
-                  const riskLevel = direction.risk_level ?? 3;
+                  const strategicValueScore = direction.strategic_value_score ?? 3;
+                  const capabilityFitScore = direction.capability_fit_score ?? 3;
+                  const feasibilityScore = direction.feasibility_score ?? 3;
+                  const riskScore = direction.risk_level ?? 3;
                   const coverage = workspace.directionCoverageById.get(direction.id) ?? {
                     linked: 0,
                     total: workspace.challenges.length,
@@ -887,29 +1115,62 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                             Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
                           </span>
                           <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                            Risiko-Prioritaet: {getRiskPriorityScore(relevanceLevel, riskLevel)}
+                            Direction Score: {Number(direction.direction_score ?? 0).toFixed(2)}
                           </span>
                         </div>
                       </div>
+                      {direction.description ? (
+                        <p className="text-xs text-zinc-600">{direction.description}</p>
+                      ) : null}
                       <form action={updateStrategicDirectionAssessment} className="flex flex-wrap items-end gap-2">
                         <input type="hidden" name="strategic_direction_id" value={direction.id} />
                         <label className="text-xs text-zinc-600">
-                          Relevanz
+                          Beschreibung
+                          <input
+                            name="description"
+                            defaultValue={direction.description ?? ""}
+                            className="ml-2 w-72 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Strategic
                           <input
                             type="number"
-                            name="relevance_level"
-                            defaultValue={relevanceLevel}
+                            name="strategic_value_score"
+                            defaultValue={strategicValueScore}
                             min={1}
                             max={5}
                             className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
                           />
                         </label>
                         <label className="text-xs text-zinc-600">
-                          Risiko
+                          Capability
                           <input
                             type="number"
-                            name="risk_level"
-                            defaultValue={riskLevel}
+                            name="capability_fit_score"
+                            defaultValue={capabilityFitScore}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Feasibility
+                          <input
+                            type="number"
+                            name="feasibility_score"
+                            defaultValue={feasibilityScore}
+                            min={1}
+                            max={5}
+                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="text-xs text-zinc-600">
+                          Risk
+                          <input
+                            type="number"
+                            name="risk_score"
+                            defaultValue={riskScore}
                             min={1}
                             max={5}
                             className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
@@ -935,6 +1196,66 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         </select>
                         <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
                           Verknuepfen
+                        </button>
+                      </form>
+                      <form action={linkDirectionToClusterInCycle} className="flex flex-wrap gap-2">
+                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                        <select
+                          name="cluster_id"
+                          defaultValue=""
+                          className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Cluster verknuepfen</option>
+                          {(workspace.clusters ?? []).map((cluster) => (
+                            <option key={cluster.id} value={cluster.id}>
+                              {cluster.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Cluster verknuepfen
+                        </button>
+                      </form>
+                      <form action={linkDirectionToObjectiveInCycle} className="flex flex-wrap gap-2">
+                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                        <select
+                          name="objective_id"
+                          defaultValue=""
+                          className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Objective verknuepfen</option>
+                          {(workspace.objectives ?? []).map((objective) => (
+                            <option key={objective.id} value={objective.id}>
+                              {objective.title}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Objective verknuepfen
+                        </button>
+                      </form>
+                      <form action={linkDirectionToGapInCycle} className="flex flex-wrap gap-2">
+                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                        <select
+                          name="cluster_objective_relation_id"
+                          defaultValue=""
+                          className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Gap verknuepfen</option>
+                          {(workspace.clusterObjectiveRelations ?? []).map((relation) => {
+                            const cluster = clusterById.get(relation.cluster_id);
+                            const objective = objectiveById.get(relation.objective_id);
+                            return (
+                              <option key={relation.id} value={relation.id}>
+                                {(cluster?.label ?? relation.cluster_id)}
+                                {" -> "}
+                                {(objective?.title ?? relation.objective_id)} ({Number(relation.gap_score ?? 0).toFixed(2)})
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Gap verknuepfen
                         </button>
                       </form>
                       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
@@ -992,6 +1313,64 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                               </button>
                             </form>
                           ))}
+                        {(workspace.clusters ?? [])
+                          .filter((cluster) => linkedClusterIds.has(cluster.id))
+                          .map((cluster) => (
+                            <form
+                              key={`${direction.id}-cluster-${cluster.id}`}
+                              action={unlinkDirectionFromClusterInCycle}
+                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                              <input type="hidden" name="cluster_id" value={cluster.id} />
+                              <span>Cluster: {cluster.label}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                        {(workspace.objectives ?? [])
+                          .filter((objective) => linkedObjectiveIds.has(objective.id))
+                          .map((objective) => (
+                            <form
+                              key={`${direction.id}-objective-${objective.id}`}
+                              action={unlinkDirectionFromObjectiveInCycle}
+                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                              <input type="hidden" name="objective_id" value={objective.id} />
+                              <span>Objective: {objective.title}</span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                        {(workspace.clusterObjectiveRelations ?? [])
+                          .filter((relation) => linkedGapRelationIds.has(relation.id))
+                          .map((relation) => (
+                            <form
+                              key={`${direction.id}-gap-${relation.id}`}
+                              action={unlinkDirectionFromGapInCycle}
+                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
+                            >
+                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
+                              <input type="hidden" name="cluster_objective_relation_id" value={relation.id} />
+                              <span>
+                                Gap {Number(relation.gap_score ?? 0).toFixed(2)}
+                              </span>
+                              <button type="submit" disabled={!canWrite} className="text-red-700">
+                                x
+                              </button>
+                            </form>
+                          ))}
+                        {(programsByDirectionId.get(direction.id) ?? []).map((program) => (
+                          <span
+                            key={`${direction.id}-program-${program.id}`}
+                            className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-800"
+                          >
+                            Programm: {program.title}
+                          </span>
+                        ))}
                         {(workspace.availableDimensions.industries ?? [])
                           .filter((industry) => directionIndustryIds.has(industry.id))
                           .map((industry) => (
@@ -1042,7 +1421,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             </div>
             <p className="mt-1 text-xs text-zinc-600">
-              Score kombiniert Link-Status, Relevanz/Risiko und Ueberschneidungen bei Industrie/Geschaeftsmodell.
+              Score kombiniert Link-Status, Challenge-/Direction-Score und Ueberschneidungen bei Industrie/Geschaeftsmodell.
             </p>
             {(workspace.challenges ?? []).length === 0 || (workspace.strategicDirections ?? []).length === 0 ? (
               <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
@@ -1089,20 +1468,182 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             )}
           </article>
+          <article className="brand-card p-6">
+            <h3 className="text-base font-semibold text-zinc-900">Gap View (Cluster x Objectives)</h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              Gap Score = Durchschnitt Challenge Score im Cluster x Objective Importance x Relation Strength.
+            </p>
+            <form action={saveClusterObjectiveRelation} className="mt-3 flex flex-wrap items-end gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+              <select
+                name="cluster_id"
+                defaultValue=""
+                className="min-w-[240px] rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="">Cluster waehlen</option>
+                {(workspace.clusters ?? []).map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="objective_id"
+                defaultValue=""
+                className="min-w-[260px] rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="">Objective waehlen</option>
+                {(workspace.objectives ?? []).map((objective) => (
+                  <option key={objective.id} value={objective.id}>
+                    {objective.title}
+                  </option>
+                ))}
+              </select>
+              <label className="text-xs text-zinc-600">
+                Relation
+                <input
+                  type="number"
+                  min={0}
+                  max={3}
+                  name="relation_strength"
+                  defaultValue={1}
+                  className="ml-2 w-16 rounded border border-zinc-300 bg-white px-2 py-1 text-xs"
+                />
+              </label>
+              <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
+                Gap speichern
+              </button>
+            </form>
+            {(workspace.clusters ?? []).length === 0 || (workspace.objectives ?? []).length === 0 ? (
+              <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
+                Fuer die Gap Matrix werden mindestens ein Cluster und ein Objective benoetigt.
+              </p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-[860px] border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs font-semibold text-zinc-700">
+                        Cluster
+                      </th>
+                      {(workspace.objectives ?? []).map((objective) => (
+                        <th key={objective.id} className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700">
+                          {objective.title}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(workspace.clusters ?? []).map((cluster) => (
+                      <tr key={cluster.id}>
+                        <td className="sticky left-0 z-10 border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-800">
+                          {cluster.label}
+                        </td>
+                        {(workspace.objectives ?? []).map((objective) => {
+                          const relation = relationByClusterObjective.get(`${cluster.id}:${objective.id}`);
+                          const gapScore = Number(relation?.gapScore ?? 0);
+                          const scoreClass =
+                            gapScore >= 30
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                              : gapScore >= 15
+                                ? "border-amber-300 bg-amber-50 text-amber-900"
+                                : "border-zinc-300 bg-white text-zinc-700";
+                          return (
+                            <td key={`${cluster.id}-${objective.id}`} className="border border-zinc-200 p-1 align-top">
+                              <div className={`rounded border px-2 py-1 text-xs ${scoreClass}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>Gap {gapScore.toFixed(2)}</span>
+                                  <span>R {relation?.relationStrength ?? 0}</span>
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </article>
         </section>
       ) : null}
 
       {activeL1 === "pips" ? (
         <section className="space-y-4">
           <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">PIPs</h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Programs</h2>
+            <form action={createStrategyProgramInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+              <input
+                name="title"
+                required
+                placeholder="Neues Programm"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+              />
+              <select
+                name="strategic_direction_id"
+                defaultValue=""
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              >
+                <option value="">Stossrichtung waehlen</option>
+                {(workspace.strategicDirections ?? []).map((direction) => (
+                  <option key={direction.id} value={direction.id}>
+                    {direction.title}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="timeline"
+                placeholder="Timeline (z.B. 2026-2028)"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <input
+                type="number"
+                name="budget"
+                defaultValue={0}
+                min={0}
+                step={1000}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <textarea
+                name="description"
+                rows={2}
+                placeholder="Programm-Beschreibung"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-4"
+              />
+              <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                Programm speichern
+              </button>
+            </form>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(workspace.programs ?? []).map((program) => (
+                <span key={program.id} className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                  {program.title} {program.strategic_direction_id ? `(${directionById.get(program.strategic_direction_id)?.title ?? "n/a"})` : ""}
+                </span>
+              ))}
+            </div>
+          </article>
+
+          <article className="brand-card p-6">
+            <h3 className="text-base font-semibold text-zinc-900">Initiativen (Execution View)</h3>
             <form action={createPipInitiativeInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
               <input
                 name="title"
                 required
-                placeholder="Neue Initiative / Program"
+                placeholder="Neue Initiative"
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
               />
+              <select
+                name="program_id"
+                defaultValue=""
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              >
+                <option value="">Programm waehlen</option>
+                {(workspace.programs ?? []).map((program) => (
+                  <option key={program.id} value={program.id}>
+                    {program.title}
+                  </option>
+                ))}
+              </select>
               <input
                 type="number"
                 name="priority"
@@ -1111,14 +1652,20 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 max={5}
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
               />
+              <input
+                name="linked_okrs"
+                placeholder="Linked OKRs (CSV)"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+              />
+              <input
+                name="deliverables"
+                placeholder="Deliverables (CSV)"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+              />
               <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                Speichern
+                Initiative speichern
               </button>
             </form>
-          </article>
-
-          <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Vorgaenger aus strategischen Stossrichtungen</h3>
             <div className="mt-4 space-y-3">
               {(workspace.initiatives ?? []).length === 0 ? (
                 <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine PIPs vorhanden.</p>
@@ -1134,10 +1681,21 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     <div key={initiative.id} className="brand-surface space-y-2 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-semibold text-zinc-900">{initiative.title}</p>
-                        <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                          Coverage {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                            Coverage {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
+                          </span>
+                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                            Programm: {workspace.programs.find((program) => program.id === initiative.program_id)?.title ?? "n/a"}
+                          </span>
+                        </div>
                       </div>
+                      {Array.isArray(initiative.linked_okrs) && initiative.linked_okrs.length > 0 ? (
+                        <p className="text-xs text-zinc-600">OKRs: {initiative.linked_okrs.join(", ")}</p>
+                      ) : null}
+                      {Array.isArray(initiative.deliverables) && initiative.deliverables.length > 0 ? (
+                        <p className="text-xs text-zinc-600">Deliverables: {initiative.deliverables.join(", ")}</p>
+                      ) : null}
                       <form action={linkInitiativeToTargetPredecessor} className="flex flex-wrap gap-2">
                         <input type="hidden" name="initiative_id" value={initiative.id} />
                         <select
@@ -1231,6 +1789,55 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <article className="brand-card p-4">
+            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Challenges</h3>
+            <div className="mt-2 space-y-2">
+              {topChallenges.length === 0 ? (
+                <p className="text-xs text-zinc-600">Noch keine Challenges vorhanden.</p>
+              ) : (
+                topChallenges.map((challenge) => (
+                  <div key={challenge.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
+                    <p className="font-medium text-zinc-900">{challenge.title}</p>
+                    <p className="text-zinc-600">Score {Number(challenge.challenge_score ?? 0).toFixed(2)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+          <article className="brand-card p-4">
+            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Directions</h3>
+            <div className="mt-2 space-y-2">
+              {topDirections.length === 0 ? (
+                <p className="text-xs text-zinc-600">Noch keine Stossrichtungen vorhanden.</p>
+              ) : (
+                topDirections.map((direction) => (
+                  <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
+                    <p className="font-medium text-zinc-900">{direction.title}</p>
+                    <p className="text-zinc-600">Score {Number(direction.direction_score ?? 0).toFixed(2)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+          <article className="brand-card p-4">
+            <h3 className="text-sm font-semibold text-zinc-900">Coverage: Unadressierte Challenges</h3>
+            <div className="mt-2 space-y-2">
+              {uncoveredChallenges.length === 0 ? (
+                <p className="text-xs text-emerald-700">Alle Challenges sind mindestens einer Direction zugeordnet.</p>
+              ) : (
+                uncoveredChallenges.slice(0, 8).map((challenge) => (
+                  <div key={challenge.id} className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                    {challenge.title}
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+        </section>
+      ) : null}
+
+      {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
         <section className="brand-card p-6 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-zinc-900">Empfehlungen fuer Herausforderungen</h2>
@@ -1296,6 +1903,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           <h2 className="text-lg font-semibold text-zinc-900">Analyse-Netzwerk</h2>
           <form action={generateLinkDrafts}>
             <input type="hidden" name="analysis_type" value={actionTab} />
+            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
               Link-Entwuerfe generieren
             </button>
@@ -1306,7 +1914,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </form>
           <form action={recomputeClusters}>
             <input type="hidden" name="analysis_type" value={actionTab} />
-            <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
+            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
               Cluster neu berechnen
             </button>
             <AiWaitOverlay
@@ -1316,7 +1925,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </form>
           <form action={recomputeGaps}>
             <input type="hidden" name="analysis_type" value={actionTab} />
-            <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
+            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
               Luecken neu berechnen
             </button>
             <AiWaitOverlay
@@ -1326,10 +1936,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </form>
           <form action={recomputeGraphLayout}>
             <input type="hidden" name="analysis_type" value={actionTab} />
+            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button
               type="submit"
               disabled={!canWrite || hasRunningGraphLayout}
-              className="brand-btn-secondary px-3 py-1.5 text-xs"
+              className="brand-btn px-3 py-1.5 text-xs"
             >
               Graph-Layout jetzt neu berechnen
             </button>
@@ -1340,10 +1951,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </form>
           <form action={backfillEntryQuality}>
             <input type="hidden" name="analysis_type" value={actionTab} />
+            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button
               type="submit"
               disabled={!canWrite || hasRunningQualityBackfill}
-              className="brand-btn-secondary px-3 py-1.5 text-xs"
+              className="brand-btn px-3 py-1.5 text-xs"
             >
               Bestehende Punkte neu bewerten
             </button>
@@ -1389,7 +2001,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       <form action={approveLinkDraft}>
                         <input type="hidden" name="analysis_type" value={actionTab} />
                         <input type="hidden" name="draft_id" value={draft.id} />
-                        <button type="submit" disabled={!canWrite} className="brand-btn px-2 py-1 text-xs">
+                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
                           Accept
                         </button>
                       </form>
@@ -1399,7 +2011,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         <button
                           type="submit"
                           disabled={!canWrite}
-                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-700"
+                          className="brand-btn px-3 py-1.5 text-xs"
                         >
                           Reject
                         </button>
@@ -1438,7 +2050,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       <form action={promoteClusterToStrategicChallenge} className="mt-2">
                         <input type="hidden" name="analysis_type" value={actionTab} />
                         <input type="hidden" name="cluster_id" value={cluster.id} />
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1 text-xs">
+                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
                           Als Challenge uebernehmen
                         </button>
                       </form>

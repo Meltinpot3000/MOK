@@ -8,6 +8,7 @@ import {
   getCeoAccessContext,
   getCeoDashboardData,
 } from "@/lib/ceo/queries";
+import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
 
 export default async function CeoDashboardPage() {
   const pageAccess = await getSidebarAccessContext("dashboard");
@@ -50,6 +51,15 @@ export default async function CeoDashboardPage() {
       .replace(/\s*\(L\d+\).*$/i, "")
       .replace(/\s*-\s*\d{3}(?:-\d{3})+$/i, "")
       .trim();
+  const strategyWorkspace = await getStrategyCycleWorkspaceData(access.organizationId, data.selectedCycle.id);
+  const topChallenges = [...(strategyWorkspace.challenges ?? [])]
+    .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
+    .slice(0, 5);
+  const topDirections = [...(strategyWorkspace.strategicDirections ?? [])]
+    .sort((a, b) => Number(b.direction_score ?? 0) - Number(a.direction_score ?? 0))
+    .slice(0, 5);
+  const linkedChallengeIds = new Set((strategyWorkspace.challengeDirectionLinks ?? []).map((link) => link.strategic_challenge_id));
+  const uncoveredChallenges = (strategyWorkspace.challenges ?? []).filter((challenge) => !linkedChallengeIds.has(challenge.id));
 
   return (
     <div className="space-y-6">
@@ -110,6 +120,44 @@ export default async function CeoDashboardPage() {
               Keine abgeleiteten Funktionsziele im gewählten Zyklus.
             </p>
           ) : null}
+        </article>
+      </section>
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <article className="brand-card p-6">
+          <h2 className="text-lg font-semibold text-zinc-900">Top 5 Challenges</h2>
+          <ul className="mt-3 space-y-2">
+            {topChallenges.map((challenge) => (
+              <li key={challenge.id} className="brand-surface p-2">
+                <p className="text-sm font-medium text-zinc-900">{challenge.title}</p>
+                <p className="text-xs text-zinc-600">Score {Number(challenge.challenge_score ?? 0).toFixed(2)}</p>
+              </li>
+            ))}
+          </ul>
+        </article>
+        <article className="brand-card p-6">
+          <h2 className="text-lg font-semibold text-zinc-900">Top 5 Directions</h2>
+          <ul className="mt-3 space-y-2">
+            {topDirections.map((direction) => (
+              <li key={direction.id} className="brand-surface p-2">
+                <p className="text-sm font-medium text-zinc-900">{direction.title}</p>
+                <p className="text-xs text-zinc-600">Score {Number(direction.direction_score ?? 0).toFixed(2)}</p>
+              </li>
+            ))}
+          </ul>
+        </article>
+        <article className="brand-card p-6">
+          <h2 className="text-lg font-semibold text-zinc-900">Unadressierte Challenges</h2>
+          <ul className="mt-3 space-y-2">
+            {uncoveredChallenges.length === 0 ? (
+              <li className="text-sm text-emerald-700">Alle Challenges sind adressiert.</li>
+            ) : (
+              uncoveredChallenges.slice(0, 5).map((challenge) => (
+                <li key={challenge.id} className="brand-surface p-2 text-sm text-zinc-800">
+                  {challenge.title}
+                </li>
+              ))
+            )}
+          </ul>
         </article>
       </section>
     </div>

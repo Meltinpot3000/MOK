@@ -8,12 +8,73 @@ import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type LlmUsagePageProps = {
-  searchParams: Promise<{ days?: string; success?: string; error?: string }>;
+  searchParams: Promise<{ days?: string; success?: string; error?: string; log_file?: string }>;
 };
 
 function toNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+type StorageLogFile = {
+  name: string;
+  path: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+async function listTenantAiLogFiles(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  bucket: string,
+  prefix: string,
+  maxFiles = 250
+): Promise<{ files: StorageLogFile[]; error: string | null }> {
+  const files: StorageLogFile[] = [];
+  const queue: string[] = [prefix];
+  const maxDepth = 8;
+
+  while (queue.length > 0 && files.length < maxFiles) {
+    const currentPrefix = queue.shift();
+    if (!currentPrefix) continue;
+    const depth = currentPrefix.split("/").length - prefix.split("/").length;
+    if (depth > maxDepth) continue;
+
+    const { data, error } = await supabase.storage.from(bucket).list(currentPrefix, {
+      limit: 100,
+      offset: 0,
+      sortBy: { column: "updated_at", order: "desc" },
+    });
+    if (error) {
+      return { files, error: error.message ?? "storage_list_failed" };
+    }
+
+    for (const item of data ?? []) {
+      const itemName = item.name ?? "";
+      if (!itemName) continue;
+      const isFolder = item.id == null;
+      const itemPath = `${currentPrefix}/${itemName}`;
+      if (isFolder) {
+        queue.push(itemPath);
+        continue;
+      }
+      if (!itemName.toLowerCase().endsWith(".json")) continue;
+      files.push({
+        name: itemName,
+        path: itemPath,
+        createdAt: item.created_at ?? null,
+        updatedAt: item.updated_at ?? null,
+      });
+      if (files.length >= maxFiles) break;
+    }
+  }
+
+  files.sort((a, b) => {
+    const at = Date.parse(a.updatedAt ?? a.createdAt ?? "1970-01-01T00:00:00.000Z");
+    const bt = Date.parse(b.updatedAt ?? b.createdAt ?? "1970-01-01T00:00:00.000Z");
+    return bt - at;
+  });
+
+  return { files, error: null };
 }
 
 export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) {
@@ -49,6 +110,34 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
     .select("branding_config")
     .eq("organization_id", pageAccess.access.organizationId)
     .maybeSingle();
+
+  const aiLogBucket = (process.env.AI_LOG_BUCKET ?? "tenant-ai-logs").trim();
+  const aiLogPrefix = `organizations/${pageAccess.access.organizationId}/ai-logs`;
+  const selectedLogFileRaw = typeof params.log_file === "string" ? params.log_file : "";
+  const selectedLogFile = selectedLogFileRaw.startsWith(`${aiLogPrefix}/`) ? selectedLogFileRaw : "";
+  const { files: aiLogFiles, error: aiLogListError } = await listTenantAiLogFiles(
+    supabase,
+    aiLogBucket,
+    aiLogPrefix
+  );
+
+  let selectedLogPretty = "";
+  let selectedLogError: string | null = null;
+  let selectedLogBytes: number | null = null;
+  if (selectedLogFile) {
+    const { data, error } = await supabase.storage.from(aiLogBucket).download(selectedLogFile);
+    if (error) {
+      selectedLogError = error.message ?? "storage_download_failed";
+    } else if (data) {
+      const raw = await data.text();
+      selectedLogBytes = raw.length;
+      try {
+        selectedLogPretty = JSON.stringify(JSON.parse(raw), null, 2);
+      } catch {
+        selectedLogPretty = raw;
+      }
+    }
+  }
 
   const events = rows ?? [];
   const modelHealth = healthRows ?? [];
@@ -404,6 +493,60 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
             })
           )}
         </div>
+      </section>
+
+      <section className="brand-card p-6">
+        <h2 className="text-lg font-semibold text-zinc-900">AI Logdatei-Reader</h2>
+        <p className="mt-1 text-xs text-zinc-500">
+          Logdateien aus Supabase Storage (`{aiLogBucket}`) im Tenant-Pfad `{aiLogPrefix}`.
+        </p>
+        <form className="mt-3 flex flex-wrap items-end gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <input type="hidden" name="days" value={String(days)} />
+          <label className="min-w-[280px] flex-1">
+            <span className="mb-1 block text-xs text-zinc-600">JSON-Datei auswaehlen</span>
+            <select
+              name="log_file"
+              defaultValue={selectedLogFile}
+              className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+            >
+              <option value="">Bitte Datei waehlen</option>
+              {aiLogFiles.map((file) => (
+                <option key={file.path} value={file.path}>
+                  {file.path}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="brand-btn px-4 py-2 text-sm">
+            JSON laden
+          </button>
+        </form>
+        {aiLogListError ? (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Konnte Logdateien nicht laden: {aiLogListError}
+          </p>
+        ) : null}
+        {!aiLogListError && aiLogFiles.length === 0 ? (
+          <p className="mt-3 text-sm text-zinc-600">Keine JSON-Logdateien im Tenant-Pfad gefunden.</p>
+        ) : null}
+        {selectedLogFile ? (
+          <div className="mt-3 space-y-2">
+            <div className="brand-surface p-3 text-xs text-zinc-700">
+              <p className="font-medium text-zinc-900">Ausgewaehlte Datei</p>
+              <p className="mt-1 break-all">{selectedLogFile}</p>
+              {selectedLogBytes != null ? <p className="mt-1">Groesse: {selectedLogBytes.toLocaleString("de-CH")} Zeichen</p> : null}
+            </div>
+            {selectedLogError ? (
+              <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                Konnte Datei nicht lesen: {selectedLogError}
+              </p>
+            ) : (
+              <pre className="max-h-[560px] overflow-auto rounded-md border border-zinc-200 bg-zinc-950 p-3 text-xs text-zinc-100">
+                {selectedLogPretty || "Datei ist leer."}
+              </pre>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <section className="brand-card p-6">

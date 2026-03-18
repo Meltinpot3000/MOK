@@ -73,13 +73,25 @@ export async function computeEntryEmbedding(entry: Pick<
   AnalysisEntryRecord,
   "title" | "analysis_type" | "sub_type" | "description"
 >): Promise<{
+  attempted: boolean;
   embedding: number[] | null;
   model: string;
   version: string;
+  httpStatus: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
 }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return { embedding: null, model: EMBEDDING_MODEL, version: EMBEDDING_VERSION };
+    return {
+      attempted: false,
+      embedding: null,
+      model: EMBEDDING_MODEL,
+      version: EMBEDDING_VERSION,
+      httpStatus: null,
+      errorCode: "MISSING_API_KEY",
+      errorMessage: "GEMINI_API_KEY ist nicht gesetzt.",
+    };
   }
   const text = buildEntryEmbeddingText(entry);
   const response = await fetchWithTimeout(
@@ -94,7 +106,40 @@ export async function computeEntryEmbedding(entry: Pick<
     }
   ).catch(() => null);
   if (!response?.ok) {
-    return { embedding: null, model: EMBEDDING_MODEL, version: EMBEDDING_VERSION };
+    let errorCode = "EMBEDDING_HTTP_ERROR";
+    let errorMessage = "Embedding Request fehlgeschlagen.";
+    if (!response) {
+      errorCode = "NETWORK_OR_TIMEOUT";
+      errorMessage = "Netzwerkfehler oder Timeout bei Embedding-Request.";
+    } else {
+      const body = (await response.json().catch(() => null)) as
+        | { error?: { status?: unknown; message?: unknown; code?: unknown } }
+        | null;
+      const status = body?.error?.status;
+      const code = body?.error?.code;
+      const message = body?.error?.message;
+      errorCode =
+        typeof status === "string"
+          ? status
+          : typeof code === "number"
+            ? String(code)
+            : typeof code === "string"
+              ? code
+              : `HTTP_${response.status}`;
+      errorMessage =
+        typeof message === "string" && message.trim().length > 0
+          ? message.slice(0, 500)
+          : `Embedding Endpoint antwortete mit HTTP ${response.status}.`;
+    }
+    return {
+      attempted: true,
+      embedding: null,
+      model: EMBEDDING_MODEL,
+      version: EMBEDDING_VERSION,
+      httpStatus: response?.status ?? null,
+      errorCode,
+      errorMessage,
+    };
   }
   const json = (await response.json().catch(() => null)) as
     | { embedding?: { values?: number[] } }
@@ -103,8 +148,12 @@ export async function computeEntryEmbedding(entry: Pick<
     ? json?.embedding?.values.filter((value) => Number.isFinite(value))
     : [];
   return {
+    attempted: true,
     embedding: values.length > 0 ? values : null,
     model: EMBEDDING_MODEL,
     version: EMBEDDING_VERSION,
+    httpStatus: response.status,
+    errorCode: values.length > 0 ? null : "EMPTY_EMBEDDING",
+    errorMessage: values.length > 0 ? null : "Embedding-Service lieferte keinen Vektor.",
   };
 }

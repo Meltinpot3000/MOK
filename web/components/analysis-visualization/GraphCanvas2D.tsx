@@ -244,8 +244,39 @@ export function GraphCanvas2D({
                         rx={3}
                         fill="#ffffff"
                         fillOpacity={0.78}
+                        style={{ cursor: "pointer" }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedNodeId(node.id);
+                          setSelectedEdgeId(null);
+                          if (wrapperRef.current && onSelectNode) {
+                            const rect = wrapperRef.current.getBoundingClientRect();
+                            onSelectNode(node.id, {
+                              x: event.clientX - rect.left,
+                              y: event.clientY - rect.top,
+                            });
+                          }
+                        }}
                       />
-                      <text x={placement.textX} y={placement.textY} fontSize={11} fill="#111827">
+                      <text
+                        x={placement.textX}
+                        y={placement.textY}
+                        fontSize={11}
+                        fill="#111827"
+                        style={{ cursor: "pointer" }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedNodeId(node.id);
+                          setSelectedEdgeId(null);
+                          if (wrapperRef.current && onSelectNode) {
+                            const rect = wrapperRef.current.getBoundingClientRect();
+                            onSelectNode(node.id, {
+                              x: event.clientX - rect.left,
+                              y: event.clientY - rect.top,
+                            });
+                          }
+                        }}
+                      >
                         {placement.text}
                       </text>
                     </>

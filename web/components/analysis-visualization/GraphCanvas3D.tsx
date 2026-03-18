@@ -193,7 +193,25 @@ export function GraphCanvas3D({
                 }}
               />
               {showLabels ? (
-                <text x={8} y={3} fontSize={10} fill="#111827">
+                <text
+                  x={8}
+                  y={3}
+                  fontSize={10}
+                  fill="#111827"
+                  style={{ cursor: "pointer" }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedNodeId(node.id);
+                    setSelectedEdgeId(null);
+                    if (containerRef.current && onSelectNode) {
+                      const rect = containerRef.current.getBoundingClientRect();
+                      onSelectNode(node.id, {
+                        x: event.clientX - rect.left,
+                        y: event.clientY - rect.top,
+                      });
+                    }
+                  }}
+                >
                   {node.label.length > 28 ? `${node.label.slice(0, 28)}...` : node.label}
                 </text>
               ) : null}

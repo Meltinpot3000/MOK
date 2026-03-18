@@ -11,8 +11,18 @@ import {
   readAnalysisNetworkLlmPolicy,
   resolveLlmMaxOutputTokens,
 } from "@/lib/analysis-network/policy";
+import { writeAiStorageActionLog } from "@/lib/analysis-network/storage-log";
 
 type SupabaseClientLike = {
+  storage: {
+    from: (bucket: string) => {
+      upload: (
+        path: string,
+        body: Blob,
+        options?: { upsert?: boolean; cacheControl?: string; contentType?: string }
+      ) => Promise<{ error?: { message?: string | null } | null }>;
+    };
+  };
   schema: (name: string) => {
     from: (table: string) => {
       upsert: (values: unknown, options?: { onConflict?: string }) => unknown;
@@ -288,4 +298,63 @@ export async function runAndPersistModelHealthChecks(input: {
     .schema("app")
     .from("llm_model_health_status")
     .upsert(rows, { onConflict: "organization_id,feature" });
+
+  const providerModels = rows.map((row) => ({
+    provider: row.provider,
+    model: row.model,
+    promptVersion: "health-check-v1",
+  }));
+  const status =
+    rows.some((row) => row.status === "down")
+      ? "failed"
+      : rows.some((row) => row.status === "degraded")
+        ? "partial"
+        : "success";
+  const healthErrors = rows
+    .filter((row) => row.error_code || row.error_message)
+    .map((row) => ({
+      feature: row.feature,
+      code: row.error_code,
+      message: row.error_message,
+      httpStatus: row.http_status,
+    }));
+  const result = await writeAiStorageActionLog({
+    supabase: input.supabase,
+    organizationId: input.organizationId,
+    cycleInstanceId: null,
+    feature: "model_health_checks",
+    action: "run_health_checks",
+    triggerType: input.trigger,
+    status,
+    startedAt: checkedAtIso,
+    finishedAt: new Date().toISOString(),
+    providerModels,
+    counts: {
+      totalChecks: rows.length,
+      healthy: rows.filter((row) => row.status === "healthy").length,
+      degraded: rows.filter((row) => row.status === "degraded").length,
+      down: rows.filter((row) => row.status === "down").length,
+    },
+    items: rows.map((row) => ({
+      feature: row.feature,
+      provider: row.provider,
+      model: row.model,
+      status: row.status,
+      fallbackMode: row.fallback_mode,
+      latencyMs: row.latency_ms,
+      httpStatus: row.http_status,
+    })),
+    errors: healthErrors,
+    metadata: {
+      trigger: input.trigger,
+      checkedAt: checkedAtIso,
+    },
+  });
+  if (!result.ok) {
+    console.warn("[ai-storage-log] health-check log write failed", {
+      organizationId: input.organizationId,
+      trigger: input.trigger,
+      error: result.error,
+    });
+  }
 }

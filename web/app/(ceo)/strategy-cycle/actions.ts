@@ -23,6 +23,7 @@ import {
   toVectorLiteral,
 } from "@/lib/analysis-network/embeddings";
 import { recordLlmUsageEvents } from "@/lib/analysis-network/usage";
+import { writeAiStorageActionLog, type AiStorageProviderModel } from "@/lib/analysis-network/storage-log";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
@@ -33,6 +34,12 @@ import {
   buildStrategyReferenceText,
   readStrategyReferenceFieldsFromBrandingConfig,
 } from "@/lib/strategy-cycle/strategy-reference";
+import {
+  clampScore1to5,
+  computeChallengeScore,
+  computeDirectionScore,
+  computeGapScore,
+} from "@/lib/strategy-cycle/scoring";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type WorkspaceContext = {
@@ -68,6 +75,33 @@ type GraphLayoutPoint = {
   reason: string;
 };
 
+type EmbeddingUpdateResult = {
+  attempted: boolean;
+  status: "ready" | "failed";
+  model: string;
+  version: string;
+  dimensions: number;
+  httpStatus: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
+type GraphLayoutRunSummary = {
+  usedLlm: boolean;
+  status: "success" | "partial";
+  fallbackReason: "llm_no_result" | "llm_not_requested" | null;
+  providerModel: AiStorageProviderModel | null;
+  usage: {
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    billableCost: number | null;
+    usageMissing: boolean;
+  } | null;
+  nodeCount: number;
+  llmNodeCount: number;
+};
+
 const ANALYSIS_TYPES = new Set([
   "environment",
   "company",
@@ -82,6 +116,88 @@ const MIN_HIGH_IMPACT_JUSTIFICATION_LENGTH = 40;
 const QUALITY_BACKFILL_BATCH_SIZE = Number(process.env.ANALYSIS_QUALITY_BACKFILL_BATCH_SIZE ?? 6);
 const QUALITY_BACKFILL_BATCH_PAUSE_MS = Number(process.env.ANALYSIS_QUALITY_BACKFILL_BATCH_PAUSE_MS ?? 2500);
 const JOB_WORKER_BATCH_SIZE = Number(process.env.ANALYSIS_JOB_WORKER_BATCH_SIZE ?? 1);
+
+function toProviderModels(events: Array<{ provider: string; model: string; promptVersion?: string | null }>): AiStorageProviderModel[] {
+  const seen = new Set<string>();
+  const out: AiStorageProviderModel[] = [];
+  for (const event of events) {
+    const key = `${event.provider}::${event.model}::${event.promptVersion ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      provider: event.provider,
+      model: event.model,
+      promptVersion: event.promptVersion ?? null,
+    });
+  }
+  return out;
+}
+
+function summarizeUsage(events: Array<{
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  billableCost?: number | null;
+}>): {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  billableCost: number | null;
+} {
+  if (events.length === 0) {
+    return {
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      billableCost: null,
+    };
+  }
+  let prompt = 0;
+  let completion = 0;
+  let total = 0;
+  let cost = 0;
+  let hasPrompt = false;
+  let hasCompletion = false;
+  let hasTotal = false;
+  let hasCost = false;
+  for (const event of events) {
+    if (event.promptTokens != null) {
+      hasPrompt = true;
+      prompt += Number(event.promptTokens);
+    }
+    if (event.completionTokens != null) {
+      hasCompletion = true;
+      completion += Number(event.completionTokens);
+    }
+    if (event.totalTokens != null) {
+      hasTotal = true;
+      total += Number(event.totalTokens);
+    }
+    if (event.billableCost != null) {
+      hasCost = true;
+      cost += Number(event.billableCost);
+    }
+  }
+  return {
+    promptTokens: hasPrompt ? prompt : null,
+    completionTokens: hasCompletion ? completion : null,
+    totalTokens: hasTotal ? total : null,
+    billableCost: hasCost ? Number(cost.toFixed(6)) : null,
+  };
+}
+
+async function writeAiActionLogSafe(input: Parameters<typeof writeAiStorageActionLog>[0]): Promise<void> {
+  const result = await writeAiStorageActionLog(input);
+  if (!result.ok) {
+    console.warn("[ai-storage-log] write failed", {
+      organizationId: input.organizationId,
+      feature: input.feature,
+      action: input.action,
+      triggerType: input.triggerType,
+      error: result.error,
+    });
+  }
+}
 
 type BackgroundJobType = "quality_backfill" | "graph_layout_recompute" | "entry_embedding_backfill";
 type BackgroundJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -214,7 +330,7 @@ async function updateEntryEmbedding(params: {
     sub_type: string | null;
     description: string | null;
   };
-}) {
+}): Promise<EmbeddingUpdateResult> {
   const embedding = await computeEntryEmbedding(params.entry);
   const now = new Date().toISOString();
   await params.supabase
@@ -230,6 +346,16 @@ async function updateEntryEmbedding(params: {
     .eq("id", params.entry.id)
     .eq("organization_id", params.organizationId)
     .eq("cycle_instance_id", params.cycleId);
+  return {
+    attempted: embedding.attempted,
+    status: embedding.embedding ? "ready" : "failed",
+    model: embedding.model,
+    version: embedding.version,
+    dimensions: embedding.embedding?.length ?? 0,
+    httpStatus: embedding.httpStatus,
+    errorCode: embedding.errorCode,
+    errorMessage: embedding.errorMessage,
+  };
 }
 
 async function enqueueBackgroundJob(params: {
@@ -379,7 +505,7 @@ async function recomputeAndPersistGraphLayout(params: {
   organizationId: string;
   cycleId: string;
   trigger: string;
-}) {
+}): Promise<GraphLayoutRunSummary> {
   const [{ data: entries }, { data: approvedLinks }, { data: draftLinks }] = await Promise.all([
     params.supabase
       .schema("app")
@@ -402,7 +528,17 @@ async function recomputeAndPersistGraphLayout(params: {
       .eq("status", "draft"),
   ]);
   const allEntries = entries ?? [];
-  if (allEntries.length === 0) return;
+  if (allEntries.length === 0) {
+    return {
+      usedLlm: false,
+      status: "success",
+      fallbackReason: "llm_not_requested",
+      providerModel: null,
+      usage: null,
+      nodeCount: 0,
+      llmNodeCount: 0,
+    };
+  }
   const brandingConfig = await readBrandingConfig(params.supabase, params.organizationId);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
@@ -494,6 +630,29 @@ async function recomputeAndPersistGraphLayout(params: {
       },
     ]);
   }
+  return {
+    usedLlm: Boolean(llmResponse.result),
+    status: llmResponse.result || !canUseGraphLayoutLlm ? "success" : "partial",
+    fallbackReason,
+    providerModel: llmResponse.result
+      ? {
+          provider: llmResponse.result.provider,
+          model: llmResponse.result.model,
+          promptVersion: llmResponse.result.promptVersion,
+        }
+      : null,
+    usage: llmResponse.usage
+      ? {
+          promptTokens: llmResponse.usage.promptTokens,
+          completionTokens: llmResponse.usage.completionTokens,
+          totalTokens: llmResponse.usage.totalTokens,
+          billableCost: llmResponse.usage.billableCost,
+          usageMissing: llmResponse.usage.usageMissing,
+        }
+      : null,
+    nodeCount: allEntries.length,
+    llmNodeCount: llmNodeIds.size,
+  };
 }
 
 async function getWorkspaceContextOrRedirect(): Promise<WorkspaceContext> {
@@ -517,6 +676,22 @@ function done(path = "/strategy-cycle"): never {
   revalidatePath("/strategy-cycle");
   revalidatePath("/strategy-matrix");
   redirect(path);
+}
+
+function readSmallIntField(formData: FormData, key: string, fallback = 3): number {
+  const parsed = Number(formData.get(key) ?? fallback);
+  return clampScore1to5(parsed);
+}
+
+function readSafeReturnTo(formData: FormData, fallbackPath: string): string {
+  const raw = String(formData.get("return_to") ?? "").trim();
+  if (!raw.startsWith("/strategy-cycle")) return fallbackPath;
+  return raw;
+}
+
+function withSuccess(path: string, success: string): string {
+  const delimiter = path.includes("?") ? "&" : "?";
+  return `${path}${delimiter}success=${encodeURIComponent(success)}`;
 }
 
 function readAndValidateInput(formData: FormData) {
@@ -559,6 +734,7 @@ function readAndValidateInput(formData: FormData) {
 }
 
 export async function createAnalysisEntry(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const input = readAndValidateInput(formData);
 
@@ -599,7 +775,7 @@ export async function createAnalysisEntry(formData: FormData) {
     semantic_embedding_status: "pending",
     created_by_membership_id: context.membershipId,
   });
-  await updateEntryEmbedding({
+  const embeddingResult = await updateEntryEmbedding({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
@@ -630,11 +806,134 @@ export async function createAnalysisEntry(formData: FormData) {
       },
     ]);
   }
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "create_analysis_entry",
+  });
+  const providerModels: AiStorageProviderModel[] = [];
+  if (quality.source === "llm" && quality.provider && quality.model) {
+    providerModels.push({
+      provider: quality.provider,
+      model: quality.model,
+      promptVersion: quality.promptVersion,
+    });
+  }
+  if (embeddingResult.attempted) {
+    providerModels.push({
+      provider: "gemini",
+      model: embeddingResult.model,
+      promptVersion: embeddingResult.version,
+    });
+  }
+  if (graphLayoutSummary.providerModel) {
+    providerModels.push(graphLayoutSummary.providerModel);
+  }
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "create_analysis_entry",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: toProviderModels(providerModels),
+    tokens: summarizeUsage(
+      [
+        quality.usage
+          ? {
+              promptTokens: quality.usage.promptTokens,
+              completionTokens: quality.usage.completionTokens,
+              totalTokens: quality.usage.totalTokens,
+              billableCost: quality.usage.billableCost,
+            }
+          : null,
+        graphLayoutSummary.usage
+          ? {
+              promptTokens: graphLayoutSummary.usage.promptTokens,
+              completionTokens: graphLayoutSummary.usage.completionTokens,
+              totalTokens: graphLayoutSummary.usage.totalTokens,
+              billableCost: graphLayoutSummary.usage.billableCost,
+            }
+          : null,
+      ].filter(Boolean) as Array<{
+        promptTokens: number | null;
+        completionTokens: number | null;
+        totalTokens: number | null;
+        billableCost?: number | null;
+      }>
+    ),
+    billableCost: summarizeUsage(
+      [
+        quality.usage
+          ? {
+              promptTokens: quality.usage.promptTokens,
+              completionTokens: quality.usage.completionTokens,
+              totalTokens: quality.usage.totalTokens,
+              billableCost: quality.usage.billableCost,
+            }
+          : null,
+        graphLayoutSummary.usage
+          ? {
+              promptTokens: graphLayoutSummary.usage.promptTokens,
+              completionTokens: graphLayoutSummary.usage.completionTokens,
+              totalTokens: graphLayoutSummary.usage.totalTokens,
+              billableCost: graphLayoutSummary.usage.billableCost,
+            }
+          : null,
+      ].filter(Boolean) as Array<{
+        promptTokens: number | null;
+        completionTokens: number | null;
+        totalTokens: number | null;
+        billableCost?: number | null;
+      }>
+    ).billableCost,
+    counts: {
+      entriesProcessed: 1,
+      qualityLlmUsed: quality.source === "llm" ? 1 : 0,
+      embeddingAttempted: embeddingResult.attempted ? 1 : 0,
+      embeddingReady: embeddingResult.status === "ready" ? 1 : 0,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "quality_scoring",
+        source: quality.source,
+        score: quality.score,
+        fallbackReason: quality.fallbackReason,
+      },
+      {
+        type: "embedding",
+        attempted: embeddingResult.attempted,
+        status: embeddingResult.status,
+        model: embeddingResult.model,
+        version: embeddingResult.version,
+        dimensions: embeddingResult.dimensions,
+        httpStatus: embeddingResult.httpStatus,
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+        nodeCount: graphLayoutSummary.nodeCount,
+        llmNodeCount: graphLayoutSummary.llmNodeCount,
+      },
+    ],
+    errors: [
+      embeddingResult.errorCode || embeddingResult.errorMessage
+        ? {
+            phase: "embedding",
+            code: embeddingResult.errorCode,
+            message: embeddingResult.errorMessage,
+          }
+        : null,
+    ].filter(Boolean) as unknown[],
+    metadata: { analysisType: input.analysisType, entryId },
   });
 
   done(`/strategy-cycle?tab=${input.analysisType}&success=saved`);
@@ -673,6 +972,7 @@ export async function saveStrategyReferenceText(formData: FormData) {
 }
 
 export async function updateAnalysisEntry(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const id = String(formData.get("analysis_entry_id") ?? "");
   if (!id) done();
@@ -716,7 +1016,7 @@ export async function updateAnalysisEntry(formData: FormData) {
     .eq("id", id)
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId);
-  await updateEntryEmbedding({
+  const embeddingResult = await updateEntryEmbedding({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
@@ -747,11 +1047,115 @@ export async function updateAnalysisEntry(formData: FormData) {
       },
     ]);
   }
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "update_analysis_entry",
+  });
+  const usageSummary = summarizeUsage(
+    [
+      quality.usage
+        ? {
+            promptTokens: quality.usage.promptTokens,
+            completionTokens: quality.usage.completionTokens,
+            totalTokens: quality.usage.totalTokens,
+            billableCost: quality.usage.billableCost,
+          }
+        : null,
+      graphLayoutSummary.usage
+        ? {
+            promptTokens: graphLayoutSummary.usage.promptTokens,
+            completionTokens: graphLayoutSummary.usage.completionTokens,
+            totalTokens: graphLayoutSummary.usage.totalTokens,
+            billableCost: graphLayoutSummary.usage.billableCost,
+          }
+        : null,
+    ].filter(Boolean) as Array<{
+      promptTokens: number | null;
+      completionTokens: number | null;
+      totalTokens: number | null;
+      billableCost?: number | null;
+    }>
+  );
+  const providerModels: AiStorageProviderModel[] = [];
+  if (quality.source === "llm" && quality.provider && quality.model) {
+    providerModels.push({
+      provider: quality.provider,
+      model: quality.model,
+      promptVersion: quality.promptVersion,
+    });
+  }
+  if (embeddingResult.attempted) {
+    providerModels.push({
+      provider: "gemini",
+      model: embeddingResult.model,
+      promptVersion: embeddingResult.version,
+    });
+  }
+  if (graphLayoutSummary.providerModel) {
+    providerModels.push(graphLayoutSummary.providerModel);
+  }
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "update_analysis_entry",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: toProviderModels(providerModels),
+    tokens: {
+      promptTokens: usageSummary.promptTokens,
+      completionTokens: usageSummary.completionTokens,
+      totalTokens: usageSummary.totalTokens,
+    },
+    billableCost: usageSummary.billableCost,
+    counts: {
+      entriesProcessed: 1,
+      qualityLlmUsed: quality.source === "llm" ? 1 : 0,
+      embeddingAttempted: embeddingResult.attempted ? 1 : 0,
+      embeddingReady: embeddingResult.status === "ready" ? 1 : 0,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "quality_scoring",
+        source: quality.source,
+        score: quality.score,
+        fallbackReason: quality.fallbackReason,
+      },
+      {
+        type: "embedding",
+        attempted: embeddingResult.attempted,
+        status: embeddingResult.status,
+        model: embeddingResult.model,
+        version: embeddingResult.version,
+        dimensions: embeddingResult.dimensions,
+        httpStatus: embeddingResult.httpStatus,
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+        nodeCount: graphLayoutSummary.nodeCount,
+        llmNodeCount: graphLayoutSummary.llmNodeCount,
+      },
+    ],
+    errors: [
+      embeddingResult.errorCode || embeddingResult.errorMessage
+        ? {
+            phase: "embedding",
+            code: embeddingResult.errorCode,
+            message: embeddingResult.errorMessage,
+          }
+        : null,
+    ].filter(Boolean) as unknown[],
+    metadata: { analysisType: input.analysisType, entryId: id },
   });
 
   done(`/strategy-cycle?tab=${input.analysisType}&success=updated`);
@@ -850,8 +1254,10 @@ export async function promoteToStrategicChallenge(formData: FormData) {
 }
 
 export async function generateLinkDrafts(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
+  const returnTo = readSafeReturnTo(formData, `/strategy-cycle?tab=${tab}`);
   const supabase = await createSupabaseServerClient();
 
   const { data: entries } = await supabase
@@ -938,17 +1344,91 @@ export async function generateLinkDrafts(formData: FormData) {
       metadata: { tab },
     }))
   );
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "generate_link_drafts",
   });
+  const usageSummary = summarizeUsage(
+    usageEvents.map((event) => ({
+      promptTokens: event.usage.promptTokens,
+      completionTokens: event.usage.completionTokens,
+      totalTokens: event.usage.totalTokens,
+      billableCost: event.usage.billableCost,
+    }))
+  );
+  const providerModels = toProviderModels([
+    ...usageEvents.map((event) => ({
+      provider: event.provider,
+      model: event.model,
+      promptVersion: event.promptVersion,
+    })),
+    ...(graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : []),
+  ]);
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "generate_link_drafts",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels,
+    tokens: {
+      promptTokens:
+        usageSummary.promptTokens != null || graphLayoutSummary.usage?.promptTokens != null
+          ? (usageSummary.promptTokens ?? 0) + (graphLayoutSummary.usage?.promptTokens ?? 0)
+          : null,
+      completionTokens:
+        usageSummary.completionTokens != null || graphLayoutSummary.usage?.completionTokens != null
+          ? (usageSummary.completionTokens ?? 0) + (graphLayoutSummary.usage?.completionTokens ?? 0)
+          : null,
+      totalTokens:
+        usageSummary.totalTokens != null || graphLayoutSummary.usage?.totalTokens != null
+          ? (usageSummary.totalTokens ?? 0) + (graphLayoutSummary.usage?.totalTokens ?? 0)
+          : null,
+    },
+    billableCost: Number(
+      ((usageSummary.billableCost ?? 0) + (graphLayoutSummary.usage?.billableCost ?? 0)).toFixed(6)
+    ),
+    counts: {
+      entriesConsidered: entriesWithEmbedding.length,
+      draftedLinks: candidates.length,
+      llmEvents: usageEvents.length,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "link_draft_generation",
+        candidateCount: candidates.length,
+        llmEventCount: usageEvents.length,
+        llmEnabled: canUseLinkLlm,
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+        nodeCount: graphLayoutSummary.nodeCount,
+        llmNodeCount: graphLayoutSummary.llmNodeCount,
+      },
+    ],
+    metadata: {
+      tab,
+      trigger: "generate_link_drafts",
+      maxLlmPairs: canUseLinkLlm ? networkConfig.maxLlmPairs : 0,
+    },
+  });
 
-  done(`/strategy-cycle?tab=${tab}&success=links-generated`);
+  done(withSuccess(returnTo, "links-generated"));
 }
 
 export async function approveLinkDraft(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
   const draftId = String(formData.get("draft_id") ?? "");
@@ -1004,17 +1484,50 @@ export async function approveLinkDraft(formData: FormData) {
     .eq("id", draftId)
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId);
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "approve_link_draft",
+  });
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "approve_link_draft",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : [],
+    tokens: graphLayoutSummary.usage
+      ? {
+          promptTokens: graphLayoutSummary.usage.promptTokens,
+          completionTokens: graphLayoutSummary.usage.completionTokens,
+          totalTokens: graphLayoutSummary.usage.totalTokens,
+        }
+      : undefined,
+    billableCost: graphLayoutSummary.usage?.billableCost ?? null,
+    counts: {
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+      },
+    ],
+    metadata: { tab, draftId, trigger: "approve_link_draft" },
   });
 
   done(`/strategy-cycle?tab=${tab}&success=link-approved`);
 }
 
 export async function rejectLinkDraft(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
   const draftId = String(formData.get("draft_id") ?? "");
@@ -1049,19 +1562,53 @@ export async function rejectLinkDraft(formData: FormData) {
     origin: draft?.origin ?? null,
     provider: draft?.provider ?? null,
   });
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "reject_link_draft",
+  });
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "reject_link_draft",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : [],
+    tokens: graphLayoutSummary.usage
+      ? {
+          promptTokens: graphLayoutSummary.usage.promptTokens,
+          completionTokens: graphLayoutSummary.usage.completionTokens,
+          totalTokens: graphLayoutSummary.usage.totalTokens,
+        }
+      : undefined,
+    billableCost: graphLayoutSummary.usage?.billableCost ?? null,
+    counts: {
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+      },
+    ],
+    metadata: { tab, draftId, trigger: "reject_link_draft" },
   });
 
   done(`/strategy-cycle?tab=${tab}&success=link-rejected`);
 }
 
 export async function recomputeClusters(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
+  const returnTo = readSafeReturnTo(formData, `/strategy-cycle?tab=${tab}`);
   const supabase = await createSupabaseServerClient();
 
   const [{ data: entries }, { data: links }] = await Promise.all([
@@ -1208,19 +1755,86 @@ export async function recomputeClusters(formData: FormData) {
       metadata: { tab },
     }))
   );
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "recompute_clusters",
   });
+  const usageSummary = summarizeUsage(
+    llmUsageEvents.map((event) => ({
+      promptTokens: event.promptTokens,
+      completionTokens: event.completionTokens,
+      totalTokens: event.totalTokens,
+      billableCost: null,
+    }))
+  );
+  const providerModels = toProviderModels([
+    ...llmUsageEvents.map((event) => ({
+      provider: event.provider,
+      model: event.model,
+      promptVersion: event.promptVersion,
+    })),
+    ...(graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : []),
+  ]);
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "recompute_clusters",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels,
+    tokens: {
+      promptTokens:
+        usageSummary.promptTokens != null || graphLayoutSummary.usage?.promptTokens != null
+          ? (usageSummary.promptTokens ?? 0) + (graphLayoutSummary.usage?.promptTokens ?? 0)
+          : null,
+      completionTokens:
+        usageSummary.completionTokens != null || graphLayoutSummary.usage?.completionTokens != null
+          ? (usageSummary.completionTokens ?? 0) + (graphLayoutSummary.usage?.completionTokens ?? 0)
+          : null,
+      totalTokens:
+        usageSummary.totalTokens != null || graphLayoutSummary.usage?.totalTokens != null
+          ? (usageSummary.totalTokens ?? 0) + (graphLayoutSummary.usage?.totalTokens ?? 0)
+          : null,
+    },
+    billableCost: graphLayoutSummary.usage?.billableCost ?? null,
+    counts: {
+      entriesConsidered: entriesWithEmbedding.length,
+      clusterCount: computed.length,
+      clusterLlmEvents: llmUsageEvents.length,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "cluster_assessment",
+        llmEnabled: canUseClusterLlm,
+        llmEventCount: llmUsageEvents.length,
+        computedClusterCount: computed.length,
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+      },
+    ],
+    metadata: { tab, trigger: "recompute_clusters" },
+  });
 
-  done(`/strategy-cycle?tab=${tab}&success=clusters-recomputed`);
+  done(withSuccess(returnTo, "clusters-recomputed"));
 }
 
 export async function recomputeGaps(formData: FormData) {
+  const startedAt = new Date().toISOString();
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
+  const returnTo = readSafeReturnTo(formData, `/strategy-cycle?tab=${tab}`);
   const supabase = await createSupabaseServerClient();
 
   const [{ data: entries }, { data: links }, { data: challenges }] = await Promise.all([
@@ -1454,19 +2068,91 @@ export async function recomputeGaps(formData: FormData) {
       metadata: { tab },
     }))
   );
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase,
     organizationId: context.organizationId,
     cycleId: context.cycleId,
     trigger: "recompute_gaps",
   });
+  const usageSummary = summarizeUsage(
+    llmUsageEvents.map((event) => ({
+      promptTokens: event.promptTokens,
+      completionTokens: event.completionTokens,
+      totalTokens: event.totalTokens,
+      billableCost: null,
+    }))
+  );
+  const providerModels = toProviderModels([
+    ...llmUsageEvents.map((event) => ({
+      provider: event.provider,
+      model: event.model,
+      promptVersion: event.promptVersion,
+    })),
+    ...(graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : []),
+  ]);
+  await writeAiActionLogSafe({
+    supabase,
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    feature: "strategy_cycle",
+    action: "recompute_gaps",
+    triggerType: "click",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels,
+    tokens: {
+      promptTokens:
+        usageSummary.promptTokens != null || graphLayoutSummary.usage?.promptTokens != null
+          ? (usageSummary.promptTokens ?? 0) + (graphLayoutSummary.usage?.promptTokens ?? 0)
+          : null,
+      completionTokens:
+        usageSummary.completionTokens != null || graphLayoutSummary.usage?.completionTokens != null
+          ? (usageSummary.completionTokens ?? 0) + (graphLayoutSummary.usage?.completionTokens ?? 0)
+          : null,
+      totalTokens:
+        usageSummary.totalTokens != null || graphLayoutSummary.usage?.totalTokens != null
+          ? (usageSummary.totalTokens ?? 0) + (graphLayoutSummary.usage?.totalTokens ?? 0)
+          : null,
+    },
+    billableCost: graphLayoutSummary.usage?.billableCost ?? null,
+    counts: {
+      entriesConsidered: entriesWithEmbedding.length,
+      gapCount: gapFindings.length,
+      challengeCandidateCount: challengeCandidates.length,
+      llmEvents: llmUsageEvents.length,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "gap_assessment",
+        llmEnabled: canUseGapLlm,
+        gapCount: gapFindings.length,
+      },
+      {
+        type: "challenge_recommendation",
+        llmEnabled: canUseChallengeLlm,
+        candidateCount: challengeCandidates.length,
+        usedLlm: Boolean(challengeCandidatesResponse.result),
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+      },
+    ],
+    metadata: { tab, trigger: "recompute_gaps" },
+  });
 
-  done(`/strategy-cycle?tab=${tab}&success=gaps-recomputed`);
+  done(withSuccess(returnTo, "gaps-recomputed"));
 }
 
 export async function recomputeGraphLayout(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
+  const returnTo = readSafeReturnTo(formData, `/strategy-cycle?tab=${tab}`);
   const supabase = await createSupabaseServerClient();
   await enqueueBackgroundJob({
     supabase,
@@ -1476,12 +2162,13 @@ export async function recomputeGraphLayout(formData: FormData) {
     jobType: "graph_layout_recompute",
     payload: { tab, trigger: "manual_recompute_graph_layout" },
   });
-  done(`/strategy-cycle?tab=${tab}&success=graph-layout-queued`);
+  done(withSuccess(returnTo, "graph-layout-queued"));
 }
 
 export async function backfillEntryQuality(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const tab = String(formData.get("analysis_type") ?? "environment");
+  const returnTo = readSafeReturnTo(formData, `/strategy-cycle?tab=${tab}`);
   const supabase = await createSupabaseServerClient();
   await enqueueBackgroundJob({
     supabase,
@@ -1491,7 +2178,7 @@ export async function backfillEntryQuality(formData: FormData) {
     jobType: "quality_backfill",
     payload: { tab, trigger: "manual_quality_backfill" },
   });
-  done(`/strategy-cycle?tab=${tab}&success=quality-backfill-queued`);
+  done(withSuccess(returnTo, "quality-backfill-queued"));
 }
 
 export async function executeQualityBackfill(params: {
@@ -1501,6 +2188,7 @@ export async function executeQualityBackfill(params: {
   trigger: string;
   tab?: string;
 }) {
+  const startedAt = new Date().toISOString();
   const { data: entries } = await params.supabase
     .schema("app")
     .from("analysis_entries")
@@ -1523,6 +2211,9 @@ export async function executeQualityBackfill(params: {
     usageMissing: boolean;
     metadata: Record<string, unknown>;
   }> = [];
+  let embeddingAttempted = 0;
+  let embeddingReady = 0;
+  const embeddingErrors: Array<{ entryId: string; code: string | null; message: string | null }> = [];
   const allEntries = entries ?? [];
   const batchSize = Math.max(1, Math.min(20, Math.round(QUALITY_BACKFILL_BATCH_SIZE)));
   for (let i = 0; i < allEntries.length; i += batchSize) {
@@ -1559,7 +2250,7 @@ export async function executeQualityBackfill(params: {
         .eq("id", entry.id)
         .eq("organization_id", params.organizationId)
         .eq("cycle_instance_id", params.cycleId);
-      await updateEntryEmbedding({
+      const embeddingResult = await updateEntryEmbedding({
         supabase: params.supabase,
         organizationId: params.organizationId,
         cycleId: params.cycleId,
@@ -1571,6 +2262,15 @@ export async function executeQualityBackfill(params: {
           description: entry.description,
         },
       });
+      if (embeddingResult.attempted) embeddingAttempted += 1;
+      if (embeddingResult.status === "ready") embeddingReady += 1;
+      if (embeddingResult.errorCode || embeddingResult.errorMessage) {
+        embeddingErrors.push({
+          entryId: entry.id,
+          code: embeddingResult.errorCode,
+          message: embeddingResult.errorMessage,
+        });
+      }
       if (quality.source === "llm" && quality.usage && quality.provider && quality.model && quality.promptVersion) {
         usageEvents.push({
           organizationId: params.organizationId,
@@ -1593,11 +2293,81 @@ export async function executeQualityBackfill(params: {
     }
   }
   await recordLlmUsageEvents(params.supabase, usageEvents);
-  await recomputeAndPersistGraphLayout({
+  const graphLayoutSummary = await recomputeAndPersistGraphLayout({
     supabase: params.supabase,
     organizationId: params.organizationId,
     cycleId: params.cycleId,
     trigger: params.trigger,
+  });
+  const usageSummary = summarizeUsage(
+    usageEvents.map((event) => ({
+      promptTokens: event.promptTokens,
+      completionTokens: event.completionTokens,
+      totalTokens: event.totalTokens,
+      billableCost: event.billableCost,
+    }))
+  );
+  await writeAiActionLogSafe({
+    supabase: params.supabase,
+    organizationId: params.organizationId,
+    cycleInstanceId: params.cycleId,
+    feature: "strategy_cycle",
+    action: "quality_backfill",
+    triggerType: "job",
+    status: graphLayoutSummary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: toProviderModels([
+      ...usageEvents.map((event) => ({
+        provider: event.provider,
+        model: event.model,
+        promptVersion: event.promptVersion,
+      })),
+      ...(graphLayoutSummary.providerModel ? [graphLayoutSummary.providerModel] : []),
+    ]),
+    tokens: {
+      promptTokens:
+        usageSummary.promptTokens != null || graphLayoutSummary.usage?.promptTokens != null
+          ? (usageSummary.promptTokens ?? 0) + (graphLayoutSummary.usage?.promptTokens ?? 0)
+          : null,
+      completionTokens:
+        usageSummary.completionTokens != null || graphLayoutSummary.usage?.completionTokens != null
+          ? (usageSummary.completionTokens ?? 0) + (graphLayoutSummary.usage?.completionTokens ?? 0)
+          : null,
+      totalTokens:
+        usageSummary.totalTokens != null || graphLayoutSummary.usage?.totalTokens != null
+          ? (usageSummary.totalTokens ?? 0) + (graphLayoutSummary.usage?.totalTokens ?? 0)
+          : null,
+    },
+    billableCost: Number(
+      ((usageSummary.billableCost ?? 0) + (graphLayoutSummary.usage?.billableCost ?? 0)).toFixed(6)
+    ),
+    counts: {
+      entriesProcessed: allEntries.length,
+      qualityLlmEvents: usageEvents.length,
+      embeddingAttempted,
+      embeddingReady,
+      graphLayoutNodes: graphLayoutSummary.nodeCount,
+      graphLayoutLlmNodes: graphLayoutSummary.llmNodeCount,
+      batchSize,
+    },
+    items: [
+      {
+        type: "quality_backfill",
+        trigger: params.trigger,
+        tab: params.tab ?? "environment",
+        entriesProcessed: allEntries.length,
+        llmEvents: usageEvents.length,
+      },
+      {
+        type: "graph_layout",
+        usedLlm: graphLayoutSummary.usedLlm,
+        status: graphLayoutSummary.status,
+        fallbackReason: graphLayoutSummary.fallbackReason,
+      },
+    ],
+    errors: embeddingErrors.slice(0, 50),
+    metadata: { trigger: params.trigger, tab: params.tab ?? "environment", chunked: true },
   });
 }
 
@@ -1607,11 +2377,44 @@ export async function executeGraphLayoutRecompute(params: {
   cycleId: string;
   trigger: string;
 }) {
-  await recomputeAndPersistGraphLayout({
+  const startedAt = new Date().toISOString();
+  const summary = await recomputeAndPersistGraphLayout({
     supabase: params.supabase,
     organizationId: params.organizationId,
     cycleId: params.cycleId,
     trigger: params.trigger,
+  });
+  await writeAiActionLogSafe({
+    supabase: params.supabase,
+    organizationId: params.organizationId,
+    cycleInstanceId: params.cycleId,
+    feature: "strategy_cycle",
+    action: "graph_layout_recompute",
+    triggerType: "job",
+    status: summary.status === "partial" ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    providerModels: summary.providerModel ? [summary.providerModel] : [],
+    tokens: summary.usage
+      ? {
+          promptTokens: summary.usage.promptTokens,
+          completionTokens: summary.usage.completionTokens,
+          totalTokens: summary.usage.totalTokens,
+        }
+      : undefined,
+    billableCost: summary.usage?.billableCost ?? null,
+    counts: {
+      graphLayoutNodes: summary.nodeCount,
+      graphLayoutLlmNodes: summary.llmNodeCount,
+    },
+    items: [
+      {
+        type: "graph_layout",
+        usedLlm: summary.usedLlm,
+        fallbackReason: summary.fallbackReason,
+      },
+    ],
+    metadata: { trigger: params.trigger },
   });
 }
 
@@ -1649,6 +2452,7 @@ export async function processPendingBackgroundJobs(
       continue;
     }
 
+    const jobStartedAt = new Date().toISOString();
     try {
       const payload = (pending.payload && typeof pending.payload === "object"
         ? (pending.payload as Record<string, unknown>)
@@ -1697,6 +2501,37 @@ export async function processPendingBackgroundJobs(
         })
         .eq("id", pending.id);
       failed += 1;
+      await writeAiActionLogSafe({
+        supabase,
+        organizationId: pending.organization_id,
+        cycleInstanceId: pending.cycle_instance_id,
+        feature: "strategy_cycle",
+        action: pending.job_type,
+        triggerType: "job",
+        status: "failed",
+        startedAt: jobStartedAt,
+        finishedAt: new Date().toISOString(),
+        counts: {
+          attemptCount: Number(pending.attempt_count ?? 0) + 1,
+          maxAttempts: Number(pending.max_attempts ?? 3),
+        },
+        errors: [
+          {
+            phase: "background_job",
+            code: "JOB_FAILED",
+            message: String(error instanceof Error ? error.message : error).slice(0, 1000),
+          },
+        ],
+        metadata: {
+          trigger: String(
+            (pending.payload &&
+            typeof pending.payload === "object" &&
+            (pending.payload as Record<string, unknown>).trigger
+              ? (pending.payload as Record<string, unknown>).trigger
+              : pending.job_type) ?? "worker"
+          ),
+        },
+      });
     }
   }
   return { processed, failed };
@@ -1869,21 +2704,69 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&error=missing-title");
   }
 
-  const priority = Number(formData.get("priority") ?? 3);
-  const relevanceLevel = Number(formData.get("relevance_level") ?? priority ?? 3);
-  const riskLevel = Number(formData.get("risk_level") ?? 3);
+  const priority = readSmallIntField(formData, "priority", 3);
+  const strategicValueScore = readSmallIntField(formData, "strategic_value_score", 3);
+  const capabilityFitScore = readSmallIntField(formData, "capability_fit_score", 3);
+  const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
+  const riskLevel = readSmallIntField(formData, "risk_score", 3);
+  const relevanceLevel = strategicValueScore;
+  const directionScore = computeDirectionScore({
+    strategicValueScore,
+    capabilityFitScore,
+    feasibilityScore,
+    riskScore: riskLevel,
+  });
   const status = String(formData.get("status") ?? "draft");
+  const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
-  await supabase.schema("app").from("strategic_directions").insert({
+  const { data: direction } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
     title,
-    priority: Number.isFinite(priority) ? Math.max(1, Math.min(5, priority)) : 3,
-    relevance_level: Number.isFinite(relevanceLevel) ? Math.max(1, Math.min(5, relevanceLevel)) : 3,
-    risk_level: Number.isFinite(riskLevel) ? Math.max(1, Math.min(5, riskLevel)) : 3,
+    description,
+    priority,
+    relevance_level: relevanceLevel,
+    risk_level: riskLevel,
+    strategic_value_score: strategicValueScore,
+    capability_fit_score: capabilityFitScore,
+    feasibility_score: feasibilityScore,
+    direction_score: directionScore,
     status,
     created_by_membership_id: context.membershipId,
-  });
+    })
+    .select("id")
+    .single();
+
+  const clusterId = String(formData.get("cluster_id") ?? "").trim();
+  if (direction?.id && clusterId) {
+    await supabase.schema("app").from("strategic_direction_cluster_links").upsert(
+      {
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        strategic_direction_id: direction.id,
+        cluster_id: clusterId,
+        created_by_membership_id: context.membershipId,
+      },
+      { onConflict: "cycle_instance_id,strategic_direction_id,cluster_id" }
+    );
+  }
+
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (direction?.id && objectiveId) {
+    await supabase.schema("app").from("strategic_direction_objective_links").upsert(
+      {
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        strategic_direction_id: direction.id,
+        objective_id: objectiveId,
+        created_by_membership_id: context.membershipId,
+      },
+      { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
+    );
+  }
   done("/strategy-cycle?l1=strategic-directions&success=direction-created");
 }
 
@@ -1893,17 +2776,34 @@ export async function createStrategicChallengeInCycle(formData: FormData) {
   if (!title) {
     done("/strategy-cycle?l1=strategic-directions&error=missing-title");
   }
-  const priority = Number(formData.get("priority") ?? 3);
-  const relevanceLevel = Number(formData.get("relevance_level") ?? priority ?? 3);
-  const riskLevel = Number(formData.get("risk_level") ?? 3);
+  const priority = readSmallIntField(formData, "priority", 3);
+  const impactScore = readSmallIntField(formData, "impact_score", 3);
+  const urgencyScore = readSmallIntField(formData, "urgency_score", 3);
+  const scopeScore = readSmallIntField(formData, "scope_score", 3);
+  const rootCauseScore = readSmallIntField(formData, "root_cause_score", 3);
+  const challengeScore = computeChallengeScore({
+    impactScore,
+    urgencyScore,
+    scopeScore,
+    rootCauseScore,
+  });
+  const relevanceLevel = impactScore;
+  const riskLevel = urgencyScore;
+  const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_challenges").insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
     title,
-    priority: Number.isFinite(priority) ? Math.max(1, Math.min(5, priority)) : 3,
-    relevance_level: Number.isFinite(relevanceLevel) ? Math.max(1, Math.min(5, relevanceLevel)) : 3,
-    risk_level: Number.isFinite(riskLevel) ? Math.max(1, Math.min(5, riskLevel)) : 3,
+    description,
+    priority,
+    impact_score: impactScore,
+    urgency_score: urgencyScore,
+    scope_score: scopeScore,
+    root_cause_score: rootCauseScore,
+    challenge_score: challengeScore,
+    relevance_level: relevanceLevel,
+    risk_level: riskLevel,
     visibility: "internal",
     created_by_membership_id: context.membershipId,
   });
@@ -1916,15 +2816,30 @@ export async function updateStrategicChallengeAssessment(formData: FormData) {
   if (!strategicChallengeId) {
     done("/strategy-cycle?l1=strategic-directions");
   }
-  const relevanceLevel = Number(formData.get("relevance_level") ?? 3);
-  const riskLevel = Number(formData.get("risk_level") ?? 3);
+  const impactScore = readSmallIntField(formData, "impact_score", 3);
+  const urgencyScore = readSmallIntField(formData, "urgency_score", 3);
+  const scopeScore = readSmallIntField(formData, "scope_score", 3);
+  const rootCauseScore = readSmallIntField(formData, "root_cause_score", 3);
+  const challengeScore = computeChallengeScore({
+    impactScore,
+    urgencyScore,
+    scopeScore,
+    rootCauseScore,
+  });
+  const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
   await supabase
     .schema("app")
     .from("strategic_challenges")
     .update({
-      relevance_level: Number.isFinite(relevanceLevel) ? Math.max(1, Math.min(5, relevanceLevel)) : 3,
-      risk_level: Number.isFinite(riskLevel) ? Math.max(1, Math.min(5, riskLevel)) : 3,
+      description,
+      impact_score: impactScore,
+      urgency_score: urgencyScore,
+      scope_score: scopeScore,
+      root_cause_score: rootCauseScore,
+      challenge_score: challengeScore,
+      relevance_level: impactScore,
+      risk_level: urgencyScore,
     })
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
@@ -1938,15 +2853,29 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
   if (!strategicDirectionId) {
     done("/strategy-cycle?l1=strategic-directions");
   }
-  const relevanceLevel = Number(formData.get("relevance_level") ?? 3);
-  const riskLevel = Number(formData.get("risk_level") ?? 3);
+  const strategicValueScore = readSmallIntField(formData, "strategic_value_score", 3);
+  const capabilityFitScore = readSmallIntField(formData, "capability_fit_score", 3);
+  const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
+  const riskLevel = readSmallIntField(formData, "risk_score", 3);
+  const directionScore = computeDirectionScore({
+    strategicValueScore,
+    capabilityFitScore,
+    feasibilityScore,
+    riskScore: riskLevel,
+  });
+  const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
   await supabase
     .schema("app")
     .from("strategic_directions")
     .update({
-      relevance_level: Number.isFinite(relevanceLevel) ? Math.max(1, Math.min(5, relevanceLevel)) : 3,
-      risk_level: Number.isFinite(riskLevel) ? Math.max(1, Math.min(5, riskLevel)) : 3,
+      description,
+      strategic_value_score: strategicValueScore,
+      capability_fit_score: capabilityFitScore,
+      feasibility_score: feasibilityScore,
+      direction_score: directionScore,
+      relevance_level: strategicValueScore,
+      risk_level: riskLevel,
     })
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
@@ -1996,6 +2925,207 @@ export async function unlinkDirectionChallengePredecessor(formData: FormData) {
   done("/strategy-cycle?l1=strategic-directions&success=unlinked");
 }
 
+export async function linkDirectionToClusterInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const clusterId = String(formData.get("cluster_id") ?? "").trim();
+  if (!directionId || !clusterId) {
+    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("strategic_direction_cluster_links").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_direction_id: directionId,
+      cluster_id: clusterId,
+      created_by_membership_id: context.membershipId,
+    },
+    { onConflict: "cycle_instance_id,strategic_direction_id,cluster_id" }
+  );
+  done("/strategy-cycle?l1=strategic-directions&success=linked");
+}
+
+export async function unlinkDirectionFromClusterInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const clusterId = String(formData.get("cluster_id") ?? "").trim();
+  if (!directionId || !clusterId) {
+    done("/strategy-cycle?l1=strategic-directions");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_direction_cluster_links")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("strategic_direction_id", directionId)
+    .eq("cluster_id", clusterId);
+  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+}
+
+export async function linkDirectionToObjectiveInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (!directionId || !objectiveId) {
+    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("strategic_direction_objective_links").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_direction_id: directionId,
+      objective_id: objectiveId,
+      created_by_membership_id: context.membershipId,
+    },
+    { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
+  );
+  done("/strategy-cycle?l1=strategic-directions&success=linked");
+}
+
+export async function unlinkDirectionFromObjectiveInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (!directionId || !objectiveId) {
+    done("/strategy-cycle?l1=strategic-directions");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_direction_objective_links")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("strategic_direction_id", directionId)
+    .eq("objective_id", objectiveId);
+  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+}
+
+export async function linkDirectionToGapInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const relationId = String(formData.get("cluster_objective_relation_id") ?? "").trim();
+  if (!directionId || !relationId) {
+    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("strategic_direction_gap_links").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_direction_id: directionId,
+      cluster_objective_relation_id: relationId,
+      created_by_membership_id: context.membershipId,
+    },
+    { onConflict: "cycle_instance_id,strategic_direction_id,cluster_objective_relation_id" }
+  );
+  done("/strategy-cycle?l1=strategic-directions&success=linked");
+}
+
+export async function unlinkDirectionFromGapInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const relationId = String(formData.get("cluster_objective_relation_id") ?? "").trim();
+  if (!directionId || !relationId) {
+    done("/strategy-cycle?l1=strategic-directions");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_direction_gap_links")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("strategic_direction_id", directionId)
+    .eq("cluster_objective_relation_id", relationId);
+  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+}
+
+export async function saveClusterObjectiveRelation(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const clusterId = String(formData.get("cluster_id") ?? "").trim();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (!clusterId || !objectiveId) {
+    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+  }
+  const relationStrength = Math.max(0, Math.min(3, Math.round(Number(formData.get("relation_strength") ?? 1))));
+  const supabase = await createSupabaseServerClient();
+  const { data: clusterEntries } = await supabase
+    .schema("app")
+    .from("analysis_cluster_members")
+    .select("entry_id")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("cluster_id", clusterId);
+  const entryIds = (clusterEntries ?? []).map((row) => row.entry_id);
+  let clusterAverageChallengeScore = 0;
+  if (entryIds.length > 0) {
+    const { data: linkedChallenges } = await supabase
+      .schema("app")
+      .from("strategic_challenges")
+      .select("challenge_score")
+      .eq("organization_id", context.organizationId)
+      .eq("cycle_instance_id", context.cycleId)
+      .in("source_analysis_entry_id", entryIds);
+    const scores = (linkedChallenges ?? []).map((row) => Number(row.challenge_score ?? 0)).filter((value) => Number.isFinite(value));
+    clusterAverageChallengeScore =
+      scores.length > 0 ? scores.reduce((sum, value) => sum + value, 0) / scores.length : 0;
+  }
+  const { data: objective } = await supabase
+    .schema("app")
+    .from("objectives")
+    .select("importance_score")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", objectiveId)
+    .maybeSingle();
+  const gapScore = computeGapScore({
+    clusterAverageChallengeScore,
+    objectiveImportanceScore: Number(objective?.importance_score ?? 3),
+    relationStrength,
+  });
+  await supabase.schema("app").from("cluster_objective_relations").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      cluster_id: clusterId,
+      objective_id: objectiveId,
+      relation_strength: relationStrength,
+      gap_score: gapScore,
+      created_by_membership_id: context.membershipId,
+    },
+    { onConflict: "cycle_instance_id,cluster_id,objective_id" }
+  );
+  done("/strategy-cycle?l1=strategic-directions&success=updated");
+}
+
+export async function createStrategyProgramInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const title = String(formData.get("title") ?? "").trim();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!title || !directionId) {
+    done("/strategy-cycle?l1=pips&error=missing-link");
+  }
+  const budgetRaw = Number(formData.get("budget") ?? 0);
+  const budget = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Number(budgetRaw.toFixed(2)) : null;
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("strategy_programs").insert({
+    organization_id: context.organizationId,
+    cycle_instance_id: context.cycleId,
+    strategic_direction_id: directionId,
+    title,
+    description: String(formData.get("description") ?? "").trim() || null,
+    timeline: String(formData.get("timeline") ?? "").trim() || null,
+    budget,
+    created_by_membership_id: context.membershipId,
+  });
+  done("/strategy-cycle?l1=pips&success=program-created");
+}
+
 export async function linkStrategicChallengeToIndustryInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
@@ -2011,7 +3141,7 @@ export async function linkStrategicChallengeToIndustryInCycle(formData: FormData
       strategic_challenge_id: challengeId,
       industry_id: industryId,
     },
-    { onConflict: "planning_cycle_id,strategic_challenge_id,industry_id" }
+    { onConflict: "cycle_instance_id,strategic_challenge_id,industry_id" }
   );
   done("/strategy-cycle?l1=strategic-directions&success=linked");
 }
@@ -2050,7 +3180,7 @@ export async function linkStrategicChallengeToBusinessModelInCycle(formData: For
       strategic_challenge_id: challengeId,
       business_model_id: businessModelId,
     },
-    { onConflict: "planning_cycle_id,strategic_challenge_id,business_model_id" }
+    { onConflict: "cycle_instance_id,strategic_challenge_id,business_model_id" }
   );
   done("/strategy-cycle?l1=strategic-directions&success=linked");
 }
@@ -2089,7 +3219,7 @@ export async function linkStrategicDirectionToIndustryInCycle(formData: FormData
       strategic_direction_id: directionId,
       industry_id: industryId,
     },
-    { onConflict: "planning_cycle_id,strategic_direction_id,industry_id" }
+    { onConflict: "cycle_instance_id,strategic_direction_id,industry_id" }
   );
   done("/strategy-cycle?l1=strategic-directions&success=linked");
 }
@@ -2128,7 +3258,7 @@ export async function linkStrategicDirectionToBusinessModelInCycle(formData: For
       strategic_direction_id: directionId,
       business_model_id: businessModelId,
     },
-    { onConflict: "planning_cycle_id,strategic_direction_id,business_model_id" }
+    { onConflict: "cycle_instance_id,strategic_direction_id,business_model_id" }
   );
   done("/strategy-cycle?l1=strategic-directions&success=linked");
 }
@@ -2158,16 +3288,31 @@ export async function createPipInitiativeInCycle(formData: FormData) {
   if (!title) {
     done("/strategy-cycle?l1=pips&error=missing-title");
   }
+  const programId = String(formData.get("program_id") ?? "").trim();
+  if (!programId) {
+    done("/strategy-cycle?l1=pips&error=missing-link");
+  }
 
-  const priority = Number(formData.get("priority") ?? 3);
+  const priority = readSmallIntField(formData, "priority", 3);
   const status = String(formData.get("status") ?? "planned");
+  const linkedOkrs = String(formData.get("linked_okrs") ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const deliverables = String(formData.get("deliverables") ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("initiatives").insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
+    program_id: programId,
     title,
-    priority: Number.isFinite(priority) ? Math.max(1, Math.min(5, priority)) : 3,
+    priority,
     status,
+    linked_okrs: linkedOkrs,
+    deliverables,
     created_by_membership_id: context.membershipId,
   });
   done("/strategy-cycle?l1=pips&success=initiative-created");

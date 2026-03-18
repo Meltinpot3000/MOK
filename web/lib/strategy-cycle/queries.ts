@@ -47,6 +47,9 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     clusterMembersResult,
     gapFindingsResult,
     challengeDirectionLinksResult,
+    directionClusterLinksResult,
+    directionObjectiveLinksResult,
+    directionGapLinksResult,
     challengeIndustriesResult,
     challengeBusinessModelsResult,
     directionIndustriesResult,
@@ -56,6 +59,9 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     businessModelsResult,
     operatingModelsResult,
     strategicDirectionsResult,
+    objectivesResult,
+    clusterObjectiveRelationsResult,
+    programsResult,
     annualTargetsResult,
     initiativesResult,
     initiativeTargetLinksResult,
@@ -74,7 +80,9 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     supabase
       .schema("app")
       .from("strategic_challenges")
-      .select("id, title, source_analysis_entry_id, relevance_level, risk_level")
+      .select(
+        "id, title, description, source_analysis_entry_id, relevance_level, risk_level, impact_score, urgency_score, scope_score, root_cause_score, challenge_score"
+      )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("created_at", { ascending: false }),
@@ -128,6 +136,24 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
+      .from("strategic_direction_cluster_links")
+      .select("strategic_direction_id, cluster_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("strategic_direction_objective_links")
+      .select("strategic_direction_id, objective_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("strategic_direction_gap_links")
+      .select("strategic_direction_id, cluster_objective_relation_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
       .from("strategic_challenge_industries")
       .select("strategic_challenge_id, industry_id")
       .eq("organization_id", organizationId)
@@ -177,7 +203,28 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     supabase
       .schema("app")
       .from("strategic_directions")
-      .select("id, title, relevance_level, risk_level")
+      .select(
+        "id, title, description, relevance_level, risk_level, strategic_value_score, capability_fit_score, feasibility_score, direction_score"
+      )
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("objectives")
+      .select("id, title, description, importance_score, time_horizon, status")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("cluster_objective_relations")
+      .select("id, cluster_id, objective_id, relation_strength, gap_score")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .order("gap_score", { ascending: false }),
+    supabase
+      .schema("app")
+      .from("strategy_programs")
+      .select("id, title, description, strategic_direction_id, owner_membership_id, budget, timeline")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -189,7 +236,7 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     supabase
       .schema("app")
       .from("initiatives")
-      .select("id, title, status, priority")
+      .select("id, title, status, priority, program_id, linked_okrs, deliverables")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("priority", { ascending: true })
@@ -349,9 +396,15 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     risk_level: Number.isFinite(Number(challenge.risk_level)) ? Math.max(1, Math.min(5, Number(challenge.risk_level))) : 3,
   }));
   const strategicDirections = strategicDirectionsResult.data ?? [];
+  const objectives = objectivesResult.data ?? [];
+  const clusterObjectiveRelations = clusterObjectiveRelationsResult.data ?? [];
+  const programs = programsResult.data ?? [];
   const annualTargets = annualTargetsResult.data ?? [];
   const initiatives = initiativesResult.data ?? [];
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
+  const directionClusterLinks = directionClusterLinksResult.data ?? [];
+  const directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
+  const directionGapLinks = directionGapLinksResult.data ?? [];
   const initiativeTargetLinks = initiativeTargetLinksResult.data ?? [];
 
   const challengeIdsByDirectionId = new Map<string, Set<string>>();
@@ -397,10 +450,16 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
     entryTitleById,
     existingChallenges: promotedResult.data ?? [],
     strategicDirections,
+    objectives,
+    clusterObjectiveRelations,
+    programs,
     challenges,
     annualTargets,
     initiatives,
     challengeDirectionLinks,
+    directionClusterLinks,
+    directionObjectiveLinks,
+    directionGapLinks,
     directionIndustries: directionIndustriesResult.data ?? [],
     directionBusinessModels: directionBusinessModelsResult.data ?? [],
     challengeIndustries: challengeIndustriesResult.data ?? [],
