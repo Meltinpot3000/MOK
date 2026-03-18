@@ -2770,6 +2770,60 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
   done("/strategy-cycle?l1=strategic-directions&success=direction-created");
 }
 
+export async function createObjectiveInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) {
+    done("/strategy-cycle?l1=strategic-directions&l2=objectives&error=missing-title");
+  }
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
+  const importanceScore = readSmallIntField(formData, "importance_score", 3);
+  const status = String(formData.get("status") ?? "draft");
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("objectives").insert({
+    organization_id: context.organizationId,
+    cycle_instance_id: context.cycleId,
+    title,
+    description,
+    time_horizon: timeHorizon,
+    importance_score: importanceScore,
+    status,
+  });
+  done("/strategy-cycle?l1=strategic-directions&l2=objectives&success=objective-created");
+}
+
+export async function updateObjectiveInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (!objectiveId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=objectives");
+  }
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) {
+    done("/strategy-cycle?l1=strategic-directions&l2=objectives&error=missing-title");
+  }
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
+  const importanceScore = readSmallIntField(formData, "importance_score", 3);
+  const status = String(formData.get("status") ?? "draft");
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("objectives")
+    .update({
+      title,
+      description,
+      time_horizon: timeHorizon,
+      importance_score: importanceScore,
+      status,
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", objectiveId);
+  done("/strategy-cycle?l1=strategic-directions&l2=objectives&success=objective-updated");
+}
+
 export async function createStrategicChallengeInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();

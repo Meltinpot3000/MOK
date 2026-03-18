@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import {
   approveLinkDraft,
   attachFindingToChallenge,
+  createObjectiveInCycle,
   createStrategicChallengeInCycle,
   createPipInitiativeInCycle,
   createStrategyProgramInCycle,
@@ -38,6 +39,7 @@ import {
   unlinkDirectionFromGapInCycle,
   unlinkDirectionFromObjectiveInCycle,
   unlinkInitiativeTargetPredecessor,
+  updateObjectiveInCycle,
   updateStrategicChallengeAssessment,
   updateStrategicDirectionAssessment,
   updateAnalysisEntry,
@@ -83,6 +85,7 @@ const L1_TABS = [
   "strategic-directions",
   "pips",
 ] as const;
+const STRATEGIC_DESIGN_TABS = ["objectives", "challenges", "design"] as const;
 
 const ANALYSIS_TYPES = [
   "environment",
@@ -129,13 +132,13 @@ function getL1TabTitle(tab: string) {
     case "mission-vision-culture-values":
       return "Mission, Vision, Kultur & Werte";
     case "corporate-strategy":
-      return "Unternehmensstrategie";
+      return "Strategische Erkenntnisse";
     case "strategic-directions":
-      return "Strategische Stossrichtungen";
+      return "Strategisches Design";
     case "pips":
       return "PIPs";
     default:
-      return "Unternehmensstrategie";
+      return "Strategische Erkenntnisse";
   }
 }
 
@@ -143,7 +146,7 @@ function getStGallenHint(tab: string) {
   if (tab === "summary")
     return "Strategische Gesamtsicht mit Netzwerk und Tabellen-Scan aller Analysepunkte.";
   if (tab === "strategy-matrix")
-    return "Matrix zur Ausrichtung von strategischen Herausforderungen, Stossrichtungen und Jahreszielen.";
+    return "Matrix zur Ausrichtung von strategischen Herausforderungen, strategischem Design und Jahreszielen.";
   if (tab === "environment") return "St. Gallen: Umwelt-Sphaeren und Anspruchsgruppen systematisch erfassen.";
   if (tab === "company") return "St. Gallen: interne Faehigkeiten, Ressourcen und Prozesse bewerten.";
   if (tab === "competitor") return "St. Gallen: Wettbewerbsposition und Differenzierungskraefte analysieren.";
@@ -219,7 +222,11 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "finding-linked")
     return { type: "success", text: "Befund wurde einer bestehenden Herausforderung zugeordnet." };
   if (success === "direction-created")
-    return { type: "success", text: "Strategische Stossrichtung wurde erstellt." };
+    return { type: "success", text: "Strategisches Design wurde erstellt." };
+  if (success === "objective-created")
+    return { type: "success", text: "Objective wurde erstellt." };
+  if (success === "objective-updated")
+    return { type: "success", text: "Objective wurde aktualisiert." };
   if (success === "challenge-created")
     return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
   if (success === "initiative-created")
@@ -298,6 +305,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     STRATEGY_CYCLE_TABS.includes(requestedL2 as (typeof STRATEGY_CYCLE_TABS)[number])
       ? requestedL2
       : "summary";
+  const activeStrategicTab =
+    activeL1 === "strategic-directions" &&
+    STRATEGIC_DESIGN_TABS.includes(requestedL2 as (typeof STRATEGIC_DESIGN_TABS)[number])
+      ? requestedL2
+      : "objectives";
   const actionTab = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number]) ? activeTab : "environment";
 
   const pageAccess = await getSidebarAccessContext("strategy-cycle");
@@ -615,6 +627,30 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </div>
             <p className="text-sm text-zinc-600">{getStGallenHint(activeTab)}</p>
           </>
+        ) : activeL1 === "strategic-directions" ? (
+          <div className="flex flex-wrap gap-2">
+            {STRATEGIC_DESIGN_TABS.map((tab) => {
+              const label =
+                tab === "objectives"
+                  ? "Objectives"
+                  : tab === "challenges"
+                    ? "Strategische Herausforderungen"
+                    : "Strategisches Design";
+              return (
+                <a
+                  key={tab}
+                  href={`/strategy-cycle?l1=strategic-directions&l2=${tab}`}
+                  className={`rounded-md border px-3 py-1.5 text-xs ${
+                    activeStrategicTab === tab
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                  }`}
+                >
+                  {label}
+                </a>
+              );
+            })}
+          </div>
         ) : null}
       </section>
 
@@ -688,7 +724,118 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
       {activeL1 === "strategic-directions" ? (
         <section className="space-y-4">
+          {activeStrategicTab === "objectives" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Objectives (Target State)</h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Definiere stabile Zielbilder fuer 3-5 Jahre mit Wichtigkeit und Status.
+              </p>
+              <form action={createObjectiveInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <input
+                  name="title"
+                  required
+                  placeholder="Neues Objective"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
+                <textarea
+                  name="description"
+                  rows={3}
+                  placeholder="Zielzustand (kein Aktionsplan)"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+                />
+                <input
+                  name="time_horizon"
+                  placeholder="Zeithorizont (z.B. 2027-2030)"
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                />
+                <label className="text-xs text-zinc-600">
+                  Importance
+                  <input
+                    type="number"
+                    name="importance_score"
+                    defaultValue={3}
+                    min={1}
+                    max={5}
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Status
+                  <select
+                    name="status"
+                    defaultValue="draft"
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="draft">draft</option>
+                    <option value="active">active</option>
+                    <option value="at_risk">at_risk</option>
+                    <option value="completed">completed</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </label>
+                <div className="md:col-span-2">
+                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                    Objective speichern
+                  </button>
+                </div>
+              </form>
+              <div className="mt-4 space-y-3">
+                {(workspace.objectives ?? []).length === 0 ? (
+                  <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Objectives vorhanden.</p>
+                ) : (
+                  (workspace.objectives ?? []).map((objective) => (
+                    <form key={objective.id} action={updateObjectiveInCycle} className="brand-surface grid grid-cols-1 gap-2 p-3 md:grid-cols-5">
+                      <input type="hidden" name="objective_id" value={objective.id} />
+                      <input
+                        name="title"
+                        defaultValue={objective.title}
+                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm md:col-span-2"
+                      />
+                      <input
+                        name="time_horizon"
+                        defaultValue={objective.time_horizon ?? ""}
+                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                      />
+                      <input
+                        type="number"
+                        name="importance_score"
+                        defaultValue={objective.importance_score ?? 3}
+                        min={1}
+                        max={5}
+                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                      />
+                      <select
+                        name="status"
+                        defaultValue={objective.status ?? "draft"}
+                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="draft">draft</option>
+                        <option value="active">active</option>
+                        <option value="at_risk">at_risk</option>
+                        <option value="completed">completed</option>
+                        <option value="archived">archived</option>
+                      </select>
+                      <textarea
+                        name="description"
+                        defaultValue={objective.description ?? ""}
+                        rows={2}
+                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm md:col-span-4"
+                      />
+                      <div className="md:col-span-1">
+                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                          Objective aktualisieren
+                        </button>
+                      </div>
+                    </form>
+                  ))
+                )}
+              </div>
+            </article>
+          ) : null}
+
+          {activeStrategicTab !== "objectives" ? (
           <article className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {activeStrategicTab === "challenges" ? (
             <div className="brand-card p-6">
               <h2 className="text-lg font-semibold text-zinc-900">Strategische Herausforderung erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">Manuell oder unabhaengig von Analyse-Eintraegen anlegen und bewerten.</p>
@@ -767,14 +914,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 </div>
               </form>
             </div>
+            ) : null}
+            {activeStrategicTab === "design" ? (
             <div className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtung erfassen</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Strategisches Design erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.</p>
               <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 <input
                   name="title"
                   required
-                  placeholder="Neue strategische Stossrichtung"
+                  placeholder="Neues strategisches Design"
                   className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
                 />
                 <textarea
@@ -870,13 +1019,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 </label>
                 <div className="md:col-span-2">
                   <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Stossrichtung speichern
+                    Design speichern
                   </button>
                 </div>
               </form>
             </div>
+            ) : null}
           </article>
+          ) : null}
 
+          {activeStrategicTab === "challenges" ? (
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
             <div className="mt-4 space-y-3">
@@ -896,7 +1048,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         <p className="text-sm font-semibold text-zinc-900">{challenge.title}</p>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                            Verknuepfte Stossrichtungen: {directionCountByChallengeId.get(challenge.id) ?? 0}
+                            Verknuepfte Designs: {directionCountByChallengeId.get(challenge.id) ?? 0}
                           </span>
                           <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
                             Challenge Score: {Number(challenge.challenge_score ?? 0).toFixed(2)}
@@ -1042,6 +1194,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               )}
             </div>
           </article>
+          ) : null}
+          {activeStrategicTab === "challenges" ? (
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Heatmap (Impact x Urgency)</h3>
             <p className="mt-1 text-xs text-zinc-600">
@@ -1083,12 +1237,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </table>
             </div>
           </article>
+          ) : null}
 
+          {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Predecessors aus Corporate Strategy</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Strategisches Design</h3>
             <div className="mt-4 space-y-3">
               {(workspace.strategicDirections ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
+                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Designs vorhanden.</p>
               ) : (
                 (workspace.strategicDirections ?? []).map((direction) => {
                   const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
@@ -1410,10 +1566,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               )}
             </div>
           </article>
+          ) : null}
 
+          {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-zinc-900">Mapping-Matrix Herausforderungen x Stossrichtungen</h3>
+              <h3 className="text-base font-semibold text-zinc-900">Mapping-Matrix Herausforderungen x Strategisches Design</h3>
               <div className="flex items-center gap-2 text-xs">
                 <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-900">hoch</span>
                 <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">mittel</span>
@@ -1425,7 +1583,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </p>
             {(workspace.challenges ?? []).length === 0 || (workspace.strategicDirections ?? []).length === 0 ? (
               <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
-                Fuer die Matrix werden mindestens eine Herausforderung und eine Stossrichtung benoetigt.
+                Fuer die Matrix werden mindestens eine Herausforderung und ein strategisches Design benoetigt.
               </p>
             ) : (
               <div className="mt-4 overflow-x-auto">
@@ -1468,6 +1626,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             )}
           </article>
+          ) : null}
+          {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Gap View (Cluster x Objectives)</h3>
             <p className="mt-1 text-xs text-zinc-600">
@@ -1565,6 +1725,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             )}
           </article>
+          ) : null}
         </section>
       ) : null}
 
@@ -1584,7 +1745,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 defaultValue=""
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
               >
-                <option value="">Stossrichtung waehlen</option>
+                <option value="">Strategisches Design waehlen</option>
                 {(workspace.strategicDirections ?? []).map((direction) => (
                   <option key={direction.id} value={direction.id}>
                     {direction.title}
@@ -1809,7 +1970,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <h3 className="text-sm font-semibold text-zinc-900">Top 5 Directions</h3>
             <div className="mt-2 space-y-2">
               {topDirections.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine Stossrichtungen vorhanden.</p>
+                <p className="text-xs text-zinc-600">Noch kein strategisches Design vorhanden.</p>
               ) : (
                 topDirections.map((direction) => (
                   <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
