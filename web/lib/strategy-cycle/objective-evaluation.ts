@@ -1,7 +1,10 @@
 import type { CompanyKennzahlen } from "@/lib/strategy-cycle/company-info";
 import type { StrategyReferenceFields } from "@/lib/strategy-cycle/strategy-reference";
 import type { CompanyProfileInput, StrategicContextOutput } from "@/lib/analysis-network/objective-evaluation-providers";
-import { buildStrategicContextWithLlm } from "@/lib/analysis-network/objective-evaluation-providers";
+import {
+  STRATEGIC_CONTEXT_PROMPT_VERSION,
+  buildStrategicContextWithLlm,
+} from "@/lib/analysis-network/objective-evaluation-providers";
 
 const REQUIRED_FIELDS = [
   "organization_type",
@@ -93,7 +96,11 @@ export async function getOrBuildStrategicContext(input: {
     .eq("is_current", true)
     .maybeSingle() as { data: { context_json: unknown; provider?: string; model?: string; prompt_version?: string } | null };
 
-  if (cached?.context_json && typeof cached.context_json === "object") {
+  if (
+    cached?.context_json &&
+    typeof cached.context_json === "object" &&
+    cached.prompt_version === STRATEGIC_CONTEXT_PROMPT_VERSION
+  ) {
     const ctx = cached.context_json as StrategicContextOutput;
     return {
       context: ctx,
@@ -131,7 +138,7 @@ export async function getOrBuildStrategicContext(input: {
         is_current: true,
         provider,
         model,
-        prompt_version: "objective-context-v1",
+        prompt_version: STRATEGIC_CONTEXT_PROMPT_VERSION,
       })
       .eq("organization_id", input.organizationId);
   } else {
@@ -141,7 +148,7 @@ export async function getOrBuildStrategicContext(input: {
       is_current: true,
       provider,
       model,
-      prompt_version: "objective-context-v1",
+      prompt_version: STRATEGIC_CONTEXT_PROMPT_VERSION,
     });
   }
 
@@ -149,5 +156,6 @@ export async function getOrBuildStrategicContext(input: {
     context,
     contextJson,
     fromCache: false,
+    promptVersion: STRATEGIC_CONTEXT_PROMPT_VERSION,
   };
 }

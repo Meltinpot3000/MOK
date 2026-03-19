@@ -43,6 +43,25 @@ type ObjectivesTableProps = {
   };
 };
 
+/** Aus der Sentinel✨-Klassifikation (KEINE eigene Berechnung in der Tabelle). */
+function formatInternalExternalTendency(value: string | null | undefined): string {
+  if (!value?.trim()) return "–";
+  const v = value.toLowerCase();
+  if (v === "internal") return "Intern";
+  if (v === "external") return "Extern";
+  if (v === "balanced") return "Ausgewogen";
+  return value;
+}
+
+function formatExploitExploreTendency(value: string | null | undefined): string {
+  if (!value?.trim()) return "–";
+  const v = value.toLowerCase();
+  if (v === "exploit") return "Exploit";
+  if (v === "explore") return "Explore";
+  if (v === "balanced") return "Ausgewogen";
+  return value;
+}
+
 function PillSection({
   title,
   children,
@@ -95,15 +114,27 @@ export function ObjectivesTable({
     },
     {
       id: "ai_objective_score",
-      label: "Sentinel Score",
+      label: "Sentinel✨ Score",
       defaultVisible: true,
       render: (o: Objective) =>
         o.ai_objective_score != null ? (o.ai_objective_score as number).toFixed(1) : "-",
     },
     {
-      id: "ai_evaluation_status",
-      label: "Sentinel Status",
+      id: "ai_tendency_internal_external",
+      label: "Sentinel✨ Tendenz Intern/Extern",
       defaultVisible: true,
+      render: (o: Objective) => formatInternalExternalTendency(o.ai_external_internal_classification),
+    },
+    {
+      id: "ai_tendency_exploit_explore",
+      label: "Sentinel✨ Tendenz Exploit/Explore",
+      defaultVisible: true,
+      render: (o: Objective) => formatExploitExploreTendency(o.ai_exploit_explore_classification),
+    },
+    {
+      id: "ai_evaluation_status",
+      label: "Sentinel✨ Status",
+      defaultVisible: false,
       render: (o: Objective) => o.ai_evaluation_status ?? "not_run",
     },
     {

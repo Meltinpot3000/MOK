@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { computeClusters } from "@/lib/analysis-network/cluster";
 import { computeGapFindings } from "@/lib/analysis-network/gaps";
@@ -19,6 +20,7 @@ import {
   assessGapWithLlm,
   proposeGraphLayoutWithLlm,
   proposeChallengeCandidatesWithLlm,
+  GROQ_MODEL,
 } from "@/lib/analysis-network/providers";
 import {
   computeEntryEmbedding,
@@ -51,6 +53,8 @@ import {
 } from "@/lib/strategy-cycle/objective-evaluation";
 import { readCompanyKennzahlenFromBrandingConfig } from "@/lib/strategy-cycle/company-info";
 import {
+  OBJECTIVE_EVAL_PROMPT_VERSION,
+  PORTFOLIO_EVAL_PROMPT_VERSION,
   evaluateObjectiveWithLlm,
   evaluateObjectivePortfolioWithLlm,
 } from "@/lib/analysis-network/objective-evaluation-providers";
@@ -376,6 +380,42 @@ async function updateEntryEmbedding(params: {
   };
 }
 
+function strategyCycleWorkerBaseUrl(): string {
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "")}`;
+  return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+}
+
+async function postStrategyCycleWorkerKick(): Promise<void> {
+  const url = `${strategyCycleWorkerBaseUrl()}/api/internal/strategy-cycle-jobs`;
+  const secret = process.env.STRATEGY_CYCLE_JOBS_CRON_SECRET ?? process.env.CRON_SECRET ?? "";
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (secret) headers.Authorization = `Bearer ${secret}`;
+  const res = await fetch(url, { method: "POST", headers, cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.warn("[strategy-cycle-worker] kick failed", res.status, body.slice(0, 300));
+  }
+}
+
+/** Nach Enqueue den gleichen Worker wie Cron aufrufen (lokal + Vercel). Läuft per `after()` auch nach redirect(). */
+function scheduleStrategyCycleWorkerKick(): void {
+  const raw = process.env.ANALYSIS_JOB_WORKER_KICK_BURST ?? "4";
+  const burst = Math.max(1, Math.min(12, Math.round(Number(raw)) || 4));
+  after(async () => {
+    try {
+      for (let i = 0; i < burst; i += 1) {
+        await postStrategyCycleWorkerKick();
+        if (i + 1 < burst) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    } catch (e) {
+      console.warn("[strategy-cycle-worker] kick error", e);
+    }
+  });
+}
+
 async function enqueueBackgroundJob(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   organizationId: string;
@@ -384,7 +424,7 @@ async function enqueueBackgroundJob(params: {
   jobType: BackgroundJobType;
   payload?: Record<string, unknown>;
 }) {
-  await params.supabase.schema("app").from("analysis_background_jobs").insert({
+  const { error } = await params.supabase.schema("app").from("analysis_background_jobs").insert({
     organization_id: params.organizationId,
     cycle_instance_id: params.cycleId,
     job_type: params.jobType,
@@ -392,6 +432,11 @@ async function enqueueBackgroundJob(params: {
     payload: params.payload ?? {},
     created_by_membership_id: params.membershipId,
   });
+  if (error) {
+    console.error("[enqueueBackgroundJob]", error);
+    throw new Error(`Hintergrund-Job konnte nicht eingestellt werden: ${error.message}`);
+  }
+  scheduleStrategyCycleWorkerKick();
 }
 
 async function writeAnalysisFeedbackCalibration(params: {
@@ -2107,9 +2152,14 @@ export async function recomputeGaps(formData: FormData) {
   }
 
   if (challengeCandidatesResponse.result && challengeCandidatesResponse.usage) {
+    const ccProv = challengeCandidatesResponse.resolvedProvider ?? "groq";
+    const ccModel =
+      ccProv === "gemini"
+        ? process.env.ANALYSIS_LLM_MODEL_GEMINI_ASSIST ?? process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro"
+        : process.env.ANALYSIS_LLM_MODEL_GROQ ?? "llama-3.3-70b-versatile";
     llmUsageEvents.push({
-      provider: "gemini",
-      model: process.env.ANALYSIS_LLM_MODEL_GEMINI_ASSIST ?? process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro",
+      provider: ccProv,
+      model: ccModel,
       promptVersion: "analysis-challenge-candidates-v1",
       promptTokens: challengeCandidatesResponse.usage.promptTokens,
       completionTokens: challengeCandidatesResponse.usage.completionTokens,
@@ -2250,6 +2300,18 @@ export async function backfillEntryQuality(formData: FormData) {
 export async function queueObjectiveEvaluationBackfill(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const supabase = await createSupabaseServerClient();
+
+  const { data: brandingQueue } = await supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+  const policyQueue = readAnalysisNetworkLlmPolicy(brandingQueue?.branding_config ?? null);
+  if (!policyQueue.llmEnabled || !isLlmFeatureEnabled(policyQueue, "objective_evaluation")) {
+    done("/strategy-cycle?l1=objectives&error=ai-evaluation-disabled");
+  }
+
   await enqueueBackgroundJob({
     supabase,
     organizationId: context.organizationId,
@@ -2499,7 +2561,8 @@ export async function executeGraphLayoutRecompute(params: {
 }
 
 /** Delay between objective LLM calls (ms) to avoid free-tier rate limits (e.g. Gemini 15 RPM). */
-const OBJECTIVE_EVALUATION_DELAY_MS = 4000;
+/** Pause zwischen Objective-LLM-Aufrufen; Groq-first: niedriger Default; bei 429 `GROQ_MIN_INTERVAL`/`ANALYSIS_LLM_MIN_INTERVAL_MS_GROQ` erhoehen. */
+const OBJECTIVE_EVALUATION_DELAY_MS = Number(process.env.ANALYSIS_LLM_OBJECTIVE_EVAL_DELAY_MS ?? 1200);
 
 export async function executeObjectiveEvaluationBackfill(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -2521,7 +2584,9 @@ export async function executeObjectiveEvaluationBackfill(params: {
 
   const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
   if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) {
-    throw new Error("AI evaluation disabled or LLM not enabled");
+    throw new Error(
+      "Objective-Bewertung in der Systemkonfiguration (LLM-Nutzung) nicht aktiviert: «LLM global aktivieren» oder «Objectives-Bewertung» ist aus."
+    );
   }
 
   const kennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
@@ -2593,9 +2658,9 @@ export async function executeObjectiveEvaluationBackfill(params: {
           organizationId: params.organizationId,
           cycleInstanceId: params.cycleId,
           feature: "objective_evaluation",
-          provider: (response as { provider?: string }).provider ?? "gemini",
-          model: (response as { model?: string }).model ?? "gemini-assist",
-          promptVersion: "objective-eval-v1",
+          provider: (response as { provider?: string }).provider ?? "groq",
+          model: (response as { model?: string }).model ?? GROQ_MODEL,
+          promptVersion: OBJECTIVE_EVAL_PROMPT_VERSION,
           promptTokens: response.usage.promptTokens,
           completionTokens: response.usage.completionTokens,
           totalTokens: response.usage.totalTokens,
@@ -2609,7 +2674,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
           0.25 * r.fit_to_company_score +
           0.2 * r.feasibility_score +
           0.25 * r.clarity_score;
-        await params.supabase
+        const rowUpd = await params.supabase
           .schema("app")
           .from("objectives")
           .update({
@@ -2626,11 +2691,18 @@ export async function executeObjectiveEvaluationBackfill(params: {
             ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
             ai_evaluation_status: "valid",
             ai_evaluated_at: new Date().toISOString(),
-            ai_evaluation_version: "objective-eval-v1",
+            ai_evaluation_version: OBJECTIVE_EVAL_PROMPT_VERSION,
           })
           .eq("id", obj.id)
           .eq("organization_id", params.organizationId)
-          .eq("cycle_instance_id", params.cycleId);
+          .eq("cycle_instance_id", params.cycleId)
+          .select("id");
+        if (rowUpd.error) {
+          throw new Error(`Objective ${obj.id}: Speichern fehlgeschlagen (${rowUpd.error.message})`);
+        }
+        if (!rowUpd.data?.length) {
+          throw new Error(`Objective ${obj.id}: Update hat keine Zeile getroffen`);
+        }
         objectivesWithClassifications.push({
           id: obj.id,
           title: obj.title,
@@ -2638,23 +2710,31 @@ export async function executeObjectiveEvaluationBackfill(params: {
         });
         evaluated += 1;
       } else {
-        await params.supabase
+        const failUpd = await params.supabase
           .schema("app")
           .from("objectives")
           .update({ ai_evaluation_status: "failed" })
           .eq("id", obj.id)
           .eq("organization_id", params.organizationId)
-          .eq("cycle_instance_id", params.cycleId);
+          .eq("cycle_instance_id", params.cycleId)
+          .select("id");
+        if (failUpd.error || !failUpd.data?.length) {
+          console.error("[objective_evaluation_backfill] failed-status update", obj.id, failUpd.error);
+        }
         failed += 1;
       }
     } catch (err) {
-      await params.supabase
+      const exUpd = await params.supabase
         .schema("app")
         .from("objectives")
         .update({ ai_evaluation_status: "failed" })
         .eq("id", obj.id)
         .eq("organization_id", params.organizationId)
-        .eq("cycle_instance_id", params.cycleId);
+        .eq("cycle_instance_id", params.cycleId)
+        .select("id");
+      if (exUpd.error || !exUpd.data?.length) {
+        console.error("[objective_evaluation_backfill] catch-status update", obj.id, exUpd.error, err);
+      }
       failed += 1;
     }
   }
@@ -2673,9 +2753,9 @@ export async function executeObjectiveEvaluationBackfill(params: {
         organizationId: params.organizationId,
         cycleInstanceId: params.cycleId,
         feature: "objective_evaluation",
-        provider: (portfolioResponse as { provider?: string }).provider ?? "gemini",
-        model: (portfolioResponse as { model?: string }).model ?? "gemini-assist",
-        promptVersion: "objective-portfolio-v1",
+        provider: (portfolioResponse as { provider?: string }).provider ?? "groq",
+        model: (portfolioResponse as { model?: string }).model ?? GROQ_MODEL,
+        promptVersion: PORTFOLIO_EVAL_PROMPT_VERSION,
         promptTokens: portfolioResponse.usage.promptTokens,
         completionTokens: portfolioResponse.usage.completionTokens,
         totalTokens: portfolioResponse.usage.totalTokens,
@@ -3138,9 +3218,9 @@ async function evaluateSingleObjectiveIfEnabled(params: {
         organizationId: params.organizationId,
         cycleInstanceId: params.cycleId,
         feature: "objective_evaluation",
-        provider: (response as { provider?: string }).provider ?? "gemini",
-        model: (response as { model?: string }).model ?? "gemini-assist",
-        promptVersion: "objective-eval-v1",
+        provider: (response as { provider?: string }).provider ?? "groq",
+        model: (response as { model?: string }).model ?? GROQ_MODEL,
+        promptVersion: OBJECTIVE_EVAL_PROMPT_VERSION,
         promptTokens: response.usage.promptTokens,
         completionTokens: response.usage.completionTokens,
         totalTokens: response.usage.totalTokens,
@@ -3173,7 +3253,7 @@ async function evaluateSingleObjectiveIfEnabled(params: {
         ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
         ai_evaluation_status: "valid",
         ai_evaluated_at: new Date().toISOString(),
-        ai_evaluation_version: "objective-eval-v1",
+        ai_evaluation_version: OBJECTIVE_EVAL_PROMPT_VERSION,
       })
       .eq("id", params.objectiveId)
       .eq("organization_id", params.organizationId)
@@ -3348,9 +3428,9 @@ export async function runObjectiveEvaluation(formData: FormData) {
         organizationId: context.organizationId,
         cycleInstanceId: context.cycleId,
         feature: "objective_evaluation",
-        provider: (response as { provider?: string }).provider ?? "gemini",
-        model: (response as { model?: string }).model ?? "gemini-assist",
-        promptVersion: "objective-eval-v1",
+        provider: (response as { provider?: string }).provider ?? "groq",
+        model: (response as { model?: string }).model ?? GROQ_MODEL,
+        promptVersion: OBJECTIVE_EVAL_PROMPT_VERSION,
         promptTokens: response.usage.promptTokens,
         completionTokens: response.usage.completionTokens,
         totalTokens: response.usage.totalTokens,
@@ -3381,7 +3461,7 @@ export async function runObjectiveEvaluation(formData: FormData) {
           ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
           ai_evaluation_status: "valid",
           ai_evaluated_at: new Date().toISOString(),
-          ai_evaluation_version: "objective-eval-v1",
+          ai_evaluation_version: OBJECTIVE_EVAL_PROMPT_VERSION,
         })
         .eq("id", obj.id)
         .eq("organization_id", context.organizationId)
@@ -3417,9 +3497,9 @@ export async function runObjectiveEvaluation(formData: FormData) {
       organizationId: context.organizationId,
       cycleInstanceId: context.cycleId,
       feature: "objective_evaluation",
-      provider: (portfolioResponse as { provider?: string }).provider ?? "gemini",
-      model: (portfolioResponse as { model?: string }).model ?? "gemini-assist",
-      promptVersion: "objective-portfolio-v1",
+      provider: (portfolioResponse as { provider?: string }).provider ?? "groq",
+      model: (portfolioResponse as { model?: string }).model ?? GROQ_MODEL,
+      promptVersion: PORTFOLIO_EVAL_PROMPT_VERSION,
       promptTokens: portfolioResponse.usage.promptTokens,
       completionTokens: portfolioResponse.usage.completionTokens,
       totalTokens: portfolioResponse.usage.totalTokens,

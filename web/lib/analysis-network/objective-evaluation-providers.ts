@@ -1,9 +1,9 @@
 import type { LlmScoreResponse, LlmUsage } from "./providers";
 import { invokeLlmForJson } from "./providers";
 
-const STRATEGIC_CONTEXT_PROMPT_VERSION = "objective-context-v1";
-const OBJECTIVE_EVAL_PROMPT_VERSION = "objective-eval-v1";
-const PORTFOLIO_EVAL_PROMPT_VERSION = "objective-portfolio-v1";
+export const STRATEGIC_CONTEXT_PROMPT_VERSION = "objective-context-v2-de";
+export const OBJECTIVE_EVAL_PROMPT_VERSION = "objective-eval-v2-de";
+export const PORTFOLIO_EVAL_PROMPT_VERSION = "objective-portfolio-v2-de";
 
 export type CompanyProfileInput = {
   organization_type: string;
@@ -60,28 +60,39 @@ function clampScore(value: number, min = 1, max = 5): number {
   return Math.round(Math.max(min, Math.min(max, value)));
 }
 
+function strategicContextFromRecord(json: Record<string, unknown>): StrategicContextOutput {
+  const implications = Array.isArray(json.strategic_implications)
+    ? (json.strategic_implications as unknown[]).map(String).filter(Boolean)
+    : [];
+  return {
+    company_type: String(json.company_type ?? "").trim().slice(0, 200),
+    scale: String(json.scale ?? "").trim().slice(0, 100),
+    industry_context: String(json.industry_context ?? "").trim().slice(0, 400),
+    value_creation_logic: String(json.value_creation_logic ?? "").trim().slice(0, 400),
+    market_scope: String(json.market_scope ?? "").trim().slice(0, 200),
+    growth_ambition: String(json.growth_ambition ?? "").trim().slice(0, 200),
+    transformation_pressure: String(json.transformation_pressure ?? "").trim().slice(0, 200),
+    strategic_implications: implications.slice(0, 10),
+  };
+}
+
 function parseStrategicContextJson(raw: string): StrategicContextOutput | null {
   try {
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
     if (first < 0 || last <= first) return null;
     const json = JSON.parse(raw.slice(first, last + 1)) as Record<string, unknown>;
-    const implications = Array.isArray(json.strategic_implications)
-      ? (json.strategic_implications as unknown[]).map(String).filter(Boolean)
-      : [];
-    return {
-      company_type: String(json.company_type ?? "").trim().slice(0, 200),
-      scale: String(json.scale ?? "").trim().slice(0, 100),
-      industry_context: String(json.industry_context ?? "").trim().slice(0, 400),
-      value_creation_logic: String(json.value_creation_logic ?? "").trim().slice(0, 400),
-      market_scope: String(json.market_scope ?? "").trim().slice(0, 200),
-      growth_ambition: String(json.growth_ambition ?? "").trim().slice(0, 200),
-      transformation_pressure: String(json.transformation_pressure ?? "").trim().slice(0, 200),
-      strategic_implications: implications.slice(0, 10),
-    };
+    return strategicContextFromRecord(json);
   } catch {
     return null;
   }
+}
+
+/** DB `context_json` (jsonb) oder LLM-Rohtext zu strukturierter Ausgabe. */
+export function coerceStrategicContextOutput(raw: unknown): StrategicContextOutput | null {
+  if (typeof raw === "string") return parseStrategicContextJson(raw);
+  if (!raw || typeof raw !== "object") return null;
+  return strategicContextFromRecord(raw as Record<string, unknown>);
 }
 
 function parseObjectiveEvaluationJson(raw: string): ObjectiveEvaluationOutput | null {
@@ -142,51 +153,55 @@ function parsePortfolioEvaluationJson(raw: string): PortfolioEvaluationOutput | 
 }
 
 function buildStrategicContextPrompt(profile: CompanyProfileInput): string {
-  const userPrompt = `Company Information:
+  return `Unternehmensdaten (Rohinput):
 
-Organization Type: ${profile.organization_type}
-Company Size: ${profile.company_size}
-Industry: ${profile.industry}
-Core Value Creation: ${profile.core_value_creation}
-Regions: ${profile.regions.join(", ") || "—"}
-Revenue Current: ${profile.revenue_current}
-Revenue Target: ${profile.revenue_target}
-Transformation Status: ${profile.transformation_status}
+Organisationstyp: ${profile.organization_type}
+Groesse: ${profile.company_size}
+Branche: ${profile.industry}
+Kern-Wertschoepfung: ${profile.core_value_creation}
+Regionen: ${profile.regions.join(", ") || "—"}
+Umsatz heute: ${profile.revenue_current}
+Umsatz-Ziel: ${profile.revenue_target}
+Transformationsstatus: ${profile.transformation_status}
 
 Mission: ${profile.mission || "—"}
 Vision: ${profile.vision || "—"}
-Values: ${profile.values || "—"}
-Culture: ${profile.culture || "—"}
+Werte: ${profile.values || "—"}
+Kultur: ${profile.culture || "—"}
 Leadership: ${profile.leadership || "—"}
 
 ---
 
-Create a strategic context profile in JSON format.
-Schema: {"company_type":"...","scale":"...","industry_context":"...","value_creation_logic":"...","market_scope":"...","growth_ambition":"...","transformation_pressure":"...","strategic_implications":["..."]}`;
-  return userPrompt;
+Antworte ausschliesslich mit validem JSON. Alle Textinhalte (alle String-Felder und Listeneintraege) auf Deutsch, praezise und kompakt, ohne die Eingaben woertlich zu wiederholen.
+Schema (Schluessel exakt so): {"company_type":"...","scale":"...","industry_context":"...","value_creation_logic":"...","market_scope":"...","growth_ambition":"...","transformation_pressure":"...","strategic_implications":["..."]}`;
 }
 
 function buildObjectiveEvalPrompt(contextJson: string, objectiveTitle: string, objectiveDescription: string): string {
-  return `Strategic Context:
+  return `Strategischer Kontext (JSON):
 ${contextJson}
 
 Objective:
-Title: ${objectiveTitle}
-Description: ${objectiveDescription}
+Titel: ${objectiveTitle}
+Beschreibung: ${objectiveDescription}
 
 ---
 
-Evaluate this objective. Return JSON only.
-Schema: {"clarity_score":1-5,"strategic_relevance_score":1-5,"feasibility_score":1-5,"fit_to_company_score":1-5,"dimension_classification":{"external_internal":"internal|external|balanced","short_long_term":"short|mid|long","exploit_explore":"exploit|explore|balanced"},"issues":["..."],"improvement_suggestion":"...","confidence":1-5}`;
+Bewerte dieses Objective im Kontext des Unternehmens. Antworte nur mit validem JSON.
+
+Skala 1–5: Nutze die **volle Bandbreite**. Die Zahl 3 ist nur fuer **durchschnittliche, klar mittlere** Erfuellung; vermeide es, alles pauschal mit 3 zu bewerten. Setze 1–2 oder 4–5, wenn die Begruendung das traeft. Begruende implizit durch konsistente Teilscores.
+
+Freitext **issues** (kurze Saetze) und **improvement_suggestion** auf **Deutsch**.
+
+Schema (Schluessel exakt so, Zahlen ganzzahlig 1–5): {"clarity_score":1-5,"strategic_relevance_score":1-5,"feasibility_score":1-5,"fit_to_company_score":1-5,"dimension_classification":{"external_internal":"internal|external|balanced","short_long_term":"short|mid|long","exploit_explore":"exploit|explore|balanced"},"issues":["..."],"improvement_suggestion":"...","confidence":1-5}`;
 }
 
 function buildPortfolioEvalPrompt(objectivesWithClassifications: string): string {
-  return `Objectives:
+  return `Objectives mit Klassifikation:
 ${objectivesWithClassifications}
 
 ---
 
-Evaluate the portfolio. Return JSON only.
+Bewerte das Portfolio (Balance, Lücken, Risiken). Antworte nur mit validem JSON. **gaps**, **risks** und **recommendation** auf **Deutsch**. balance_score 1–5 mit gleicher Kalibrierung wie bei Einzelbewertungen (3 = klar mittel, nicht Default).
 Schema: {"balance_score":1-5,"distribution":{},"gaps":["..."],"risks":["..."],"recommendation":"..."}`;
 }
 
@@ -221,7 +236,7 @@ export async function evaluateObjectiveWithLlm(
   objective: { title: string; description: string | null },
   maxOutputTokens?: number
 ): Promise<LlmScoreResponse<ObjectiveEvaluationOutput> & { provider?: string; model?: string }> {
-  const systemPrompt = `You are a strategy expert evaluating strategic objectives. Evaluate the objective strictly in the context of the company. Do NOT be generic. Be critical but constructive. Classify the objective across strategic dimensions and assess clarity, strategic relevance, feasibility, fit to company. Return structured JSON only.`;
+  const systemPrompt = `Du bist ein Strategie-Expert:in und bewertest strategische Objectives. Bewerte streng im Kontext des Unternehmens — nicht generisch. Kritisch aber konstruktiv. Ordne die Dimensionen ein und bewerte Klaerheit, strategische Relevanz, Machbarkeit und Passung zum Unternehmen. Nur strukturiertes JSON; Freitextfelder auf Deutsch.`;
   const userPrompt = buildObjectiveEvalPrompt(
     contextJson,
     objective.title,
@@ -244,7 +259,7 @@ export async function evaluateObjectivePortfolioWithLlm(
   objectivesWithClassifications: string,
   maxOutputTokens?: number
 ): Promise<LlmScoreResponse<PortfolioEvaluationOutput> & { provider?: string; model?: string }> {
-  const systemPrompt = `You are a strategy advisor evaluating a portfolio of objectives. Assess balance across internal vs external, exploit vs explore, short vs long term. Identify gaps, risks, and imbalance. Return structured JSON only.`;
+  const systemPrompt = `Du bist Strategieberater:in und bewertest ein Portfolio von Objectives. Beurteile Balance (intern/extern, exploit/explore, kurz/mittel/lang), Lücken und Risiken. Nur strukturiertes JSON; Texte auf Deutsch.`;
   const userPrompt = buildPortfolioEvalPrompt(objectivesWithClassifications);
   const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
   const result = await invokeLlmForJson(fullPrompt, maxOutputTokens);

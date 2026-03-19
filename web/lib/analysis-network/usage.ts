@@ -3,7 +3,7 @@
 type SupabaseClientLike = {
   schema: (name: string) => {
     from: (table: string) => {
-      insert: (values: unknown) => unknown;
+      insert: (values: unknown) => Promise<{ error: { message: string } | null }>;
     };
   };
 };
@@ -28,7 +28,7 @@ export async function recordLlmUsageEvents(
   events: LlmUsageEventInput[]
 ): Promise<void> {
   if (events.length === 0) return;
-  await supabase.schema("app").from("llm_usage_events").insert(
+  const { error } = await supabase.schema("app").from("llm_usage_events").insert(
     events.map((event) => ({
       organization_id: event.organizationId,
       cycle_instance_id: event.cycleInstanceId,
@@ -44,4 +44,8 @@ export async function recordLlmUsageEvents(
       metadata: event.metadata ?? {},
     }))
   );
+  if (error) {
+    console.error("[llm_usage_events] insert failed", error.message);
+    throw new Error(`llm_usage_events: ${error.message}`);
+  }
 }

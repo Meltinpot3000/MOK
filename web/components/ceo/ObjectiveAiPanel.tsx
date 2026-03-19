@@ -34,6 +34,30 @@ function getStatusLabel(status: string | null | undefined): string {
   return "Nicht ausgefuehrt";
 }
 
+function deExternalInternal(value: string): string {
+  const v = value.toLowerCase();
+  if (v === "internal") return "Intern";
+  if (v === "external") return "Extern";
+  if (v === "balanced") return "Ausgewogen";
+  return value;
+}
+
+function deShortMidLong(value: string): string {
+  const v = value.toLowerCase();
+  if (v === "short") return "Kurzfristig";
+  if (v === "mid") return "Mittelfristig";
+  if (v === "long") return "Langfristig";
+  return value;
+}
+
+function deExploitExplore(value: string): string {
+  const v = value.toLowerCase();
+  if (v === "exploit") return "Exploit";
+  if (v === "explore") return "Explore";
+  if (v === "balanced") return "Ausgewogen";
+  return value;
+}
+
 export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
   const status = objective.ai_evaluation_status ?? "not_run";
   const issues = Array.isArray(objective.ai_issues_json)
@@ -62,7 +86,7 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
       </div>
       {objective.ai_objective_score != null && (
         <div>
-          <p className="text-xs text-zinc-600">Objective Score</p>
+          <p className="text-xs text-zinc-600">Sentinel✨ Score</p>
           <p className="text-2xl font-semibold text-zinc-900">{(objective.ai_objective_score as number).toFixed(1)}</p>
         </div>
       )}
@@ -92,17 +116,17 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
         <div className="flex flex-wrap gap-1">
           {objective.ai_external_internal_classification && (
             <span className="rounded bg-zinc-200 px-2 py-0.5 text-xs text-zinc-800">
-              {objective.ai_external_internal_classification}
+              {deExternalInternal(objective.ai_external_internal_classification)}
             </span>
           )}
           {objective.ai_short_long_term_classification && (
             <span className="rounded bg-zinc-200 px-2 py-0.5 text-xs text-zinc-800">
-              {objective.ai_short_long_term_classification}
+              {deShortMidLong(objective.ai_short_long_term_classification)}
             </span>
           )}
           {objective.ai_exploit_explore_classification && (
             <span className="rounded bg-zinc-200 px-2 py-0.5 text-xs text-zinc-800">
-              {objective.ai_exploit_explore_classification}
+              {deExploitExplore(objective.ai_exploit_explore_classification)}
             </span>
           )}
         </div>

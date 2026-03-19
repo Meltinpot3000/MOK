@@ -83,6 +83,13 @@ import {
   TRANSFORMATION_STATUS_OPTIONS,
 } from "@/lib/strategy-cycle/company-info";
 import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
+import {
+  readAnalysisNetworkLlmPolicy,
+  isLlmFeatureEnabled,
+  type AnalysisNetworkLlmPolicy,
+} from "@/lib/analysis-network/policy";
+import { coerceStrategicContextOutput } from "@/lib/analysis-network/objective-evaluation-providers";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type StrategyCycleViewPageProps = {
   searchParams: Promise<{
@@ -115,7 +122,15 @@ const L1_TABS = [
   "strategic-directions",
   "pips",
 ] as const;
-const UNTERNEHMENSINFO_TABS = ["kennwerte", "mission", "vision", "werte", "kultur", "leadership"] as const;
+const UNTERNEHMENSINFO_TABS = [
+  "kennwerte",
+  "mission",
+  "vision",
+  "werte",
+  "kultur",
+  "leadership",
+  "sentinel-zusammenfassung",
+] as const;
 const STRATEGIC_DESIGN_TABS = ["summary", "challenges", "design", "strategy-matrix"] as const;
 
 const ANALYSIS_TYPES = [
@@ -137,6 +152,58 @@ const PESTEL_AREA_META: Array<{ key: string; label: string; tintPercent: number 
   { key: "legal", label: "Legal", tintPercent: 52 },
 ];
 
+/** Pending ohne Fortschritt: nach dieser Zeit Button wieder frei. */
+const BACKGROUND_JOB_PENDING_STALE_MS = 20 * 60 * 1000;
+/** Running: lange Laeufe (viele Objectives/Entries) erlauben; danach als haengend behandeln. */
+const BACKGROUND_JOB_RUNNING_STALE_MS = 90 * 60 * 1000;
+
+type BackgroundJobRow = {
+  job_type: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+};
+
+function isBackgroundJobStaleForUiLock(
+  job: Pick<BackgroundJobRow, "status" | "created_at" | "started_at">
+): boolean {
+  const now = Date.now();
+  if (job.status === "pending") {
+    return now - new Date(job.created_at).getTime() > BACKGROUND_JOB_PENDING_STALE_MS;
+  }
+  if (job.status === "running") {
+    const ref = job.started_at
+      ? new Date(job.started_at).getTime()
+      : new Date(job.created_at).getTime();
+    return now - ref > BACKGROUND_JOB_RUNNING_STALE_MS;
+  }
+  return false;
+}
+
+function jobActivelyLocksUi(job: BackgroundJobRow, jobType: string): boolean {
+  if (job.job_type !== jobType) return false;
+  if (job.status !== "pending" && job.status !== "running") return false;
+  return !isBackgroundJobStaleForUiLock(job);
+}
+
+function ObjectiveEvaluationDisabledNotice({ policy }: { policy: AnalysisNetworkLlmPolicy }) {
+  if (isLlmFeatureEnabled(policy, "objective_evaluation")) return null;
+  const who = "Eine berechtigte Rolle kann in der Systemkonfiguration (LLM-Nutzung)";
+  if (!policy.llmEnabled) {
+    return (
+      <p className="mt-2 text-xs text-zinc-600">
+        Sentinel✨ Objective-Bewertung: LLM ist global aus. {who} «LLM global aktivieren» einschalten.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-2 text-xs text-zinc-600">
+      Sentinel✨ Objective-Bewertung: Feature ist aus. {who} «Objectives-Bewertung» aktivieren (ggf.
+      zuerst «LLM global aktivieren»).
+    </p>
+  );
+}
+
 function getTabTitle(tab: string) {
   switch (tab) {
     case "summary":
@@ -155,6 +222,27 @@ function getTabTitle(tab: string) {
       return "Workshop-Erkenntnisse";
     default:
       return "Sonstige Analyse";
+  }
+}
+
+function getUnternehmensinfoSubTabLabel(tab: (typeof UNTERNEHMENSINFO_TABS)[number]) {
+  switch (tab) {
+    case "kennwerte":
+      return "Kennwerte";
+    case "mission":
+      return "Mission";
+    case "vision":
+      return "Vision";
+    case "werte":
+      return "Werte";
+    case "kultur":
+      return "Kultur";
+    case "leadership":
+      return "Leadership";
+    case "sentinel-zusammenfassung":
+      return "Sentinel✨ Zusammenfassung";
+    default:
+      return tab;
   }
 }
 
@@ -226,6 +314,18 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "error", text: "Bitte gueltige Verknuepfung auswaehlen." };
   if (error === "objective-insert-failed")
     return { type: "error", text: "Objective konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
+  if (error === "ai-evaluation-disabled")
+    return {
+      type: "error",
+      text: "Sentinel✨ Objective-Bewertung ist nicht aktiviert. Bitte eine berechtigte Rolle, in der Systemkonfiguration (LLM-Nutzung) «LLM global aktivieren» und «Objectives-Bewertung» zu pruefen.",
+    };
+  if (error === "company-profile-incomplete")
+    return {
+      type: "error",
+      text: "Unternehmensprofil fuer die KI-Bewertung unvollstaendig. Bitte Kennwerte/Unternehmensinfo ergaenzen.",
+    };
+  if (error === "llm-budget-exceeded")
+    return { type: "error", text: "LLM-Budget erreicht. Objective-Bewertung wurde nicht gestartet." };
   if (success === "saved")
     return { type: "success", text: "Analyse-Eintrag wurde gespeichert." };
   if (success === "updated")
@@ -395,6 +495,25 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     selectedCycle.legacy_planning_cycle_id ?? undefined
   );
   const branding = await getTenantBranding(context.organizationId);
+  const supabaseForStrategicContext = await createSupabaseServerClient();
+  const { data: strategicContextRow } = await supabaseForStrategicContext
+    .schema("app")
+    .from("strategic_context_cache")
+    .select("context_json, provider, model, prompt_version, created_at")
+    .eq("organization_id", context.organizationId)
+    .eq("is_current", true)
+    .maybeSingle();
+  const strategicContextCache = strategicContextRow
+    ? {
+        parsed: coerceStrategicContextOutput(strategicContextRow.context_json),
+        provider: strategicContextRow.provider,
+        model: strategicContextRow.model,
+        prompt_version: strategicContextRow.prompt_version,
+        created_at: strategicContextRow.created_at,
+      }
+    : null;
+  const analysisLlmPolicy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
+  const canQueueObjectiveEvaluation = isLlmFeatureEnabled(analysisLlmPolicy, "objective_evaluation");
   const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
   const companyKennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
   const entries = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number])
@@ -596,10 +715,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     (job) => job.status === "pending" || job.status === "running" || job.status === "failed"
   );
   const runningJobs = activeOrFailedJobs.filter((job) => job.status === "pending" || job.status === "running");
-  const hasRunningQualityBackfill = runningJobs.some((job) => job.job_type === "quality_backfill");
-  const hasRunningGraphLayout = runningJobs.some((job) => job.job_type === "graph_layout_recompute");
-  const hasRunningObjectiveBackfill = runningJobs.some(
-    (job) => job.job_type === "objective_evaluation_backfill"
+  const hasRunningQualityBackfill = runningJobs.some((job) => jobActivelyLocksUi(job, "quality_backfill"));
+  const hasRunningGraphLayout = runningJobs.some((job) => jobActivelyLocksUi(job, "graph_layout_recompute"));
+  const hasRunningObjectiveBackfill = runningJobs.some((job) =>
+    jobActivelyLocksUi(job, "objective_evaluation_backfill")
+  );
+  const staleObjectiveEvalJobs = runningJobs.filter(
+    (job) =>
+      job.job_type === "objective_evaluation_backfill" && isBackgroundJobStaleForUiLock(job)
   );
   const contributionWeightByPair = new Map<string, number>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
@@ -694,7 +817,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           {L1_TABS.map((tab) => (
             <a
               key={tab}
-              href={tab === "unternehmensinfo" ? "/strategy-cycle?l1=unternehmensinfo&l2=kennzahlen" : `/strategy-cycle?l1=${tab}`}
+              href={tab === "unternehmensinfo" ? "/strategy-cycle?l1=unternehmensinfo&l2=kennwerte" : `/strategy-cycle?l1=${tab}`}
               className={`rounded-md border px-3 py-1.5 text-xs ${
                 activeL1 === tab
                   ? "border-zinc-900 bg-zinc-900 text-white"
@@ -726,33 +849,19 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </>
         ) : activeL1 === "unternehmensinfo" ? (
           <div className="flex flex-wrap gap-2">
-            {UNTERNEHMENSINFO_TABS.map((tab) => {
-              const label =
-                tab === "kennwerte"
-                  ? "Kennwerte"
-                  : tab === "mission"
-                    ? "Mission"
-                    : tab === "vision"
-                      ? "Vision"
-                      : tab === "werte"
-                        ? "Werte"
-                        : tab === "kultur"
-                          ? "Kultur"
-                          : "Leadership";
-              return (
-                <a
-                  key={tab}
-                  href={`/strategy-cycle?l1=unternehmensinfo&l2=${tab}`}
-                  className={`rounded-md border px-3 py-1.5 text-xs ${
-                    activeUnternehmensinfoTab === tab
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                  }`}
-                >
-                  {label}
-                </a>
-              );
-            })}
+            {UNTERNEHMENSINFO_TABS.map((tab) => (
+              <a
+                key={tab}
+                href={`/strategy-cycle?l1=unternehmensinfo&l2=${tab}`}
+                className={`rounded-md border px-3 py-1.5 text-xs ${
+                  activeUnternehmensinfoTab === tab
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                }`}
+              >
+                {getUnternehmensinfoSubTabLabel(tab)}
+              </a>
+            ))}
           </div>
         ) : activeL1 === "strategic-directions" ? (
           <div className="flex flex-wrap gap-2">
@@ -994,6 +1103,86 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </form>
             </article>
           ) : null}
+          {activeUnternehmensinfoTab === "sentinel-zusammenfassung" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Sentinel✨ Zusammenfassung</h2>
+              <p className="mt-2 text-sm text-zinc-600">
+                Aus Kennwerten und Strategiereferenz fuer Sentinel✨ Objective-Bewertungen aufbereiteter strategischer Kontext
+                (Cache in der Datenbank).
+              </p>
+              {!strategicContextCache ? (
+                <p className="mt-4 text-sm text-zinc-600">
+                  Noch kein Eintrag. Die Zusammenfassung wird angelegt, sobald die Objective-Bewertung den strategischen Kontext
+                  erstmalig erzeugt.
+                </p>
+              ) : !strategicContextCache.parsed ? (
+                <p className="mt-4 text-sm text-amber-800">
+                  Gespeicherter Kontext konnte nicht gelesen werden. Bitte Objective-Bewertung erneut anstossen oder Support
+                  kontaktieren.
+                </p>
+              ) : (
+                <>
+                  {![
+                    strategicContextCache.parsed.company_type,
+                    strategicContextCache.parsed.scale,
+                    strategicContextCache.parsed.industry_context,
+                    strategicContextCache.parsed.value_creation_logic,
+                    strategicContextCache.parsed.market_scope,
+                    strategicContextCache.parsed.growth_ambition,
+                    strategicContextCache.parsed.transformation_pressure,
+                  ].some(Boolean) &&
+                  strategicContextCache.parsed.strategic_implications.length === 0 ? (
+                    <p className="mt-4 text-sm text-zinc-600">
+                      Der gespeicherte Kontext enthaelt noch keine ausfuellbaren Felder.
+                    </p>
+                  ) : null}
+                  <dl className="mt-6 grid gap-4 text-sm md:grid-cols-2">
+                    {[
+                      ["Unternehmenstyp", strategicContextCache.parsed.company_type],
+                      ["Skala / Groesse", strategicContextCache.parsed.scale],
+                      ["Industriekontext", strategicContextCache.parsed.industry_context],
+                      ["Wertschoepfungslogik", strategicContextCache.parsed.value_creation_logic],
+                      ["Marktumfang", strategicContextCache.parsed.market_scope],
+                      ["Wachstumsambition", strategicContextCache.parsed.growth_ambition],
+                      ["Transformationsdruck", strategicContextCache.parsed.transformation_pressure],
+                    ].map(([label, value]) =>
+                      value ? (
+                        <div key={String(label)} className="md:col-span-2">
+                          <dt className="font-medium text-zinc-800">{label}</dt>
+                          <dd className="mt-1 whitespace-pre-wrap text-zinc-700">{value}</dd>
+                        </div>
+                      ) : null
+                    )}
+                  </dl>
+                  {strategicContextCache.parsed.strategic_implications.length > 0 ? (
+                    <div className="mt-6">
+                      <h3 className="text-sm font-medium text-zinc-800">Strategische Implikationen</h3>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+                        {strategicContextCache.parsed.strategic_implications.map((line, implIdx) => (
+                          <li key={`${implIdx}-${line.slice(0, 48)}`}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <p className="mt-6 text-xs text-zinc-500">
+                    {[
+                      [strategicContextCache.provider, strategicContextCache.model, strategicContextCache.prompt_version]
+                        .filter(Boolean)
+                        .join(" · "),
+                      strategicContextCache.created_at
+                        ? new Date(strategicContextCache.created_at).toLocaleString("de-CH", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Keine Metadaten (Erstellzeit unbekannt)"}
+                  </p>
+                </>
+              )}
+            </article>
+          ) : null}
         </section>
       ) : null}
 
@@ -1040,20 +1229,32 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   disabled={
                     !canWrite ||
                     (workspace.objectives ?? []).length === 0 ||
-                    hasRunningObjectiveBackfill
+                    hasRunningObjectiveBackfill ||
+                    !canQueueObjectiveEvaluation
                   }
                   className="brand-btn rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
                 >
                   Objectives neu bewerten
                 </button>
               </form>
+              <ObjectiveEvaluationDisabledNotice policy={analysisLlmPolicy} />
+              {canQueueObjectiveEvaluation && staleObjectiveEvalJobs.length > 0 ? (
+                <p className="mt-2 text-xs text-amber-800">
+                  Ein Objective-Bewertungsjob ist aelter als ca.:{" "}
+                  {Math.round(BACKGROUND_JOB_PENDING_STALE_MS / 60000)} Min (pending) bzw.{" "}
+                  {Math.round(BACKGROUND_JOB_RUNNING_STALE_MS / 60000)} Min (running) — der Button ist wieder
+                  aktiv. Haengende Eintraege bleiben in der Jobliste; ein neuer Lauf stellt einen zusaetzlichen
+                  Job ein.
+                </p>
+              ) : null}
             </div>
           </article>
 
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Objective Balance (Scatter)</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Objective-Balance (Streudiagramm)</h3>
             <p className="mt-1 text-sm text-zinc-600">
-              Verteilung Internal/External vs Exploit/Explore.
+              Grob lesbar: Intern/Extern vs Exploit/Explore (KI-Klassifikation, nur wenige Rasterpunkte). Feine
+              Verschiebung unter den Punkten kommt aus Teilscores, damit Ueberlagerungen sichtbar werden.
             </p>
             <div className="mt-4">
               <ObjectiveBalanceScatterPlot objectives={workspace.objectives ?? []} />

@@ -28,6 +28,9 @@ export type LlmUsage = {
 export type LlmScoreResponse<T> = {
   result: T | null;
   usage: LlmUsage | null;
+  /** gesetzt, wenn result Nutzdaten liefert, aber diese keinen Provider tragen (z. B. Kandidatenliste) */
+  resolvedProvider?: "gemini" | "groq" | null;
+  resolvedModel?: string | null;
 };
 
 export type LlmQualityScore = {
@@ -101,8 +104,12 @@ export const GEMINI_MODEL_ASSIST = process.env.ANALYSIS_LLM_MODEL_GEMINI_ASSIST 
 export const GROQ_MODEL = process.env.ANALYSIS_LLM_MODEL_GROQ ?? "llama-3.3-70b-versatile";
 const REQUEST_TIMEOUT_MS = Number(process.env.ANALYSIS_LLM_TIMEOUT_MS ?? 20000);
 const GEMINI_MIN_INTERVAL_MS = Number(process.env.ANALYSIS_LLM_MIN_INTERVAL_MS_GEMINI ?? 900);
-const GROQ_MIN_INTERVAL_MS = Number(process.env.ANALYSIS_LLM_MIN_INTERVAL_MS_GROQ ?? 450);
-const RETRY_BASE_DELAY_MS = Number(process.env.ANALYSIS_LLM_RETRY_BASE_DELAY_MS ?? 1200);
+/** Groq: niedriger = hoere Kadenz; bei 429 greifen Retries. 30 RPM fuer z. B. llama-3.3-70b ≈ 2000 ms Mittel — siehe Groq-Dokumentation / eigene Limits. */
+const GROQ_MIN_INTERVAL_MS = Number(process.env.ANALYSIS_LLM_MIN_INTERVAL_MS_GROQ ?? 250);
+const RETRY_BASE_DELAY_MS_GEMINI = Number(
+  process.env.ANALYSIS_LLM_RETRY_BASE_DELAY_MS_GEMINI ?? process.env.ANALYSIS_LLM_RETRY_BASE_DELAY_MS ?? 1200
+);
+const RETRY_BASE_DELAY_MS_GROQ = Number(process.env.ANALYSIS_LLM_RETRY_BASE_DELAY_MS_GROQ ?? 800);
 const RETRY_MAX_ATTEMPTS = Number(process.env.ANALYSIS_LLM_RETRY_MAX_ATTEMPTS ?? 3);
 const lastRequestAtByProvider: Record<"gemini" | "groq", number> = {
   gemini: 0,
@@ -507,7 +514,8 @@ async function fetchWithRetry(
     const shouldRetry =
       !response || response.status === 429 || response.status >= 500 || response.status === 408;
     if (!shouldRetry) return response;
-    const retryDelayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt) + Math.round(Math.random() * 250);
+    const baseDelay = provider === "groq" ? RETRY_BASE_DELAY_MS_GROQ : RETRY_BASE_DELAY_MS_GEMINI;
+    const retryDelayMs = baseDelay * Math.pow(2, attempt) + Math.round(Math.random() * 250);
     await sleep(retryDelayMs);
   }
   return null;
@@ -602,33 +610,33 @@ export async function scorePairWithLlmDetailed(
   options?: { strategyReferenceText?: string | null; maxOutputTokens?: number }
 ): Promise<LlmScoreResponse<LlmScoredLink>> {
   const prompt = buildPrompt(a, b, options?.strategyReferenceText);
-  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_LINKS, options?.maxOutputTokens);
-  if (geminiRaw) {
-    const parsed = parseJsonPayload(geminiRaw.text);
-    if (parsed) {
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, options?.maxOutputTokens);
+  if (groqRaw) {
+    const parsedGroq = parseJsonPayload(groqRaw.text);
+    if (parsedGroq) {
       return {
         result: {
-          ...parsed,
-          provider: "gemini",
-          model: GEMINI_MODEL_LINKS,
+          ...parsedGroq,
+          provider: "groq",
+          model: GROQ_MODEL,
           promptVersion: LINK_PROMPT_VERSION,
         },
-        usage: geminiRaw.usage,
+        usage: groqRaw.usage,
       };
     }
   }
-  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, options?.maxOutputTokens);
-  if (!groqRaw) return { result: null, usage: null };
-  const parsed = parseJsonPayload(groqRaw.text);
-  if (!parsed) return { result: null, usage: groqRaw.usage };
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_LINKS, options?.maxOutputTokens);
+  if (!geminiRaw) return { result: null, usage: null };
+  const parsed = parseJsonPayload(geminiRaw.text);
+  if (!parsed) return { result: null, usage: geminiRaw.usage };
   return {
     result: {
       ...parsed,
-      provider: "groq",
-      model: GROQ_MODEL,
+      provider: "gemini",
+      model: GEMINI_MODEL_LINKS,
       promptVersion: LINK_PROMPT_VERSION,
     },
-    usage: groqRaw.usage,
+    usage: geminiRaw.usage,
   };
 }
 
@@ -641,70 +649,55 @@ export async function scorePairWithLlm(
   return response.result;
 }
 
+function buildQualityScoreFromJson(
+  json: Record<string, unknown>,
+  provider: "gemini" | "groq",
+  model: string
+): LlmQualityScore {
+  const hasStrategicValue = Boolean(json.strategicValue ?? true);
+  const qualityScore = clamp(Number(json.qualityScore ?? 50), 0, 100);
+  const impactScore = clamp(Number(json.impactScore ?? qualityScore), 0, 100);
+  const certaintyScore = clamp(Number(json.certaintyScore ?? qualityScore), 0, 100);
+  const evidenceScore = clamp(Number(json.evidenceScore ?? qualityScore), 0, 100);
+  const structureScore = clamp(Number(json.structureScore ?? qualityScore), 0, 100);
+  const enforcedZeroScore = hasStrategicValue ? Math.round(qualityScore) : 0;
+  return {
+    qualityScore: enforcedZeroScore,
+    impactScore: hasStrategicValue ? Math.round(impactScore) : 0,
+    certaintyScore: hasStrategicValue ? Math.round(certaintyScore) : 0,
+    evidenceScore: hasStrategicValue ? Math.round(evidenceScore) : 0,
+    structureScore: hasStrategicValue ? Math.round(structureScore) : 0,
+    hasStrategicValue,
+    strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
+    explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
+    provider,
+    model,
+    promptVersion: QUALITY_PROMPT_VERSION,
+  };
+}
+
 export async function scoreEntryQualityWithLlm(
   entry: QualityEntryInput,
   options?: { strategyReferenceText?: string | null; maxOutputTokens?: number }
 ): Promise<LlmScoreResponse<LlmQualityScore>> {
   const prompt = buildQualityPrompt(entry, options?.strategyReferenceText);
-  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_QUALITY, options?.maxOutputTokens);
-  if (geminiRaw) {
-    const json = parseGenericJson(geminiRaw.text);
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, options?.maxOutputTokens);
+  if (groqRaw) {
+    const json = parseGenericJson(groqRaw.text);
     if (json) {
-      const hasStrategicValue = Boolean(json.strategicValue ?? true);
-      const qualityScore = clamp(Number(json.qualityScore ?? 50), 0, 100);
-      const impactScore = clamp(Number(json.impactScore ?? qualityScore), 0, 100);
-      const certaintyScore = clamp(Number(json.certaintyScore ?? qualityScore), 0, 100);
-      const evidenceScore = clamp(Number(json.evidenceScore ?? qualityScore), 0, 100);
-      const structureScore = clamp(Number(json.structureScore ?? qualityScore), 0, 100);
-      const enforcedZeroScore = hasStrategicValue ? Math.round(qualityScore) : 0;
       return {
-        result: {
-          qualityScore: enforcedZeroScore,
-          impactScore: hasStrategicValue ? Math.round(impactScore) : 0,
-          certaintyScore: hasStrategicValue ? Math.round(certaintyScore) : 0,
-          evidenceScore: hasStrategicValue ? Math.round(evidenceScore) : 0,
-          structureScore: hasStrategicValue ? Math.round(structureScore) : 0,
-          hasStrategicValue,
-          strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
-          explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
-          provider: "gemini",
-          model: GEMINI_MODEL_QUALITY,
-          promptVersion: QUALITY_PROMPT_VERSION,
-        },
-        usage: geminiRaw.usage,
+        result: buildQualityScoreFromJson(json, "groq", GROQ_MODEL),
+        usage: groqRaw.usage,
       };
     }
   }
-  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, options?.maxOutputTokens);
-  if (!groqRaw) return { result: null, usage: null };
-  const json = parseGenericJson(groqRaw.text);
-  if (!json) return { result: null, usage: groqRaw.usage };
-  const hasStrategicValue = Boolean(json.strategicValue ?? true);
-  const qualityScore = clamp(Number(json.qualityScore ?? 50), 0, 100);
-  const enforcedZeroScore = hasStrategicValue ? Math.round(qualityScore) : 0;
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_QUALITY, options?.maxOutputTokens);
+  if (!geminiRaw) return { result: null, usage: null };
+  const json = parseGenericJson(geminiRaw.text);
+  if (!json) return { result: null, usage: geminiRaw.usage };
   return {
-    result: {
-      qualityScore: enforcedZeroScore,
-      impactScore: hasStrategicValue
-        ? Math.round(clamp(Number(json.impactScore ?? qualityScore), 0, 100))
-        : 0,
-      certaintyScore: hasStrategicValue
-        ? Math.round(clamp(Number(json.certaintyScore ?? qualityScore), 0, 100))
-        : 0,
-      evidenceScore: hasStrategicValue
-        ? Math.round(clamp(Number(json.evidenceScore ?? qualityScore), 0, 100))
-        : 0,
-      structureScore: hasStrategicValue
-        ? Math.round(clamp(Number(json.structureScore ?? qualityScore), 0, 100))
-        : 0,
-      hasStrategicValue,
-      strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
-      explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
-      provider: "groq",
-      model: GROQ_MODEL,
-      promptVersion: QUALITY_PROMPT_VERSION,
-    },
-    usage: groqRaw.usage,
+    result: buildQualityScoreFromJson(json, "gemini", GEMINI_MODEL_QUALITY),
+    usage: geminiRaw.usage,
   };
 }
 
@@ -717,6 +710,25 @@ export async function assessClusterWithLlm(input: {
   maxOutputTokens?: number;
 }): Promise<LlmScoreResponse<LlmClusterAssessment>> {
   const prompt = buildClusterPrompt(input);
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
+  if (groqRaw) {
+    const json = parseGenericJson(groqRaw.text);
+    if (json) {
+      return {
+        result: {
+          label: String(json.label ?? input.currentLabel).trim().slice(0, 120) || input.currentLabel,
+          summary:
+            String(json.summary ?? input.currentSummary).trim().slice(0, 220) || input.currentSummary,
+          scoreAdjustment: clamp(Number(json.scoreAdjustment ?? 0), -0.2, 0.2),
+          explanation: String(json.explanation ?? "").trim().slice(0, 160),
+          provider: "groq",
+          model: GROQ_MODEL,
+          promptVersion: CLUSTER_PROMPT_VERSION,
+        },
+        usage: groqRaw.usage,
+      };
+    }
+  }
   const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
   if (!geminiRaw) return { result: null, usage: null };
   const json = parseGenericJson(geminiRaw.text);
@@ -746,6 +758,25 @@ export async function assessGapWithLlm(input: {
   maxOutputTokens?: number;
 }): Promise<LlmScoreResponse<LlmGapAssessment>> {
   const prompt = buildGapPrompt(input);
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
+  if (groqRaw) {
+    const json = parseGenericJson(groqRaw.text);
+    if (json) {
+      return {
+        result: {
+          severity: Math.round(clamp(Number(json.severity ?? input.severity), 1, 5)),
+          recommendation:
+            String(json.recommendation ?? input.recommendation).trim().slice(0, 220) ||
+            input.recommendation,
+          rationale: String(json.rationale ?? "").trim().slice(0, 160),
+          provider: "groq",
+          model: GROQ_MODEL,
+          promptVersion: GAP_PROMPT_VERSION,
+        },
+        usage: groqRaw.usage,
+      };
+    }
+  }
   const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
   if (!geminiRaw) return { result: null, usage: null };
   const json = parseGenericJson(geminiRaw.text);
@@ -765,20 +796,7 @@ export async function assessGapWithLlm(input: {
   };
 }
 
-export async function proposeChallengeCandidatesWithLlm(input: {
-  clusters: Array<{ id: string; label: string; summary: string; score: number }>;
-  gaps: Array<{ id: string; dimension: string; gapType: string; severity: number; recommendation: string }>;
-  strategyReferenceText?: string | null;
-  maxOutputTokens?: number;
-}): Promise<LlmScoreResponse<LlmChallengeCandidate[]>> {
-  if (input.clusters.length === 0 && input.gaps.length === 0) {
-    return { result: [], usage: null };
-  }
-  const prompt = buildChallengeCandidatesPrompt(input);
-  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
-  if (!geminiRaw) return { result: null, usage: null };
-  const json = parseGenericJson(geminiRaw.text);
-  if (!json) return { result: null, usage: geminiRaw.usage };
+function parseChallengeCandidatesFromJson(json: Record<string, unknown>): LlmChallengeCandidate[] {
   const candidatesRaw = Array.isArray(json.candidates) ? json.candidates : [];
   const candidates: LlmChallengeCandidate[] = [];
   for (const item of candidatesRaw) {
@@ -796,7 +814,44 @@ export async function proposeChallengeCandidatesWithLlm(input: {
       sourceRef,
     });
   }
-  return { result: candidates.slice(0, 8), usage: geminiRaw.usage };
+  return candidates.slice(0, 8);
+}
+
+export async function proposeChallengeCandidatesWithLlm(input: {
+  clusters: Array<{ id: string; label: string; summary: string; score: number }>;
+  gaps: Array<{ id: string; dimension: string; gapType: string; severity: number; recommendation: string }>;
+  strategyReferenceText?: string | null;
+  maxOutputTokens?: number;
+}): Promise<LlmScoreResponse<LlmChallengeCandidate[]>> {
+  if (input.clusters.length === 0 && input.gaps.length === 0) {
+    return { result: [], usage: null };
+  }
+  const prompt = buildChallengeCandidatesPrompt(input);
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
+  if (groqRaw) {
+    const json = parseGenericJson(groqRaw.text);
+    if (json) {
+      const candidates = parseChallengeCandidatesFromJson(json);
+      if (candidates.length > 0) {
+        return {
+          result: candidates,
+          usage: groqRaw.usage,
+          resolvedProvider: "groq",
+          resolvedModel: GROQ_MODEL,
+        };
+      }
+    }
+  }
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
+  if (!geminiRaw) return { result: null, usage: null };
+  const json = parseGenericJson(geminiRaw.text);
+  if (!json) return { result: null, usage: geminiRaw.usage };
+  return {
+    result: parseChallengeCandidatesFromJson(json),
+    usage: geminiRaw.usage,
+    resolvedProvider: "gemini",
+    resolvedModel: GEMINI_MODEL_ASSIST,
+  };
 }
 
 export async function proposeGraphLayoutWithLlm(input: {
@@ -824,33 +879,33 @@ export async function proposeGraphLayoutWithLlm(input: {
   if (input.nodes.length === 0) return { result: null, usage: null };
   const expectedNodeIds = input.nodes.map((node) => node.id);
   const prompt = buildGraphLayoutPrompt(input);
-  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
-  if (geminiRaw) {
-    const parsed = parseGraphLayoutJson(geminiRaw.text, expectedNodeIds);
-    if (parsed) {
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
+  if (groqRaw) {
+    const parsedGroq = parseGraphLayoutJson(groqRaw.text, expectedNodeIds);
+    if (parsedGroq) {
       return {
         result: {
-          ...parsed,
-          provider: "gemini",
-          model: GEMINI_MODEL_ASSIST,
+          ...parsedGroq,
+          provider: "groq",
+          model: GROQ_MODEL,
           promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
         },
-        usage: geminiRaw.usage,
+        usage: groqRaw.usage,
       };
     }
   }
-  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
-  if (!groqRaw) return { result: null, usage: null };
-  const parsed = parseGraphLayoutJson(groqRaw.text, expectedNodeIds);
-  if (!parsed) return { result: null, usage: groqRaw.usage };
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
+  if (!geminiRaw) return { result: null, usage: null };
+  const parsed = parseGraphLayoutJson(geminiRaw.text, expectedNodeIds);
+  if (!parsed) return { result: null, usage: geminiRaw.usage };
   return {
     result: {
       ...parsed,
-      provider: "groq",
-      model: GROQ_MODEL,
+      provider: "gemini",
+      model: GEMINI_MODEL_ASSIST,
       promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
     },
-    usage: groqRaw.usage,
+    usage: geminiRaw.usage,
   };
 }
 
@@ -859,21 +914,21 @@ export async function invokeLlmForJson(
   prompt: string,
   maxOutputTokens?: number
 ): Promise<{ text: string; usage: LlmUsage; provider: string; model: string } | null> {
-  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, maxOutputTokens);
-  if (geminiRaw?.text) {
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, maxOutputTokens);
+  if (groqRaw?.text) {
     return {
-      text: geminiRaw.text,
-      usage: geminiRaw.usage,
-      provider: "gemini",
-      model: GEMINI_MODEL_ASSIST,
+      text: groqRaw.text,
+      usage: groqRaw.usage,
+      provider: "groq",
+      model: GROQ_MODEL,
     };
   }
-  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, maxOutputTokens);
-  if (!groqRaw?.text) return null;
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, maxOutputTokens);
+  if (!geminiRaw?.text) return null;
   return {
-    text: groqRaw.text,
-    usage: groqRaw.usage,
-    provider: "groq",
-    model: GROQ_MODEL,
+    text: geminiRaw.text,
+    usage: geminiRaw.usage,
+    provider: "gemini",
+    model: GEMINI_MODEL_ASSIST,
   };
 }

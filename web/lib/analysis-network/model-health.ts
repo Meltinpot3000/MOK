@@ -36,7 +36,7 @@ export type SupabaseClientLike = {
 };
 
 export type ModelHealthStatus = "healthy" | "degraded" | "down";
-export type FallbackMode = "none" | "groq" | "rule";
+export type FallbackMode = "none" | "groq" | "gemini" | "rule";
 
 type ProbeResult = {
   provider: "gemini" | "groq";
@@ -269,10 +269,13 @@ export async function runAndPersistModelHealthChecks(input: {
   const rows = targets.map((target) => {
     const probe = probes.get(makeProbeKey(target.provider, target.model));
     const providerHealthy = probe?.status === "healthy";
-    const fallbackByGroq = target.provider === "gemini" && !providerHealthy && groqProbe?.status === "healthy";
+    const geminiFallbackModel = geminiFallbackModelForFeature(target.feature);
+    const geminiProbe = probes.get(makeProbeKey("gemini", geminiFallbackModel));
+    const fallbackByGemini =
+      target.provider === "groq" && !providerHealthy && geminiProbe?.status === "healthy";
 
-    const status: ModelHealthStatus = providerHealthy ? "healthy" : fallbackByGroq ? "degraded" : "down";
-    const fallbackMode: FallbackMode = providerHealthy ? "none" : fallbackByGroq ? "groq" : "rule";
+    const status: ModelHealthStatus = providerHealthy ? "healthy" : fallbackByGemini ? "degraded" : "down";
+    const fallbackMode: FallbackMode = providerHealthy ? "none" : fallbackByGemini ? "gemini" : "rule";
 
     return {
       organization_id: input.organizationId,
@@ -289,7 +292,8 @@ export async function runAndPersistModelHealthChecks(input: {
       checked_at: checkedAtIso,
       metadata: {
         trigger: input.trigger,
-        groqFallbackHealthy: groqProbe?.status === "healthy",
+        geminiFallbackHealthy: geminiProbe?.status === "healthy",
+        geminiFallbackModel,
       },
     };
   });
