@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 import { computeClusters } from "@/lib/analysis-network/cluster";
 import { computeGapFindings } from "@/lib/analysis-network/gaps";
 import { generateHybridLinkCandidates } from "@/lib/analysis-network/link-scorer";
-import { evaluateLlmBudgetStatus } from "@/lib/analysis-network/budget";
+import {
+  evaluateLlmBudgetStatus,
+  type BudgetSupabaseClientLike,
+} from "@/lib/analysis-network/budget";
 import {
   isLlmFeatureEnabled,
   readAnalysisNetworkLlmPolicy,
@@ -40,6 +43,17 @@ import {
   computeDirectionScore,
   computeGapScore,
 } from "@/lib/strategy-cycle/scoring";
+import {
+  invalidateStrategicContextCache,
+  validateCompanyProfileForEvaluation,
+  buildCompanyProfileInput,
+  getOrBuildStrategicContext,
+} from "@/lib/strategy-cycle/objective-evaluation";
+import { readCompanyKennzahlenFromBrandingConfig } from "@/lib/strategy-cycle/company-info";
+import {
+  evaluateObjectiveWithLlm,
+  evaluateObjectivePortfolioWithLlm,
+} from "@/lib/analysis-network/objective-evaluation-providers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type WorkspaceContext = {
@@ -473,7 +487,7 @@ async function computePersistedQuality(params: {
   const brandingConfig = await readBrandingConfig(params.supabase, params.organizationId);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase: params.supabase,
+    supabase: params.supabase as unknown as BudgetSupabaseClientLike,
     organizationId: params.organizationId,
     policy: llmPolicy,
   });
@@ -542,7 +556,7 @@ async function recomputeAndPersistGraphLayout(params: {
   const brandingConfig = await readBrandingConfig(params.supabase, params.organizationId);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase: params.supabase,
+    supabase: params.supabase as unknown as BudgetSupabaseClientLike,
     organizationId: params.organizationId,
     policy: llmPolicy,
   });
@@ -578,7 +592,10 @@ async function recomputeAndPersistGraphLayout(params: {
     : { result: null, usage: null };
   const fallbackReason = llmResponse.result ? null : canUseGraphLayoutLlm ? "llm_no_result" : "llm_not_requested";
   const pointsById = new Map<string, GraphLayoutPoint>(
-    (llmResponse.result?.nodes ?? fallbackPoints).map((point) => [point.id, point])
+    (llmResponse.result?.nodes ?? fallbackPoints).map((point) => [
+      point.id,
+      { ...point, reason: point.reason ?? "" } as GraphLayoutPoint,
+    ])
   );
   const llmNodeIds = new Set((llmResponse.result?.nodes ?? []).map((node) => node.id));
   const calculatedAt = new Date().toISOString();
@@ -678,6 +695,14 @@ function done(path = "/strategy-cycle"): never {
   redirect(path);
 }
 
+/** Wenn _noRedirect=1 im FormData: nur revalidieren, kein Redirect. Fuer sanfte UX (z.B. Pill-Klicks). */
+function finishOrRedirect(formData: FormData, path: string): void {
+  revalidatePath("/strategy-cycle");
+  revalidatePath("/strategy-matrix");
+  if (formData.get("_noRedirect") === "1") return;
+  redirect(path);
+}
+
 function readSmallIntField(formData: FormData, key: string, fallback = 3): number {
   const parsed = Number(formData.get(key) ?? fallback);
   return clampScore1to5(parsed);
@@ -692,6 +717,12 @@ function readSafeReturnTo(formData: FormData, fallbackPath: string): string {
 function withSuccess(path: string, success: string): string {
   const delimiter = path.includes("?") ? "&" : "?";
   return `${path}${delimiter}success=${encodeURIComponent(success)}`;
+}
+
+function readCorrelationStatusField(formData: FormData, key: string): "green" | "yellow" | "red" | "unknown" {
+  const raw = String(formData.get(key) ?? "unknown").trim().toLowerCase();
+  if (raw === "green" || raw === "yellow" || raw === "red" || raw === "unknown") return raw;
+  return "unknown";
 }
 
 function readAndValidateInput(formData: FormData) {
@@ -968,7 +999,38 @@ export async function saveStrategyReferenceText(formData: FormData) {
     .update({ branding_config: nextBrandingConfig })
     .eq("organization_id", context.organizationId);
 
-  done("/strategy-cycle?l1=mission-vision-culture-values&success=strategy-reference-saved");
+  await invalidateStrategicContextCache(supabase, context.organizationId);
+  done("/strategy-cycle?l1=unternehmensinfo&success=strategy-reference-saved");
+}
+
+export async function saveCompanyKennzahlen(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const supabase = await createSupabaseServerClient();
+  const brandingConfig = await readBrandingConfig(supabase, context.organizationId);
+  const regionenRaw = formData.getAll("company_info_marktregionen");
+  const marktregionen = Array.isArray(regionenRaw) ? regionenRaw.map(String).filter(Boolean).slice(0, 20) : [];
+  const nextBrandingConfig = {
+    ...brandingConfig,
+    company_info_organizationsform: String(formData.get("company_info_organizationsform") ?? "").trim().slice(0, 80),
+    company_info_organizationsform_other: String(formData.get("company_info_organizationsform_other") ?? "").trim().slice(0, 200),
+    company_info_unternehmensgroesse: String(formData.get("company_info_unternehmensgroesse") ?? "").trim().slice(0, 50),
+    company_info_industriekontext: String(formData.get("company_info_industriekontext") ?? "").trim().slice(0, 80),
+    company_info_industriekontext_other: String(formData.get("company_info_industriekontext_other") ?? "").trim().slice(0, 200),
+    company_info_kern_wertschoepfung: String(formData.get("company_info_kern_wertschoepfung") ?? "").trim().slice(0, 50),
+    company_info_wichtigstes_produkt_oder_dienstleistung: String(formData.get("company_info_wichtigstes_produkt_oder_dienstleistung") ?? "").trim().slice(0, 500),
+    company_info_transformation_status: String(formData.get("company_info_transformation_status") ?? "").trim().slice(0, 50),
+    company_info_marktregionen: marktregionen,
+    company_info_umsatz_heute: String(formData.get("company_info_umsatz_heute") ?? "").trim().slice(0, 100),
+    company_info_umsatz_ziel: String(formData.get("company_info_umsatz_ziel") ?? "").trim().slice(0, 100),
+  };
+  await supabase
+    .schema("app")
+    .from("tenant_branding")
+    .update({ branding_config: nextBrandingConfig })
+    .eq("organization_id", context.organizationId);
+
+  await invalidateStrategicContextCache(supabase, context.organizationId);
+  done("/strategy-cycle?l1=unternehmensinfo&l2=kennwerte&success=company-kennzahlen-saved");
 }
 
 export async function updateAnalysisEntry(formData: FormData) {
@@ -1273,7 +1335,7 @@ export async function generateLinkDrafts(formData: FormData) {
   const networkConfig = parseAnalysisNetworkConfig(brandingConfig);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase,
+    supabase: supabase as unknown as BudgetSupabaseClientLike,
     organizationId: context.organizationId,
     policy: llmPolicy,
   });
@@ -1632,7 +1694,7 @@ export async function recomputeClusters(formData: FormData) {
   const networkConfig = parseAnalysisNetworkConfig(brandingConfig);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase,
+    supabase: supabase as unknown as BudgetSupabaseClientLike,
     organizationId: context.organizationId,
     policy: llmPolicy,
   });
@@ -1865,7 +1927,7 @@ export async function recomputeGaps(formData: FormData) {
   const networkConfig = parseAnalysisNetworkConfig(brandingConfig);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
-    supabase,
+    supabase: supabase as unknown as BudgetSupabaseClientLike,
     organizationId: context.organizationId,
     policy: llmPolicy,
   });
@@ -2767,21 +2829,21 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
       { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
     );
   }
-  done("/strategy-cycle?l1=strategic-directions&success=direction-created");
+  done("/strategy-cycle?l1=strategic-directions&l2=design&success=direction-created");
 }
 
 export async function createObjectiveInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
   if (!title) {
-    done("/strategy-cycle?l1=strategic-directions&l2=objectives&error=missing-title");
+    done("/strategy-cycle?l1=objectives&error=missing-title");
   }
   const description = String(formData.get("description") ?? "").trim() || null;
   const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
   const importanceScore = readSmallIntField(formData, "importance_score", 3);
   const status = String(formData.get("status") ?? "draft");
   const supabase = await createSupabaseServerClient();
-  await supabase.schema("app").from("objectives").insert({
+  const { error } = await supabase.schema("app").from("objectives").insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
     title,
@@ -2790,18 +2852,21 @@ export async function createObjectiveInCycle(formData: FormData) {
     importance_score: importanceScore,
     status,
   });
-  done("/strategy-cycle?l1=strategic-directions&l2=objectives&success=objective-created");
+  if (error) {
+    done("/strategy-cycle?l1=objectives&error=objective-insert-failed");
+  }
+  done("/strategy-cycle?l1=objectives&success=objective-created");
 }
 
 export async function updateObjectiveInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const objectiveId = String(formData.get("objective_id") ?? "").trim();
   if (!objectiveId) {
-    done("/strategy-cycle?l1=strategic-directions&l2=objectives");
+    done("/strategy-cycle?l1=objectives");
   }
   const title = String(formData.get("title") ?? "").trim();
   if (!title) {
-    done("/strategy-cycle?l1=strategic-directions&l2=objectives&error=missing-title");
+    done("/strategy-cycle?l1=objectives&error=missing-title");
   }
   const description = String(formData.get("description") ?? "").trim() || null;
   const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
@@ -2817,20 +2882,208 @@ export async function updateObjectiveInCycle(formData: FormData) {
       time_horizon: timeHorizon,
       importance_score: importanceScore,
       status,
+      ai_evaluation_status: "outdated",
     })
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", objectiveId);
-  done("/strategy-cycle?l1=strategic-directions&l2=objectives&success=objective-updated");
+  done("/strategy-cycle?l1=objectives&success=objective-updated");
+}
+
+export async function runObjectiveEvaluation(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: branding } = await supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+
+  const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
+  if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) {
+    done("/strategy-cycle?l1=objectives&error=ai-evaluation-disabled");
+  }
+
+  const kennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
+  const strategyRef = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
+  const missing = validateCompanyProfileForEvaluation(kennzahlen);
+  if (missing.length > 0) {
+    done(`/strategy-cycle?l1=objectives&error=company-profile-incomplete&missing=${encodeURIComponent(missing.join(","))}`);
+  }
+
+  const budgetStatus = await evaluateLlmBudgetStatus({
+    supabase: supabase as unknown as BudgetSupabaseClientLike,
+    organizationId: context.organizationId,
+    policy,
+  });
+  if (!budgetStatus.allowed) {
+    done("/strategy-cycle?l1=objectives&error=llm-budget-exceeded");
+  }
+
+  const companyProfile = buildCompanyProfileInput(kennzahlen, strategyRef);
+  const maxTokens = resolveLlmMaxOutputTokens(policy, "objective_evaluation");
+
+  const { contextJson } = await getOrBuildStrategicContext({
+    supabase,
+    organizationId: context.organizationId,
+    companyProfile,
+    maxOutputTokens: maxTokens,
+  });
+
+  const { data: objectives } = await supabase
+    .schema("app")
+    .from("objectives")
+    .select("id, title, description, importance_score")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId);
+
+  const objectivesList = objectives ?? [];
+  const usageEvents: Array<{
+    organizationId: string;
+    cycleInstanceId: string | null;
+    feature: string;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    usageMissing?: boolean;
+  }> = [];
+
+  const objectivesWithClassifications: Array<{
+    id: string;
+    title: string;
+    classification: { external_internal: string; short_long_term: string; exploit_explore: string };
+  }> = [];
+
+  for (const obj of objectivesList) {
+    const response = await evaluateObjectiveWithLlm(
+      contextJson,
+      { title: obj.title, description: obj.description },
+      maxTokens
+    );
+    if (response.usage) {
+      usageEvents.push({
+        organizationId: context.organizationId,
+        cycleInstanceId: context.cycleId,
+        feature: "objective_evaluation",
+        provider: (response as { provider?: string }).provider ?? "gemini",
+        model: (response as { model?: string }).model ?? "gemini-assist",
+        promptVersion: "objective-eval-v1",
+        promptTokens: response.usage.promptTokens,
+        completionTokens: response.usage.completionTokens,
+        totalTokens: response.usage.totalTokens,
+        usageMissing: response.usage.usageMissing,
+      });
+    }
+    if (response.result) {
+      const r = response.result;
+      const aiObjectiveScore =
+        0.3 * r.strategic_relevance_score +
+        0.25 * r.fit_to_company_score +
+        0.2 * r.feasibility_score +
+        0.25 * r.clarity_score;
+      await supabase
+        .schema("app")
+        .from("objectives")
+        .update({
+          ai_clarity_score: r.clarity_score,
+          ai_strategic_relevance_score: r.strategic_relevance_score,
+          ai_feasibility_score: r.feasibility_score,
+          ai_fit_to_company_score: r.fit_to_company_score,
+          ai_confidence_score: r.confidence,
+          ai_external_internal_classification: r.dimension_classification.external_internal,
+          ai_short_long_term_classification: r.dimension_classification.short_long_term,
+          ai_exploit_explore_classification: r.dimension_classification.exploit_explore,
+          ai_issues_json: r.issues,
+          ai_improvement_suggestion: r.improvement_suggestion,
+          ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
+          ai_evaluation_status: "valid",
+          ai_evaluated_at: new Date().toISOString(),
+          ai_evaluation_version: "objective-eval-v1",
+        })
+        .eq("id", obj.id)
+        .eq("organization_id", context.organizationId)
+        .eq("cycle_instance_id", context.cycleId);
+      objectivesWithClassifications.push({
+        id: obj.id,
+        title: obj.title,
+        classification: r.dimension_classification,
+      });
+    } else {
+      await supabase
+        .schema("app")
+        .from("objectives")
+        .update({
+          ai_evaluation_status: "failed",
+        })
+        .eq("id", obj.id)
+        .eq("organization_id", context.organizationId)
+        .eq("cycle_instance_id", context.cycleId);
+    }
+  }
+
+  const objectivesForPortfolio = objectivesWithClassifications
+    .map(
+      (o) =>
+        `- ${o.title} | internal/external: ${o.classification.external_internal} | short/mid/long: ${o.classification.short_long_term} | exploit/explore: ${o.classification.exploit_explore}`
+    )
+    .join("\n");
+
+  const portfolioResponse = await evaluateObjectivePortfolioWithLlm(objectivesForPortfolio, maxTokens);
+  if (portfolioResponse.usage) {
+    usageEvents.push({
+      organizationId: context.organizationId,
+      cycleInstanceId: context.cycleId,
+      feature: "objective_evaluation",
+      provider: (portfolioResponse as { provider?: string }).provider ?? "gemini",
+      model: (portfolioResponse as { model?: string }).model ?? "gemini-assist",
+      promptVersion: "objective-portfolio-v1",
+      promptTokens: portfolioResponse.usage.promptTokens,
+      completionTokens: portfolioResponse.usage.completionTokens,
+      totalTokens: portfolioResponse.usage.totalTokens,
+      usageMissing: portfolioResponse.usage.usageMissing,
+    });
+  }
+  if (portfolioResponse.result) {
+    const pr = portfolioResponse.result;
+    await supabase
+      .schema("app")
+      .from("cycle_instance_portfolio_evaluation")
+      .upsert(
+        {
+          organization_id: context.organizationId,
+          cycle_instance_id: context.cycleId,
+          balance_score: pr.balance_score,
+          distribution_internal_external_json: pr.distribution,
+          distribution_exploit_explore_json: pr.distribution,
+          distribution_short_long_json: pr.distribution,
+          portfolio_gaps_json: pr.gaps,
+          portfolio_risks_json: pr.risks,
+          portfolio_recommendation: pr.recommendation,
+          portfolio_evaluated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "cycle_instance_id" }
+      );
+  }
+
+  if (usageEvents.length > 0) {
+    await recordLlmUsageEvents(supabase, usageEvents);
+  }
+
+  done("/strategy-cycle?l1=objectives&success=objective-evaluation-complete");
 }
 
 export async function createStrategicChallengeInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
   if (!title) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-title");
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=missing-title");
   }
-  const priority = readSmallIntField(formData, "priority", 3);
   const impactScore = readSmallIntField(formData, "impact_score", 3);
   const urgencyScore = readSmallIntField(formData, "urgency_score", 3);
   const scopeScore = readSmallIntField(formData, "scope_score", 3);
@@ -2850,7 +3103,7 @@ export async function createStrategicChallengeInCycle(formData: FormData) {
     cycle_instance_id: context.cycleId,
     title,
     description,
-    priority,
+    priority: 3,
     impact_score: impactScore,
     urgency_score: urgencyScore,
     scope_score: scopeScore,
@@ -2861,14 +3114,14 @@ export async function createStrategicChallengeInCycle(formData: FormData) {
     visibility: "internal",
     created_by_membership_id: context.membershipId,
   });
-  done("/strategy-cycle?l1=strategic-directions&success=challenge-created");
+  done("/strategy-cycle?l1=strategic-directions&l2=challenges&success=challenge-created");
 }
 
 export async function updateStrategicChallengeAssessment(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const strategicChallengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
   if (!strategicChallengeId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges");
   }
   const impactScore = readSmallIntField(formData, "impact_score", 3);
   const urgencyScore = readSmallIntField(formData, "urgency_score", 3);
@@ -2898,15 +3151,16 @@ export async function updateStrategicChallengeAssessment(formData: FormData) {
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", strategicChallengeId);
-  done("/strategy-cycle?l1=strategic-directions&success=assessment-updated");
+  done("/strategy-cycle?l1=strategic-directions&l2=challenges&success=assessment-updated");
 }
 
 export async function updateStrategicDirectionAssessment(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const strategicDirectionId = String(formData.get("strategic_direction_id") ?? "").trim();
   if (!strategicDirectionId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
+  const title = String(formData.get("title") ?? "").trim();
   const strategicValueScore = readSmallIntField(formData, "strategic_value_score", 3);
   const capabilityFitScore = readSmallIntField(formData, "capability_fit_score", 3);
   const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
@@ -2923,6 +3177,7 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     .schema("app")
     .from("strategic_directions")
     .update({
+      ...(title ? { title } : {}),
       description,
       strategic_value_score: strategicValueScore,
       capability_fit_score: capabilityFitScore,
@@ -2934,7 +3189,7 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", strategicDirectionId);
-  done("/strategy-cycle?l1=strategic-directions&success=assessment-updated");
+  done("/strategy-cycle?l1=strategic-directions&l2=design&success=assessment-updated");
 }
 
 export async function linkDirectionToChallengePredecessor(formData: FormData) {
@@ -2942,7 +3197,7 @@ export async function linkDirectionToChallengePredecessor(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
   if (!directionId || !challengeId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("challenge_direction_links").upsert(
@@ -2957,7 +3212,7 @@ export async function linkDirectionToChallengePredecessor(formData: FormData) {
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,strategic_challenge_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkDirectionChallengePredecessor(formData: FormData) {
@@ -2965,7 +3220,7 @@ export async function unlinkDirectionChallengePredecessor(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
   if (!directionId || !challengeId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -2976,7 +3231,7 @@ export async function unlinkDirectionChallengePredecessor(formData: FormData) {
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("strategic_challenge_id", challengeId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function linkDirectionToClusterInCycle(formData: FormData) {
@@ -2984,7 +3239,7 @@ export async function linkDirectionToClusterInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const clusterId = String(formData.get("cluster_id") ?? "").trim();
   if (!directionId || !clusterId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_direction_cluster_links").upsert(
@@ -2997,7 +3252,7 @@ export async function linkDirectionToClusterInCycle(formData: FormData) {
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,cluster_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkDirectionFromClusterInCycle(formData: FormData) {
@@ -3005,7 +3260,7 @@ export async function unlinkDirectionFromClusterInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const clusterId = String(formData.get("cluster_id") ?? "").trim();
   if (!directionId || !clusterId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3016,7 +3271,7 @@ export async function unlinkDirectionFromClusterInCycle(formData: FormData) {
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("cluster_id", clusterId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function linkDirectionToObjectiveInCycle(formData: FormData) {
@@ -3024,7 +3279,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const objectiveId = String(formData.get("objective_id") ?? "").trim();
   if (!directionId || !objectiveId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_direction_objective_links").upsert(
@@ -3037,7 +3292,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkDirectionFromObjectiveInCycle(formData: FormData) {
@@ -3045,7 +3300,7 @@ export async function unlinkDirectionFromObjectiveInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const objectiveId = String(formData.get("objective_id") ?? "").trim();
   if (!directionId || !objectiveId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3056,7 +3311,7 @@ export async function unlinkDirectionFromObjectiveInCycle(formData: FormData) {
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("objective_id", objectiveId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function linkDirectionToGapInCycle(formData: FormData) {
@@ -3064,7 +3319,7 @@ export async function linkDirectionToGapInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const relationId = String(formData.get("cluster_objective_relation_id") ?? "").trim();
   if (!directionId || !relationId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_direction_gap_links").upsert(
@@ -3077,7 +3332,7 @@ export async function linkDirectionToGapInCycle(formData: FormData) {
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,cluster_objective_relation_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkDirectionFromGapInCycle(formData: FormData) {
@@ -3085,7 +3340,7 @@ export async function unlinkDirectionFromGapInCycle(formData: FormData) {
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const relationId = String(formData.get("cluster_objective_relation_id") ?? "").trim();
   if (!directionId || !relationId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3096,7 +3351,7 @@ export async function unlinkDirectionFromGapInCycle(formData: FormData) {
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("cluster_objective_relation_id", relationId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function saveClusterObjectiveRelation(formData: FormData) {
@@ -3157,6 +3412,60 @@ export async function saveClusterObjectiveRelation(formData: FormData) {
   done("/strategy-cycle?l1=strategic-directions&success=updated");
 }
 
+export async function saveCorrelationStatusOverride(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const challengeId = String(formData.get("challenge_id") ?? "").trim();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!challengeId || !objectiveId || !directionId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=summary&error=missing-link");
+  }
+  const status = readCorrelationStatusField(formData, "status");
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const returnTo = readSafeReturnTo(formData, "/strategy-cycle?l1=strategic-directions&l2=summary");
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("strategy_correlation_status_overrides").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      objective_id: objectiveId,
+      challenge_id: challengeId,
+      strategic_direction_id: directionId,
+      status,
+      note,
+      updated_by_membership_id: context.membershipId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      onConflict:
+        "cycle_instance_id,objective_id,challenge_id,strategic_direction_id",
+    }
+  );
+  done(withSuccess(returnTo, "correlation-override-saved"));
+}
+
+export async function clearCorrelationStatusOverride(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const challengeId = String(formData.get("challenge_id") ?? "").trim();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!challengeId || !objectiveId || !directionId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=summary");
+  }
+  const returnTo = readSafeReturnTo(formData, "/strategy-cycle?l1=strategic-directions&l2=summary");
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategy_correlation_status_overrides")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("objective_id", objectiveId)
+    .eq("challenge_id", challengeId)
+    .eq("strategic_direction_id", directionId);
+  done(withSuccess(returnTo, "correlation-override-cleared"));
+}
+
 export async function createStrategyProgramInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
@@ -3197,7 +3506,7 @@ export async function linkStrategicChallengeToIndustryInCycle(formData: FormData
     },
     { onConflict: "cycle_instance_id,strategic_challenge_id,industry_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=linked");
 }
 
 export async function unlinkStrategicChallengeFromIndustryInCycle(formData: FormData) {
@@ -3216,7 +3525,7 @@ export async function unlinkStrategicChallengeFromIndustryInCycle(formData: Form
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_challenge_id", challengeId)
     .eq("industry_id", industryId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=unlinked");
 }
 
 export async function linkStrategicChallengeToBusinessModelInCycle(formData: FormData) {
@@ -3236,7 +3545,7 @@ export async function linkStrategicChallengeToBusinessModelInCycle(formData: For
     },
     { onConflict: "cycle_instance_id,strategic_challenge_id,business_model_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=linked");
 }
 
 export async function unlinkStrategicChallengeFromBusinessModelInCycle(formData: FormData) {
@@ -3255,7 +3564,7 @@ export async function unlinkStrategicChallengeFromBusinessModelInCycle(formData:
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_challenge_id", challengeId)
     .eq("business_model_id", businessModelId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=unlinked");
 }
 
 export async function linkStrategicDirectionToIndustryInCycle(formData: FormData) {
@@ -3263,7 +3572,7 @@ export async function linkStrategicDirectionToIndustryInCycle(formData: FormData
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const industryId = String(formData.get("industry_id") ?? "").trim();
   if (!directionId || !industryId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_direction_industries").upsert(
@@ -3275,7 +3584,7 @@ export async function linkStrategicDirectionToIndustryInCycle(formData: FormData
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,industry_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkStrategicDirectionFromIndustryInCycle(formData: FormData) {
@@ -3283,7 +3592,7 @@ export async function unlinkStrategicDirectionFromIndustryInCycle(formData: Form
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const industryId = String(formData.get("industry_id") ?? "").trim();
   if (!directionId || !industryId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3294,7 +3603,7 @@ export async function unlinkStrategicDirectionFromIndustryInCycle(formData: Form
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("industry_id", industryId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function linkStrategicDirectionToBusinessModelInCycle(formData: FormData) {
@@ -3302,7 +3611,7 @@ export async function linkStrategicDirectionToBusinessModelInCycle(formData: For
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const businessModelId = String(formData.get("business_model_id") ?? "").trim();
   if (!directionId || !businessModelId) {
-    done("/strategy-cycle?l1=strategic-directions&error=missing-link");
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_direction_business_models").upsert(
@@ -3314,7 +3623,7 @@ export async function linkStrategicDirectionToBusinessModelInCycle(formData: For
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,business_model_id" }
   );
-  done("/strategy-cycle?l1=strategic-directions&success=linked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
 
 export async function unlinkStrategicDirectionFromBusinessModelInCycle(formData: FormData) {
@@ -3322,7 +3631,7 @@ export async function unlinkStrategicDirectionFromBusinessModelInCycle(formData:
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
   const businessModelId = String(formData.get("business_model_id") ?? "").trim();
   if (!directionId || !businessModelId) {
-    done("/strategy-cycle?l1=strategic-directions");
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3333,7 +3642,7 @@ export async function unlinkStrategicDirectionFromBusinessModelInCycle(formData:
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
     .eq("business_model_id", businessModelId);
-  done("/strategy-cycle?l1=strategic-directions&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
 export async function createPipInitiativeInCycle(formData: FormData) {
@@ -3410,5 +3719,134 @@ export async function unlinkInitiativeTargetPredecessor(formData: FormData) {
     .eq("cycle_instance_id", context.cycleId)
     .eq("initiative_id", initiativeId)
     .eq("annual_target_id", annualTargetId);
-  done("/strategy-cycle?l1=pips&success=unlinked");
+  finishOrRedirect(formData, "/strategy-cycle?l1=pips&success=unlinked");
+}
+
+export async function linkObjectiveToIndustryInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const industryId = String(formData.get("industry_id") ?? "").trim();
+  if (!objectiveId || !industryId) {
+    done("/strategy-cycle?l1=objectives&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("objective_industries").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      objective_id: objectiveId,
+      industry_id: industryId,
+    },
+    { onConflict: "planning_cycle_id,objective_id,industry_id" }
+  );
+  finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=linked");
+}
+
+export async function unlinkObjectiveFromIndustryInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const industryId = String(formData.get("industry_id") ?? "").trim();
+  if (!objectiveId || !industryId) {
+    done("/strategy-cycle?l1=objectives");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("objective_industries")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("objective_id", objectiveId)
+    .eq("industry_id", industryId);
+  finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=unlinked");
+}
+
+export async function linkObjectiveToBusinessModelInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const businessModelId = String(formData.get("business_model_id") ?? "").trim();
+  if (!objectiveId || !businessModelId) {
+    done("/strategy-cycle?l1=objectives&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase.schema("app").from("objective_business_models").upsert(
+    {
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      objective_id: objectiveId,
+      business_model_id: businessModelId,
+    },
+    { onConflict: "planning_cycle_id,objective_id,business_model_id" }
+  );
+  finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=linked");
+}
+
+export async function unlinkObjectiveFromBusinessModelInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const businessModelId = String(formData.get("business_model_id") ?? "").trim();
+  if (!objectiveId || !businessModelId) {
+    done("/strategy-cycle?l1=objectives");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("objective_business_models")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("objective_id", objectiveId)
+    .eq("business_model_id", businessModelId);
+  finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=unlinked");
+}
+
+export async function deleteObjectiveInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  if (!objectiveId) {
+    done("/strategy-cycle?l1=objectives");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("objectives")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", objectiveId);
+  done("/strategy-cycle?l1=objectives&success=objective-deleted");
+}
+
+export async function deleteStrategicChallengeInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
+  if (!challengeId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_challenges")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", challengeId);
+  done("/strategy-cycle?l1=strategic-directions&l2=challenges&success=challenge-deleted");
+}
+
+export async function deleteStrategicDirectionInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!directionId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", directionId);
+  done("/strategy-cycle?l1=strategic-directions&l2=design&success=direction-deleted");
 }

@@ -8,17 +8,18 @@ export function roundScore(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** Challenge Score = Impact × 0.4 + Urgency × 0.25 + Scope × 0.2 + Steuerbarkeit × 0.2 */
 export function computeChallengeScore(input: {
   impactScore: number;
   urgencyScore: number;
   scopeScore: number;
-  rootCauseScore: number;
+  rootCauseScore: number; // Steuerbarkeit (controllability), DB-Spalte bleibt root_cause_score
 }): number {
   const impact = clampScore1to5(input.impactScore);
   const urgency = clampScore1to5(input.urgencyScore);
   const scope = clampScore1to5(input.scopeScore);
-  const rootCause = clampScore1to5(input.rootCauseScore);
-  return roundScore(impact * 0.35 + urgency * 0.25 + scope * 0.2 + rootCause * 0.2);
+  const steuerbarkeit = clampScore1to5(input.rootCauseScore);
+  return roundScore(impact * 0.4 + urgency * 0.25 + scope * 0.2 + steuerbarkeit * 0.2);
 }
 
 export function computeDirectionScore(input: {

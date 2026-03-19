@@ -28,10 +28,10 @@ create table if not exists app.strategy_programs (
   strategic_direction_id uuid references app.strategic_directions(id) on delete set null,
   title text not null,
   description text,
-  owner_membership_id uuid references app.memberships(id) on delete set null,
+  owner_membership_id uuid references app.organization_memberships(id) on delete set null,
   budget numeric(18,2),
   timeline text,
-  created_by_membership_id uuid references app.memberships(id) on delete set null,
+  created_by_membership_id uuid references app.organization_memberships(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -45,7 +45,7 @@ create table if not exists app.cluster_objective_relations (
   objective_id uuid not null references app.objectives(id) on delete cascade,
   relation_strength smallint not null default 1,
   gap_score numeric(10,2) not null default 0,
-  created_by_membership_id uuid references app.memberships(id) on delete set null,
+  created_by_membership_id uuid references app.organization_memberships(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint cluster_objective_relations_relation_strength_check check (relation_strength between 0 and 3)
@@ -58,7 +58,7 @@ create table if not exists app.strategic_direction_cluster_links (
   cycle_instance_id uuid not null references app.cycle_instances(id) on delete cascade,
   strategic_direction_id uuid not null references app.strategic_directions(id) on delete cascade,
   cluster_id uuid not null references app.analysis_clusters(id) on delete cascade,
-  created_by_membership_id uuid references app.memberships(id) on delete set null,
+  created_by_membership_id uuid references app.organization_memberships(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -69,7 +69,7 @@ create table if not exists app.strategic_direction_objective_links (
   cycle_instance_id uuid not null references app.cycle_instances(id) on delete cascade,
   strategic_direction_id uuid not null references app.strategic_directions(id) on delete cascade,
   objective_id uuid not null references app.objectives(id) on delete cascade,
-  created_by_membership_id uuid references app.memberships(id) on delete set null,
+  created_by_membership_id uuid references app.organization_memberships(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -80,7 +80,7 @@ create table if not exists app.strategic_direction_gap_links (
   cycle_instance_id uuid not null references app.cycle_instances(id) on delete cascade,
   strategic_direction_id uuid not null references app.strategic_directions(id) on delete cascade,
   cluster_objective_relation_id uuid not null references app.cluster_objective_relations(id) on delete cascade,
-  created_by_membership_id uuid references app.memberships(id) on delete set null,
+  created_by_membership_id uuid references app.organization_memberships(id) on delete set null,
   created_at timestamptz not null default now()
 );
 

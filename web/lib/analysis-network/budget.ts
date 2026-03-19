@@ -2,7 +2,7 @@
 
 import type { AnalysisNetworkLlmPolicy } from "@/lib/analysis-network/policy";
 
-type SupabaseClientLike = {
+export type BudgetSupabaseClientLike = {
   schema: (name: string) => {
     from: (table: string) => {
       select: (columns: string) => {
@@ -33,7 +33,7 @@ function toNumber(value: unknown): number {
 }
 
 export async function evaluateLlmBudgetStatus(input: {
-  supabase: SupabaseClientLike;
+  supabase: BudgetSupabaseClientLike;
   organizationId: string;
   policy: AnalysisNetworkLlmPolicy;
 }): Promise<LlmBudgetStatus> {

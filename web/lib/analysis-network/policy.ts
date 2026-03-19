@@ -5,7 +5,8 @@ type LlmFeatureKey =
   | "cluster_assessment"
   | "gap_assessment"
   | "challenge_recommendation"
-  | "model_health_checks";
+  | "model_health_checks"
+  | "objective_evaluation";
 
 export type AnalysisNetworkLlmPolicy = {
   llmEnabled: boolean;
@@ -64,6 +65,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     gap_assessment: readBoolean(featureFlagsRaw.gap_assessment, true),
     challenge_recommendation: readBoolean(featureFlagsRaw.challenge_recommendation, true),
     model_health_checks: readBoolean(featureFlagsRaw.model_health_checks, true),
+    objective_evaluation: readBoolean(featureFlagsRaw.objective_evaluation, false),
   };
 
   const maxOutputTokensByFeature: Record<LlmFeatureKey, number> = {
@@ -74,6 +76,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     gap_assessment: readNumber(outputByFeatureRaw.gap_assessment, 380, 64, 4096),
     challenge_recommendation: readNumber(outputByFeatureRaw.challenge_recommendation, 900, 64, 4096),
     model_health_checks: readNumber(outputByFeatureRaw.model_health_checks, 128, 64, 4096),
+    objective_evaluation: readNumber(outputByFeatureRaw.objective_evaluation, 600, 64, 4096),
   };
 
   return {

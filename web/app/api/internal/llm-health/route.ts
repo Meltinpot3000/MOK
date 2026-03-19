@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { runAndPersistModelHealthChecks } from "@/lib/analysis-network/model-health";
+import {
+  runAndPersistModelHealthChecks,
+  type SupabaseClientLike,
+} from "@/lib/analysis-network/model-health";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function isAuthorized(request: Request): boolean {
@@ -30,7 +33,7 @@ async function handleCronHealthcheck(request: Request) {
   for (const organization of organizations ?? []) {
     if (!organization.id) continue;
     await runAndPersistModelHealthChecks({
-      supabase: admin,
+      supabase: admin as unknown as SupabaseClientLike,
       organizationId: organization.id,
       trigger: "cron",
     });

@@ -9,6 +9,10 @@ import {
   createAnalysisEntry,
   createStrategicDirectionInCycle,
   backfillEntryQuality,
+  clearCorrelationStatusOverride,
+  deleteObjectiveInCycle,
+  deleteStrategicChallengeInCycle,
+  deleteStrategicDirectionInCycle,
   dismissChallengeCandidate,
   deleteAnalysisEntry,
   generateLinkDrafts,
@@ -17,6 +21,8 @@ import {
   linkDirectionToGapInCycle,
   linkDirectionToObjectiveInCycle,
   linkInitiativeToTargetPredecessor,
+  linkObjectiveToBusinessModelInCycle,
+  linkObjectiveToIndustryInCycle,
   promoteChallengeCandidate,
   promoteClusterToStrategicChallenge,
   promoteToStrategicChallenge,
@@ -24,12 +30,16 @@ import {
   recomputeGraphLayout,
   recomputeGaps,
   rejectLinkDraft,
+  saveCorrelationStatusOverride,
   saveStrategyReferenceText,
+  saveCompanyKennzahlen,
   saveClusterObjectiveRelation,
   linkStrategicChallengeToBusinessModelInCycle,
   linkStrategicChallengeToIndustryInCycle,
   linkStrategicDirectionToBusinessModelInCycle,
   linkStrategicDirectionToIndustryInCycle,
+  unlinkObjectiveFromBusinessModelInCycle,
+  unlinkObjectiveFromIndustryInCycle,
   unlinkStrategicChallengeFromBusinessModelInCycle,
   unlinkStrategicChallengeFromIndustryInCycle,
   unlinkStrategicDirectionFromBusinessModelInCycle,
@@ -43,15 +53,35 @@ import {
   updateStrategicChallengeAssessment,
   updateStrategicDirectionAssessment,
   updateAnalysisEntry,
+  runObjectiveEvaluation,
 } from "@/app/(ceo)/strategy-cycle/actions";
-import StrategyMatrixPage from "@/app/(ceo)/strategy-matrix/page";
+import { StrategyMatrixView } from "@/app/(ceo)/strategy-matrix/StrategyMatrixView";
 import { AnalysisVisualizationWorkspace } from "@/components/analysis-visualization/AnalysisVisualizationWorkspace";
 import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
 import { LiveRangeInput } from "@/components/ceo/LiveRangeInput";
+import { ChallengeCreateForm } from "@/components/ceo/ChallengeCreateForm";
+import { ObjectiveCreateForm } from "@/components/ceo/ObjectiveCreateForm";
+import { StrategicDesignSummary } from "@/components/ceo/StrategicDesignSummary";
+import { StrategicDirectionsTable } from "@/components/ceo/StrategicDirectionsTable";
+import { ObjectivesTable } from "@/components/ceo/ObjectivesTable";
+import { ChallengesTable } from "@/components/ceo/ChallengesTable";
+import { ObjectiveAiPanel } from "@/components/ceo/ObjectiveAiPanel";
+import { ObjectiveBalanceScatterPlot } from "@/components/ceo/ObjectiveBalanceScatterPlot";
+import { PortfolioSummaryView } from "@/components/ceo/PortfolioSummaryView";
 import { getTenantBranding } from "@/lib/ceo/queries";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { computeStrategicDesignCorrelationSummary } from "@/lib/strategy-cycle/correlation";
 import { readStrategyReferenceFieldsFromBrandingConfig } from "@/lib/strategy-cycle/strategy-reference";
+import {
+  readCompanyKennzahlenFromBrandingConfig,
+  ORGFORM_OPTIONS,
+  UNTERNEHMENSGROESSE_OPTIONS,
+  INDUSTRIE_OPTIONS,
+  MARKTREGIONEN_OPTIONS,
+  KERN_WERTSCHOEPFUNG_OPTIONS,
+  TRANSFORMATION_STATUS_OPTIONS,
+} from "@/lib/strategy-cycle/company-info";
 import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
 
 type StrategyCycleViewPageProps = {
@@ -79,12 +109,14 @@ const STRATEGY_CYCLE_TABS = [
 ] as const;
 
 const L1_TABS = [
-  "mission-vision-culture-values",
+  "unternehmensinfo",
+  "objectives",
   "corporate-strategy",
   "strategic-directions",
   "pips",
 ] as const;
-const STRATEGIC_DESIGN_TABS = ["objectives", "challenges", "design", "strategy-matrix"] as const;
+const UNTERNEHMENSINFO_TABS = ["kennwerte", "mission", "vision", "werte", "kultur", "leadership"] as const;
+const STRATEGIC_DESIGN_TABS = ["summary", "challenges", "design", "strategy-matrix"] as const;
 
 const ANALYSIS_TYPES = [
   "environment",
@@ -128,8 +160,10 @@ function getTabTitle(tab: string) {
 
 function getL1TabTitle(tab: string) {
   switch (tab) {
-    case "mission-vision-culture-values":
-      return "Mission, Vision, Kultur & Werte";
+    case "unternehmensinfo":
+      return "Unternehmensinfo";
+    case "objectives":
+      return "Objectives";
     case "corporate-strategy":
       return "Strategische Erkenntnisse";
     case "strategic-directions":
@@ -190,6 +224,8 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "error", text: "Analyse-Eintrag wurde nicht gefunden oder ist nicht mehr verfuegbar." };
   if (error === "missing-link")
     return { type: "error", text: "Bitte gueltige Verknuepfung auswaehlen." };
+  if (error === "objective-insert-failed")
+    return { type: "error", text: "Objective konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
   if (success === "saved")
     return { type: "success", text: "Analyse-Eintrag wurde gespeichert." };
   if (success === "updated")
@@ -226,8 +262,14 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Objective wurde erstellt." };
   if (success === "objective-updated")
     return { type: "success", text: "Objective wurde aktualisiert." };
+  if (success === "objective-deleted")
+    return { type: "success", text: "Objective wurde geloescht." };
   if (success === "challenge-created")
     return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
+  if (success === "challenge-deleted")
+    return { type: "success", text: "Strategische Herausforderung wurde geloescht." };
+  if (success === "direction-deleted")
+    return { type: "success", text: "Strategische Stossrichtung wurde geloescht." };
   if (success === "initiative-created")
     return { type: "success", text: "PIP wurde erstellt." };
   if (success === "program-created")
@@ -239,7 +281,13 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "unlinked")
     return { type: "success", text: "Predecessor-Verknuepfung wurde entfernt." };
   if (success === "strategy-reference-saved")
-    return { type: "success", text: "Mission, Vision, Kultur und Werte wurden gespeichert." };
+    return { type: "success", text: "Unternehmensinfo wurde gespeichert." };
+  if (success === "company-kennzahlen-saved")
+    return { type: "success", text: "Kennwerte wurden gespeichert." };
+  if (success === "correlation-override-saved")
+    return { type: "success", text: "Status-Override fuer die Korrelation wurde gespeichert." };
+  if (success === "correlation-override-cleared")
+    return { type: "success", text: "Status-Override wurde entfernt. Auto-Status ist wieder aktiv." };
   return null;
 }
 
@@ -292,13 +340,19 @@ function readTriScores(metadata: unknown) {
 export default async function StrategyCycleViewPage({ searchParams }: StrategyCycleViewPageProps) {
   const resolvedSearchParams = await searchParams;
   const legacyTab = resolvedSearchParams.tab;
-  const requestedL1 = String(resolvedSearchParams.l1 ?? "").trim();
+  let requestedL1 = String(resolvedSearchParams.l1 ?? "").trim();
+  if (requestedL1 === "mission-vision-culture-values") requestedL1 = "unternehmensinfo";
   const requestedL2 = String(resolvedSearchParams.l2 ?? legacyTab ?? "summary").trim();
   const activeL1 = L1_TABS.includes(requestedL1 as (typeof L1_TABS)[number])
     ? requestedL1
     : legacyTab
       ? "corporate-strategy"
-      : "mission-vision-culture-values";
+      : "unternehmensinfo";
+  const activeUnternehmensinfoTab =
+    activeL1 === "unternehmensinfo" &&
+    UNTERNEHMENSINFO_TABS.includes(requestedL2 as (typeof UNTERNEHMENSINFO_TABS)[number])
+      ? requestedL2
+      : "kennwerte";
   const activeTab =
     activeL1 === "corporate-strategy" &&
     STRATEGY_CYCLE_TABS.includes(requestedL2 as (typeof STRATEGY_CYCLE_TABS)[number])
@@ -308,7 +362,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     activeL1 === "strategic-directions" &&
     STRATEGIC_DESIGN_TABS.includes(requestedL2 as (typeof STRATEGIC_DESIGN_TABS)[number])
       ? requestedL2
-      : "objectives";
+      : "summary";
   const actionTab = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number]) ? activeTab : "environment";
 
   const pageAccess = await getSidebarAccessContext("strategy-cycle");
@@ -334,6 +388,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const workspace = await getStrategyCycleWorkspaceData(context.organizationId, selectedCycle.id);
   const branding = await getTenantBranding(context.organizationId);
   const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
+  const companyKennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
   const entries = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number])
     ? workspace.grouped[activeTab as keyof typeof workspace.grouped] ?? []
     : [];
@@ -416,12 +471,34 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     });
   }
   const directionCountByChallengeId = new Map<string, number>();
+  const directionIdsByChallengeId = new Map<string, Set<string>>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
     directionCountByChallengeId.set(
       link.strategic_challenge_id,
       (directionCountByChallengeId.get(link.strategic_challenge_id) ?? 0) + 1
     );
+    const current = directionIdsByChallengeId.get(link.strategic_challenge_id) ?? new Set<string>();
+    current.add(link.strategic_direction_id);
+    directionIdsByChallengeId.set(link.strategic_challenge_id, current);
   }
+  const programById = new Map((workspace.programs ?? []).map((p) => [p.id, p] as const));
+  const directionIdsWithInitiatives = new Set<string>();
+  for (const initiative of workspace.initiatives ?? []) {
+    const program = initiative.program_id ? programById.get(initiative.program_id) : null;
+    if (program?.strategic_direction_id) directionIdsWithInitiatives.add(program.strategic_direction_id);
+  }
+  const totalChallenges = (workspace.challenges ?? []).length;
+  const challengesCoveredByDirections = totalChallenges === 0 ? 0 : (workspace.challenges ?? []).filter((c) => (directionCountByChallengeId.get(c.id) ?? 0) > 0).length;
+  const challengesCoveredByInitiatives =
+    totalChallenges === 0
+      ? 0
+      : (workspace.challenges ?? []).filter((c) => {
+          const dirIds = directionIdsByChallengeId.get(c.id);
+          if (!dirIds) return false;
+          return [...dirIds].some((d) => directionIdsWithInitiatives.has(d));
+        }).length;
+  const coverageByDirectionsPercent = totalChallenges === 0 ? 0 : Math.round((challengesCoveredByDirections / totalChallenges) * 100);
+  const coverageByInitiativesPercent = totalChallenges === 0 ? 0 : Math.round((challengesCoveredByInitiatives / totalChallenges) * 100);
   const directionIndustryIdsById = new Map<string, string[]>();
   for (const row of workspace.directionIndustries ?? []) {
     const current = directionIndustryIdsById.get(row.strategic_direction_id) ?? [];
@@ -560,6 +637,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       cells,
     };
   });
+  const strategicDesignSummary = computeStrategicDesignCorrelationSummary({
+    challenges: workspace.challenges ?? [],
+    objectives: workspace.objectives ?? [],
+    directions: workspace.strategicDirections ?? [],
+    clusterMembers: workspace.clusterMembers ?? [],
+    clusterObjectiveRelations: workspace.clusterObjectiveRelations ?? [],
+    challengeDirectionLinks: workspace.challengeDirectionLinks ?? [],
+    directionObjectiveLinks: workspace.directionObjectiveLinks ?? [],
+    overrides: workspace.correlationStatusOverrides ?? [],
+  });
 
   return (
     <div className="space-y-6">
@@ -596,7 +683,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           {L1_TABS.map((tab) => (
             <a
               key={tab}
-              href={`/strategy-cycle?l1=${tab}`}
+              href={tab === "unternehmensinfo" ? "/strategy-cycle?l1=unternehmensinfo&l2=kennzahlen" : `/strategy-cycle?l1=${tab}`}
               className={`rounded-md border px-3 py-1.5 text-xs ${
                 activeL1 === tab
                   ? "border-zinc-900 bg-zinc-900 text-white"
@@ -626,12 +713,42 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </div>
             <p className="text-sm text-zinc-600">{getStGallenHint(activeTab)}</p>
           </>
+        ) : activeL1 === "unternehmensinfo" ? (
+          <div className="flex flex-wrap gap-2">
+            {UNTERNEHMENSINFO_TABS.map((tab) => {
+              const label =
+                tab === "kennwerte"
+                  ? "Kennwerte"
+                  : tab === "mission"
+                    ? "Mission"
+                    : tab === "vision"
+                      ? "Vision"
+                      : tab === "werte"
+                        ? "Werte"
+                        : tab === "kultur"
+                          ? "Kultur"
+                          : "Leadership";
+              return (
+                <a
+                  key={tab}
+                  href={`/strategy-cycle?l1=unternehmensinfo&l2=${tab}`}
+                  className={`rounded-md border px-3 py-1.5 text-xs ${
+                    activeUnternehmensinfoTab === tab
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                  }`}
+                >
+                  {label}
+                </a>
+              );
+            })}
+          </div>
         ) : activeL1 === "strategic-directions" ? (
           <div className="flex flex-wrap gap-2">
             {STRATEGIC_DESIGN_TABS.map((tab) => {
               const label =
-                tab === "objectives"
-                  ? "Objectives"
+                tab === "summary"
+                  ? "Zusammenfassung"
                   : tab === "challenges"
                     ? "Strategische Herausforderungen"
                     : tab === "strategy-matrix"
@@ -655,587 +772,404 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
         ) : null}
       </section>
 
-      {activeL1 === "mission-vision-culture-values" ? (
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <article className="brand-card p-6 lg:col-span-2">
-            <h2 className="text-lg font-semibold text-zinc-900">Mission, Vision, Kultur, Werte & Fuehrung</h2>
-            <p className="mt-2 text-sm text-zinc-600">
-              Hinterlege die Leitbild-Bausteine als Freitext und pflege sie laufend.
+      {activeL1 === "unternehmensinfo" ? (
+        <section className="space-y-4">
+          {activeUnternehmensinfoTab === "kennwerte" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Kennwerte</h2>
+              <p className="mt-2 text-sm text-zinc-600">
+                Grundlegende Unternehmenskennwerte fuer den Strategiezyklus.
+              </p>
+              <form action={saveCompanyKennzahlen} className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="block text-sm text-zinc-700">
+                  <span className="mb-1 block font-medium">Organisationsform</span>
+                  <select
+                    name="company_info_organizationsform"
+                    defaultValue={companyKennzahlen.organizationsform}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Bitte waehlen —</option>
+                    {ORGFORM_OPTIONS.filter((o) => o !== "other").map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                    <option value="other">Sonstige</option>
+                  </select>
+                  <input
+                    type="text"
+                    name="company_info_organizationsform_other"
+                    defaultValue={companyKennzahlen.organizationsform_other}
+                    placeholder="Bei Sonstige: eigene Angabe"
+                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-700">
+                  <span className="mb-1 block font-medium">Unternehmensgroesse (Mitarbeitende)</span>
+                  <select
+                    name="company_info_unternehmensgroesse"
+                    defaultValue={companyKennzahlen.unternehmensgroesse}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Bitte waehlen —</option>
+                    {UNTERNEHMENSGROESSE_OPTIONS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm text-zinc-700 md:col-span-2">
+                  <span className="mb-1 block font-medium">Industriekontext</span>
+                  <select
+                    name="company_info_industriekontext"
+                    defaultValue={companyKennzahlen.industriekontext}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Bitte waehlen —</option>
+                    {INDUSTRIE_OPTIONS.filter((o) => o !== "other").map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                    <option value="other">Sonstige</option>
+                  </select>
+                  <input
+                    type="text"
+                    name="company_info_industriekontext_other"
+                    defaultValue={companyKennzahlen.industriekontext_other}
+                    placeholder="Bei Sonstige: eigene Angabe"
+                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-700 md:col-span-2">
+                  <span className="mb-1 block font-medium">Kern-Wertschöpfung</span>
+                  <select
+                    name="company_info_kern_wertschoepfung"
+                    defaultValue={companyKennzahlen.kern_wertschoepfung}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Bitte waehlen —</option>
+                    {KERN_WERTSCHOEPFUNG_OPTIONS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    name="company_info_wichtigstes_produkt_oder_dienstleistung"
+                    defaultValue={companyKennzahlen.wichtigstes_produkt_oder_dienstleistung}
+                    placeholder="Wichtigstes Produkt oder wichtigste Dienstleistung"
+                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-700 md:col-span-2">
+                  <span className="mb-1 block font-medium">Marktregionen</span>
+                  <div className="flex flex-wrap gap-2">
+                    {MARKTREGIONEN_OPTIONS.map((region) => (
+                      <label key={region} className="flex items-center gap-2 rounded border border-zinc-200 px-3 py-1.5">
+                        <input
+                          type="checkbox"
+                          name="company_info_marktregionen"
+                          value={region}
+                          defaultChecked={companyKennzahlen.marktregionen.includes(region)}
+                        />
+                        <span className="text-sm">{region}</span>
+                      </label>
+                    ))}
+                  </div>
+                </label>
+                <label className="block text-sm text-zinc-700">
+                  <span className="mb-1 block font-medium">Umsatzgroesse heute</span>
+                  <input
+                    type="text"
+                    name="company_info_umsatz_heute"
+                    defaultValue={companyKennzahlen.umsatz_heute}
+                    placeholder="z.B. 5 Mio. CHF"
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-700">
+                  <span className="mb-1 block font-medium">Umsatzgroesse Ziel (Ende Strategiezyklus)</span>
+                  <input
+                    type="text"
+                    name="company_info_umsatz_ziel"
+                    defaultValue={companyKennzahlen.umsatz_ziel}
+                    placeholder="z.B. 8 Mio. CHF"
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-700 md:col-span-2">
+                  <span className="mb-1 block font-medium">Transformation Status</span>
+                  <select
+                    name="company_info_transformation_status"
+                    defaultValue={companyKennzahlen.transformation_status}
+                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Bitte waehlen —</option>
+                    {TRANSFORMATION_STATUS_OPTIONS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="md:col-span-2">
+                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                    Speichern
+                  </button>
+                </div>
+              </form>
+            </article>
+          ) : null}
+          {activeUnternehmensinfoTab === "mission" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Mission</h2>
+              <p className="mt-2 text-sm text-zinc-600">Unternehmensauftrag und Zweck.</p>
+              <form action={saveStrategyReferenceText} className="mt-4">
+                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
+                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
+                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
+                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
+                <textarea name="strategy_reference_mission" defaultValue={strategyReferenceFields.mission} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Unternehmensauftrag und Zweck..." />
+                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
+              </form>
+            </article>
+          ) : null}
+          {activeUnternehmensinfoTab === "vision" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Vision</h2>
+              <p className="mt-2 text-sm text-zinc-600">Langfristiges Zukunftsbild.</p>
+              <form action={saveStrategyReferenceText} className="mt-4">
+                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
+                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
+                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
+                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
+                <textarea name="strategy_reference_vision" defaultValue={strategyReferenceFields.vision} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Langfristiges Zukunftsbild..." />
+                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
+              </form>
+            </article>
+          ) : null}
+          {activeUnternehmensinfoTab === "werte" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Werte</h2>
+              <p className="mt-2 text-sm text-zinc-600">Werte und Entscheidungsgrundsaetze.</p>
+              <form action={saveStrategyReferenceText} className="mt-4">
+                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
+                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
+                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
+                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
+                <textarea name="strategy_reference_values" defaultValue={strategyReferenceFields.values} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Werte und Entscheidungsgrundsaetze..." />
+                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
+              </form>
+            </article>
+          ) : null}
+          {activeUnternehmensinfoTab === "kultur" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Kultur</h2>
+              <p className="mt-2 text-sm text-zinc-600">Zusammenarbeit, Verhalten und Prinzipien.</p>
+              <form action={saveStrategyReferenceText} className="mt-4">
+                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
+                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
+                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
+                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
+                <textarea name="strategy_reference_culture" defaultValue={strategyReferenceFields.culture} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Zusammenarbeit, Verhalten und Prinzipien..." />
+                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
+              </form>
+            </article>
+          ) : null}
+          {activeUnternehmensinfoTab === "leadership" ? (
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Leadership</h2>
+              <p className="mt-2 text-sm text-zinc-600">Fuehrungsprinzipien und Erwartung an Leadership-Verhalten.</p>
+              <form action={saveStrategyReferenceText} className="mt-4">
+                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
+                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
+                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
+                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
+                <textarea name="strategy_reference_leadership" defaultValue={strategyReferenceFields.leadership} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Fuehrungsprinzipien und Erwartung an Leadership-Verhalten..." />
+                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
+              </form>
+            </article>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeL1 === "objectives" ? (
+        <section className="space-y-4">
+          <article className="brand-card p-6">
+            <h2 className="text-lg font-semibold text-zinc-900">Objectives (Target State)</h2>
+            <p className="mt-1 text-sm text-zinc-600">
+              Definiere stabile Zielbilder fuer 3-5 Jahre mit Wichtigkeit und Status.
             </p>
-            <form action={saveStrategyReferenceText} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Mission</span>
-                <textarea
-                  name="strategy_reference_mission"
-                  defaultValue={strategyReferenceFields.mission}
-                  rows={6}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Unternehmensauftrag und Zweck..."
-                />
-              </label>
-              <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Vision</span>
-                <textarea
-                  name="strategy_reference_vision"
-                  defaultValue={strategyReferenceFields.vision}
-                  rows={6}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Langfristiges Zukunftsbild..."
-                />
-              </label>
-              <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Kultur</span>
-                <textarea
-                  name="strategy_reference_culture"
-                  defaultValue={strategyReferenceFields.culture}
-                  rows={6}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Zusammenarbeit, Verhalten und Prinzipien..."
-                />
-              </label>
-              <label className="block text-sm text-zinc-700">
-                <span className="mb-1 block font-medium">Werte</span>
-                <textarea
-                  name="strategy_reference_values"
-                  defaultValue={strategyReferenceFields.values}
-                  rows={6}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Werte und Entscheidungsgrundsaetze..."
-                />
-              </label>
-              <label className="block text-sm text-zinc-700 md:col-span-2">
-                <span className="mb-1 block font-medium">Leadership</span>
-                <textarea
-                  name="strategy_reference_leadership"
-                  defaultValue={strategyReferenceFields.leadership}
-                  rows={6}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Fuehrungsprinzipien und Erwartung an Leadership-Verhalten..."
-                />
-              </label>
-              <div className="md:col-span-2">
-              <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                Speichern
-              </button>
-              </div>
-            </form>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <ObjectiveCreateForm action={createObjectiveInCycle} canWrite={canWrite} />
+              <form action={runObjectiveEvaluation}>
+                <button
+                  type="submit"
+                  disabled={!canWrite || (workspace.objectives ?? []).length === 0}
+                  className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  Objectives KI-bewerten
+                </button>
+              </form>
+            </div>
+            <div className="mt-4">
+              <ObjectivesTable
+                objectives={workspace.objectives ?? []}
+                industries={workspace.availableDimensions?.industries ?? []}
+                businessModels={workspace.availableDimensions?.businessModels ?? []}
+                industryIdsByObjective={Object.fromEntries(workspace.industryIdsByObjectiveId ?? [])}
+                businessModelIdsByObjective={Object.fromEntries(workspace.businessModelIdsByObjectiveId ?? [])}
+                canWrite={canWrite}
+                actions={{
+                  updateObjectiveInCycle,
+                  deleteObjectiveInCycle,
+                  linkObjectiveToIndustryInCycle,
+                  unlinkObjectiveFromIndustryInCycle,
+                  linkObjectiveToBusinessModelInCycle,
+                  unlinkObjectiveFromBusinessModelInCycle,
+                }}
+              />
+            </div>
+          </article>
+
+          <article className="brand-card p-6">
+            <h3 className="text-base font-semibold text-zinc-900">Portfolio-Bewertung</h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              Balance und Verteilung der Objectives nach KI-Bewertung.
+            </p>
+            <div className="mt-4">
+              <PortfolioSummaryView portfolio={workspace.portfolioEvaluation ?? null} />
+            </div>
+          </article>
+
+          <article className="brand-card p-6">
+            <h3 className="text-base font-semibold text-zinc-900">Objective Balance (Scatter)</h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              Verteilung Internal/External vs Exploit/Explore.
+            </p>
+            <div className="mt-4">
+              <ObjectiveBalanceScatterPlot objectives={workspace.objectives ?? []} />
+            </div>
           </article>
         </section>
       ) : null}
 
       {activeL1 === "strategic-directions" ? (
         <section className="space-y-4">
-          {activeStrategicTab === "objectives" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Objectives (Target State)</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Definiere stabile Zielbilder fuer 3-5 Jahre mit Wichtigkeit und Status.
-              </p>
-              <form action={createObjectiveInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input
-                  name="title"
-                  required
-                  placeholder="Neues Objective"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <textarea
-                  name="description"
-                  rows={3}
-                  placeholder="Zielzustand (kein Aktionsplan)"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <input
-                  name="time_horizon"
-                  placeholder="Zeithorizont (z.B. 2027-2030)"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                />
-                <label className="text-xs text-zinc-600">
-                  Importance
-                  <input
-                    type="number"
-                    name="importance_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Status
-                  <select
-                    name="status"
-                    defaultValue="draft"
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="draft">draft</option>
-                    <option value="active">active</option>
-                    <option value="at_risk">at_risk</option>
-                    <option value="completed">completed</option>
-                    <option value="archived">archived</option>
-                  </select>
-                </label>
-                <div className="md:col-span-2">
-                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Objective speichern
-                  </button>
-                </div>
-              </form>
-              <div className="mt-4 space-y-3">
-                {(workspace.objectives ?? []).length === 0 ? (
-                  <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Objectives vorhanden.</p>
-                ) : (
-                  (workspace.objectives ?? []).map((objective) => (
-                    <form key={objective.id} action={updateObjectiveInCycle} className="brand-surface grid grid-cols-1 gap-2 p-3 md:grid-cols-5">
-                      <input type="hidden" name="objective_id" value={objective.id} />
-                      <input
-                        name="title"
-                        defaultValue={objective.title}
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm md:col-span-2"
-                      />
-                      <input
-                        name="time_horizon"
-                        defaultValue={objective.time_horizon ?? ""}
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                      />
-                      <input
-                        type="number"
-                        name="importance_score"
-                        defaultValue={objective.importance_score ?? 3}
-                        min={1}
-                        max={5}
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                      />
-                      <select
-                        name="status"
-                        defaultValue={objective.status ?? "draft"}
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="draft">draft</option>
-                        <option value="active">active</option>
-                        <option value="at_risk">at_risk</option>
-                        <option value="completed">completed</option>
-                        <option value="archived">archived</option>
-                      </select>
-                      <textarea
-                        name="description"
-                        defaultValue={objective.description ?? ""}
-                        rows={2}
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-sm md:col-span-4"
-                      />
-                      <div className="md:col-span-1">
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Objective aktualisieren
-                        </button>
-                      </div>
-                    </form>
-                  ))
-                )}
-              </div>
-            </article>
+          {activeStrategicTab === "summary" ? (
+            <StrategicDesignSummary
+              canWrite={canWrite}
+              summary={strategicDesignSummary}
+              onSaveOverride={saveCorrelationStatusOverride}
+              onClearOverride={clearCorrelationStatusOverride}
+            />
           ) : null}
-
-          {activeStrategicTab !== "objectives" ? (
-          <article className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {activeStrategicTab === "challenges" ? (
-            <div className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Strategische Herausforderung erfassen</h2>
-              <p className="mt-1 text-sm text-zinc-600">Manuell oder unabhaengig von Analyse-Eintraegen anlegen und bewerten.</p>
-              <form action={createStrategicChallengeInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input
-                  name="title"
-                  required
-                  placeholder="Neue strategische Herausforderung"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <textarea
-                  name="description"
-                  rows={3}
-                  placeholder="Problemstatement und Kontext"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <label className="text-xs text-zinc-600">
-                  Prioritaet
-                  <input
-                    type="number"
-                    name="priority"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Impact
-                  <input
-                    type="number"
-                    name="impact_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Urgency
-                  <input
-                    type="number"
-                    name="urgency_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Scope
-                  <input
-                    type="number"
-                    name="scope_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Root Cause
-                  <input
-                    type="number"
-                    name="root_cause_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <div className="md:col-span-2">
-                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Herausforderung speichern
-                  </button>
-                </div>
-              </form>
-            </div>
-            ) : null}
-            {activeStrategicTab === "design" ? (
-            <div className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Strategische Stossrichtung erfassen</h2>
-              <p className="mt-1 text-sm text-zinc-600">Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.</p>
-              <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input
-                  name="title"
-                  required
-                  placeholder="Neue strategische Stossrichtung"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <textarea
-                  name="description"
-                  rows={3}
-                  placeholder="Loesungslogik (solution-agnostic)"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <label className="text-xs text-zinc-600">
-                  Prioritaet
-                  <input
-                    type="number"
-                    name="priority"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Strategic Value
-                  <input
-                    type="number"
-                    name="strategic_value_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Capability Fit
-                  <input
-                    type="number"
-                    name="capability_fit_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Feasibility
-                  <input
-                    type="number"
-                    name="feasibility_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Risk
-                  <input
-                    type="number"
-                    name="risk_score"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Cluster (Pflicht fuer active)
-                  <select
-                    name="cluster_id"
-                    defaultValue=""
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="">Optional waehlen</option>
-                    {(workspace.clusters ?? []).map((cluster) => (
-                      <option key={cluster.id} value={cluster.id}>
-                        {cluster.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Objective (Pflicht fuer active)
-                  <select
-                    name="objective_id"
-                    defaultValue=""
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="">Optional waehlen</option>
-                    {(workspace.objectives ?? []).map((objective) => (
-                      <option key={objective.id} value={objective.id}>
-                        {objective.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="md:col-span-2">
-                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Stossrichtung speichern
-                  </button>
-                </div>
-              </form>
-            </div>
-            ) : null}
-          </article>
-          ) : null}
-
           {activeStrategicTab === "challenges" ? (
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
-            <div className="mt-4 space-y-3">
-              {(workspace.challenges ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Herausforderungen vorhanden.</p>
-              ) : (
-                (workspace.challenges ?? []).map((challenge) => {
-                  const impactScore = challenge.impact_score ?? 3;
-                  const urgencyScore = challenge.urgency_score ?? 3;
-                  const scopeScore = challenge.scope_score ?? 3;
-                  const rootCauseScore = challenge.root_cause_score ?? 3;
-                  const challengeIndustryIds = new Set(challengeIndustryIdsById.get(challenge.id) ?? []);
-                  const challengeBusinessModelIds = new Set(challengeBusinessModelIdsById.get(challenge.id) ?? []);
-                  return (
-                    <div key={challenge.id} className="brand-surface space-y-3 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-zinc-900">{challenge.title}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                            Verknuepfte Designs: {directionCountByChallengeId.get(challenge.id) ?? 0}
-                          </span>
-                          <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                            Challenge Score: {Number(challenge.challenge_score ?? 0).toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                      {challenge.description ? (
-                        <p className="text-xs text-zinc-600">{challenge.description}</p>
-                      ) : null}
-                      <form action={updateStrategicChallengeAssessment} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                        <label className="text-xs text-zinc-600">
-                          Beschreibung
-                          <input
-                            name="description"
-                            defaultValue={challenge.description ?? ""}
-                            className="ml-2 w-72 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Impact
-                          <input
-                            type="number"
-                            name="impact_score"
-                            defaultValue={impactScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Urgency
-                          <input
-                            type="number"
-                            name="urgency_score"
-                            defaultValue={urgencyScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Scope
-                          <input
-                            type="number"
-                            name="scope_score"
-                            defaultValue={scopeScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Root
-                          <input
-                            type="number"
-                            name="root_cause_score"
-                            defaultValue={rootCauseScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Bewertung speichern
-                        </button>
-                      </form>
-                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-                        <form action={linkStrategicChallengeToIndustryInCycle} className="flex gap-2">
-                          <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                          <select
-                            name="industry_id"
-                            defaultValue=""
-                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="">Industrie verknuepfen</option>
-                            {(workspace.availableDimensions.industries ?? []).map((industry) => (
-                              <option key={industry.id} value={industry.id}>
-                                {industry.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                            Verknuepfen
-                          </button>
-                        </form>
-                        <form action={linkStrategicChallengeToBusinessModelInCycle} className="flex gap-2">
-                          <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                          <select
-                            name="business_model_id"
-                            defaultValue=""
-                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="">Geschaeftsmodell verknuepfen</option>
-                            {(workspace.availableDimensions.businessModels ?? []).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                            Verknuepfen
-                          </button>
-                        </form>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {(workspace.availableDimensions.industries ?? [])
-                          .filter((industry) => challengeIndustryIds.has(industry.id))
-                          .map((industry) => (
-                            <form
-                              key={`${challenge.id}-industry-${industry.id}`}
-                              action={unlinkStrategicChallengeFromIndustryInCycle}
-                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                              <input type="hidden" name="industry_id" value={industry.id} />
-                              <span>{industry.name}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(workspace.availableDimensions.businessModels ?? [])
-                          .filter((model) => challengeBusinessModelIds.has(model.id))
-                          .map((model) => (
-                            <form
-                              key={`${challenge.id}-business-${model.id}`}
-                              action={unlinkStrategicChallengeFromBusinessModelInCycle}
-                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                              <input type="hidden" name="business_model_id" value={model.id} />
-                              <span>{model.name}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+            <p className="mt-1 text-sm text-zinc-600">
+              Manuell oder unabhaengig von Analyse-Eintraegen anlegen und bewerten.
+            </p>
+            <ChallengeCreateForm action={createStrategicChallengeInCycle} canWrite={canWrite} />
+            <div className="mt-4">
+              <ChallengesTable
+                challenges={workspace.challenges ?? []}
+                industries={workspace.availableDimensions?.industries ?? []}
+                businessModels={workspace.availableDimensions?.businessModels ?? []}
+                industryIdsByChallenge={Object.fromEntries(challengeIndustryIdsById)}
+                businessModelIdsByChallenge={Object.fromEntries(challengeBusinessModelIdsById)}
+                directionCountByChallengeId={Object.fromEntries(directionCountByChallengeId)}
+                canWrite={canWrite}
+                actions={{
+                  updateStrategicChallengeAssessment,
+                  deleteStrategicChallengeInCycle,
+                  linkStrategicChallengeToIndustryInCycle,
+                  unlinkStrategicChallengeFromIndustryInCycle,
+                  linkStrategicChallengeToBusinessModelInCycle,
+                  unlinkStrategicChallengeFromBusinessModelInCycle,
+                }}
+              />
             </div>
           </article>
           ) : null}
           {activeStrategicTab === "challenges" ? (
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Heatmap (Impact x Urgency)</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Heatmap (Auswirkung × Dringlichkeit)</h3>
             <p className="mt-1 text-xs text-zinc-600">
               Hohe Werte oben rechts markieren prioritär zu adressierende Herausforderungen.
             </p>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-[520px] border-collapse">
-                <thead>
-                  <tr>
-                    <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">Impact \\ Urgency</th>
-                    {[1, 2, 3, 4, 5].map((urgency) => (
-                      <th key={`u-${urgency}`} className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
-                        {urgency}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[5, 4, 3, 2, 1].map((impact) => (
-                    <tr key={`i-${impact}`}>
-                      <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">{impact}</th>
-                      {[1, 2, 3, 4, 5].map((urgency) => {
-                        const count = challengeHeatmapCounts.get(`${impact}:${urgency}`) ?? 0;
-                        const tone =
-                          impact >= 4 && urgency >= 4
-                            ? "bg-emerald-100 text-emerald-900"
-                            : impact >= 3 && urgency >= 3
-                              ? "bg-amber-100 text-amber-900"
-                              : "bg-white text-zinc-700";
-                        return (
-                          <td key={`${impact}-${urgency}`} className="border border-zinc-200 p-0">
-                            <div className={`px-2 py-2 text-center text-xs ${tone}`}>{count}</div>
-                          </td>
-                        );
-                      })}
+            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div className="overflow-x-auto shrink-0">
+                <table className="min-w-[520px] border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">Auswirkung \\ Dringlichkeit</th>
+                      {[1, 2, 3, 4, 5].map((urgency) => (
+                        <th key={`u-${urgency}`} className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
+                          {urgency}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {[5, 4, 3, 2, 1].map((impact) => (
+                      <tr key={`i-${impact}`}>
+                        <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">{impact}</th>
+                        {[1, 2, 3, 4, 5].map((urgency) => {
+                          const count = challengeHeatmapCounts.get(`${impact}:${urgency}`) ?? 0;
+                          const tone =
+                            impact >= 4 && urgency >= 4
+                              ? "bg-emerald-100 text-emerald-900"
+                              : impact >= 3 && urgency >= 3
+                                ? "bg-amber-100 text-amber-900"
+                                : "bg-white text-zinc-700";
+                          return (
+                            <td key={`${impact}-${urgency}`} className="border border-zinc-200 p-0">
+                              <div className={`px-2 py-2 text-center text-xs ${tone}`}>{count}</div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col gap-4 lg:min-w-[280px]">
+                <div>
+                  <h4 className="text-sm font-medium text-zinc-800">Top 5 Herausforderungen</h4>
+                  <p className="mt-1 text-xs text-zinc-500">Nach Challenge-Score sortiert</p>
+                  <ul className="mt-2 space-y-1.5">
+                    {topChallenges.map((challenge, idx) => (
+                      <li key={challenge.id} className="flex items-start gap-2 text-xs">
+                        <span className="shrink-0 font-medium text-zinc-500">{idx + 1}.</span>
+                        <span className="text-zinc-800" title={challenge.title}>
+                          {challenge.title.length > 50 ? `${challenge.title.slice(0, 50)}…` : challenge.title}
+                        </span>
+                        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                          {Number(challenge.challenge_score ?? 0).toFixed(1)}
+                        </span>
+                      </li>
+                    ))}
+                    {topChallenges.length === 0 && (
+                      <li className="text-xs text-zinc-400">Keine Herausforderungen vorhanden.</li>
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-zinc-800">Abdeckungsgrad</h4>
+                  <p className="mt-1 text-xs text-zinc-500">Herausforderungen mit Verknüpfung</p>
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <span className="text-xs text-zinc-700">Durch Stossrichtungen</span>
+                      <span className="text-sm font-semibold text-zinc-900">
+                        {challengesCoveredByDirections}/{totalChallenges} ({coverageByDirectionsPercent}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <span className="text-xs text-zinc-700">Durch Initiativen</span>
+                      <span className="text-sm font-semibold text-zinc-900">
+                        {challengesCoveredByInitiatives}/{totalChallenges} ({coverageByInitiativesPercent}%)
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[10px] text-zinc-400">
+                    Initiativen hängen über Programme an Stossrichtungen; eine Herausforderung gilt als abgedeckt, wenn sie mit einer Stossrichtung verknüpft ist, die Initiativen hat.
+                  </p>
+                </div>
+              </div>
             </div>
           </article>
           ) : null}
@@ -1243,328 +1177,154 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           {activeStrategicTab === "design" ? (
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Strategische Stossrichtungen</h3>
-            <div className="mt-4 space-y-3">
-              {(workspace.strategicDirections ?? []).length === 0 ? (
-                <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
-              ) : (
-                (workspace.strategicDirections ?? []).map((direction) => {
-                  const linkedChallengeIds = new Set(challengeIdsByDirection.get(direction.id) ?? []);
-                  const linkedClusterIds = new Set(clusterIdsByDirection.get(direction.id) ?? []);
-                  const linkedObjectiveIds = new Set(objectiveIdsByDirection.get(direction.id) ?? []);
-                  const linkedGapRelationIds = new Set(gapRelationIdsByDirection.get(direction.id) ?? []);
-                  const directionIndustryIds = new Set(directionIndustryIdsById.get(direction.id) ?? []);
-                  const directionBusinessModelIds = new Set(directionBusinessModelIdsById.get(direction.id) ?? []);
-                  const strategicValueScore = direction.strategic_value_score ?? 3;
-                  const capabilityFitScore = direction.capability_fit_score ?? 3;
-                  const feasibilityScore = direction.feasibility_score ?? 3;
-                  const riskScore = direction.risk_level ?? 3;
-                  const coverage = workspace.directionCoverageById.get(direction.id) ?? {
-                    linked: 0,
-                    total: workspace.challenges.length,
-                    percent: 0,
-                  };
-                  return (
-                    <div key={direction.id} className="brand-surface space-y-2 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-zinc-900">{direction.title}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                            Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
-                          </span>
-                          <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                            Direction Score: {Number(direction.direction_score ?? 0).toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                      {direction.description ? (
-                        <p className="text-xs text-zinc-600">{direction.description}</p>
-                      ) : null}
-                      <form action={updateStrategicDirectionAssessment} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                        <label className="text-xs text-zinc-600">
-                          Beschreibung
-                          <input
-                            name="description"
-                            defaultValue={direction.description ?? ""}
-                            className="ml-2 w-72 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Strategic
-                          <input
-                            type="number"
-                            name="strategic_value_score"
-                            defaultValue={strategicValueScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Capability
-                          <input
-                            type="number"
-                            name="capability_fit_score"
-                            defaultValue={capabilityFitScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Feasibility
-                          <input
-                            type="number"
-                            name="feasibility_score"
-                            defaultValue={feasibilityScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <label className="text-xs text-zinc-600">
-                          Risk
-                          <input
-                            type="number"
-                            name="risk_score"
-                            defaultValue={riskScore}
-                            min={1}
-                            max={5}
-                            className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                          />
-                        </label>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Bewertung speichern
-                        </button>
-                      </form>
-                      <form action={linkDirectionToChallengePredecessor} className="flex flex-wrap gap-2">
-                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                        <select
-                          name="strategic_challenge_id"
-                          defaultValue=""
-                          className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Vorgaenger-Herausforderung verknuepfen</option>
-                          {challengeOptions.map((challenge) => (
-                            <option key={challenge.id} value={challenge.id}>
-                              {challenge.title}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Verknuepfen
-                        </button>
-                      </form>
-                      <form action={linkDirectionToClusterInCycle} className="flex flex-wrap gap-2">
-                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                        <select
-                          name="cluster_id"
-                          defaultValue=""
-                          className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Cluster verknuepfen</option>
-                          {(workspace.clusters ?? []).map((cluster) => (
-                            <option key={cluster.id} value={cluster.id}>
-                              {cluster.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Cluster verknuepfen
-                        </button>
-                      </form>
-                      <form action={linkDirectionToObjectiveInCycle} className="flex flex-wrap gap-2">
-                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                        <select
-                          name="objective_id"
-                          defaultValue=""
-                          className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Objective verknuepfen</option>
-                          {(workspace.objectives ?? []).map((objective) => (
-                            <option key={objective.id} value={objective.id}>
-                              {objective.title}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Objective verknuepfen
-                        </button>
-                      </form>
-                      <form action={linkDirectionToGapInCycle} className="flex flex-wrap gap-2">
-                        <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                        <select
-                          name="cluster_objective_relation_id"
-                          defaultValue=""
-                          className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Gap verknuepfen</option>
-                          {(workspace.clusterObjectiveRelations ?? []).map((relation) => {
-                            const cluster = clusterById.get(relation.cluster_id);
-                            const objective = objectiveById.get(relation.objective_id);
-                            return (
-                              <option key={relation.id} value={relation.id}>
-                                {(cluster?.label ?? relation.cluster_id)}
-                                {" -> "}
-                                {(objective?.title ?? relation.objective_id)} ({Number(relation.gap_score ?? 0).toFixed(2)})
-                              </option>
-                            );
-                          })}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Gap verknuepfen
-                        </button>
-                      </form>
-                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-                        <form action={linkStrategicDirectionToIndustryInCycle} className="flex gap-2">
-                          <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                          <select
-                            name="industry_id"
-                            defaultValue=""
-                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="">Industrie verknuepfen</option>
-                            {(workspace.availableDimensions.industries ?? []).map((industry) => (
-                              <option key={industry.id} value={industry.id}>
-                                {industry.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                            Verknuepfen
-                          </button>
-                        </form>
-                        <form action={linkStrategicDirectionToBusinessModelInCycle} className="flex gap-2">
-                          <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                          <select
-                            name="business_model_id"
-                            defaultValue=""
-                            className="min-w-[180px] rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="">Geschaeftsmodell verknuepfen</option>
-                            {(workspace.availableDimensions.businessModels ?? []).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                            Verknuepfen
-                          </button>
-                        </form>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {(workspace.challenges ?? [])
-                          .filter((challenge) => linkedChallengeIds.has(challenge.id))
-                          .map((challenge) => (
-                            <form
-                              key={`${direction.id}-${challenge.id}`}
-                              action={unlinkDirectionChallengePredecessor}
-                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                              <span>{challenge.title}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(workspace.clusters ?? [])
-                          .filter((cluster) => linkedClusterIds.has(cluster.id))
-                          .map((cluster) => (
-                            <form
-                              key={`${direction.id}-cluster-${cluster.id}`}
-                              action={unlinkDirectionFromClusterInCycle}
-                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="cluster_id" value={cluster.id} />
-                              <span>Cluster: {cluster.label}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(workspace.objectives ?? [])
-                          .filter((objective) => linkedObjectiveIds.has(objective.id))
-                          .map((objective) => (
-                            <form
-                              key={`${direction.id}-objective-${objective.id}`}
-                              action={unlinkDirectionFromObjectiveInCycle}
-                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="objective_id" value={objective.id} />
-                              <span>Objective: {objective.title}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(workspace.clusterObjectiveRelations ?? [])
-                          .filter((relation) => linkedGapRelationIds.has(relation.id))
-                          .map((relation) => (
-                            <form
-                              key={`${direction.id}-gap-${relation.id}`}
-                              action={unlinkDirectionFromGapInCycle}
-                              className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="cluster_objective_relation_id" value={relation.id} />
-                              <span>
-                                Gap {Number(relation.gap_score ?? 0).toFixed(2)}
-                              </span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(programsByDirectionId.get(direction.id) ?? []).map((program) => (
-                          <span
-                            key={`${direction.id}-program-${program.id}`}
-                            className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs text-emerald-800"
-                          >
-                            Programm: {program.title}
-                          </span>
-                        ))}
-                        {(workspace.availableDimensions.industries ?? [])
-                          .filter((industry) => directionIndustryIds.has(industry.id))
-                          .map((industry) => (
-                            <form
-                              key={`${direction.id}-industry-${industry.id}`}
-                              action={unlinkStrategicDirectionFromIndustryInCycle}
-                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="industry_id" value={industry.id} />
-                              <span>{industry.name}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                        {(workspace.availableDimensions.businessModels ?? [])
-                          .filter((model) => directionBusinessModelIds.has(model.id))
-                          .map((model) => (
-                            <form
-                              key={`${direction.id}-business-${model.id}`}
-                              action={unlinkStrategicDirectionFromBusinessModelInCycle}
-                              className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700"
-                            >
-                              <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                              <input type="hidden" name="business_model_id" value={model.id} />
-                              <span>{model.name}</span>
-                              <button type="submit" disabled={!canWrite} className="text-red-700">
-                                x
-                              </button>
-                            </form>
-                          ))}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+            <p className="mt-1 text-sm text-zinc-600">
+              Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.
+            </p>
+            <form action={createStrategicDirectionInCycle} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <input
+                name="title"
+                required
+                placeholder="Neue strategische Stossrichtung"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+              />
+              <textarea
+                name="description"
+                rows={3}
+                placeholder="Loesungslogik (solution-agnostic)"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm md:col-span-2"
+              />
+              <label className="text-xs text-zinc-600">
+                Prioritaet
+                <input
+                  type="number"
+                  name="priority"
+                  defaultValue={3}
+                  min={1}
+                  max={5}
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-zinc-600">
+                Strategic Value
+                <input
+                  type="number"
+                  name="strategic_value_score"
+                  defaultValue={3}
+                  min={1}
+                  max={5}
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-zinc-600">
+                Capability Fit
+                <input
+                  type="number"
+                  name="capability_fit_score"
+                  defaultValue={3}
+                  min={1}
+                  max={5}
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-zinc-600">
+                Feasibility
+                <input
+                  type="number"
+                  name="feasibility_score"
+                  defaultValue={3}
+                  min={1}
+                  max={5}
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-zinc-600">
+                Risk
+                <input
+                  type="number"
+                  name="risk_score"
+                  defaultValue={3}
+                  min={1}
+                  max={5}
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-zinc-600">
+                Cluster (Pflicht fuer active)
+                <select
+                  name="cluster_id"
+                  defaultValue=""
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                >
+                  <option value="">Optional waehlen</option>
+                  {(workspace.clusters ?? []).map((cluster) => (
+                    <option key={cluster.id} value={cluster.id}>
+                      {cluster.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-zinc-600">
+                Objective (Pflicht fuer active)
+                <select
+                  name="objective_id"
+                  defaultValue=""
+                  className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                >
+                  <option value="">Optional waehlen</option>
+                  {(workspace.objectives ?? []).map((objective) => (
+                    <option key={objective.id} value={objective.id}>
+                      {objective.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="md:col-span-2">
+                <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
+                  Stossrichtung speichern
+                </button>
+              </div>
+            </form>
+            <div className="mt-4">
+              <StrategicDirectionsTable
+                directions={workspace.strategicDirections ?? []}
+                challenges={challengeOptions}
+                clusters={workspace.clusters ?? []}
+                objectives={workspace.objectives ?? []}
+                clusterObjectiveRelations={workspace.clusterObjectiveRelations ?? []}
+                industries={workspace.availableDimensions.industries ?? []}
+                businessModels={workspace.availableDimensions.businessModels ?? []}
+                programsByDirectionId={Object.fromEntries(programsByDirectionId)}
+                challengeIdsByDirection={Object.fromEntries(challengeIdsByDirection)}
+                clusterIdsByDirection={Object.fromEntries(clusterIdsByDirection)}
+                objectiveIdsByDirection={Object.fromEntries(objectiveIdsByDirection)}
+                gapRelationIdsByDirection={Object.fromEntries(gapRelationIdsByDirection)}
+                industryIdsByDirection={Object.fromEntries(directionIndustryIdsById)}
+                businessModelIdsByDirection={Object.fromEntries(directionBusinessModelIdsById)}
+                directionCoverageById={Object.fromEntries(workspace.directionCoverageById)}
+                clusterById={Object.fromEntries(
+                  [...clusterById.entries()].map(([k, v]) => [k, { label: v.label }])
+                )}
+                objectiveById={Object.fromEntries(
+                  [...objectiveById.entries()].map(([k, v]) => [k, { title: v.title }])
+                )}
+                canWrite={canWrite}
+                actions={{
+                  updateStrategicDirectionAssessment,
+                  deleteStrategicDirectionInCycle,
+                  linkDirectionToChallengePredecessor,
+                  unlinkDirectionChallengePredecessor,
+                  linkDirectionToClusterInCycle,
+                  unlinkDirectionFromClusterInCycle,
+                  linkDirectionToObjectiveInCycle,
+                  unlinkDirectionFromObjectiveInCycle,
+                  linkDirectionToGapInCycle,
+                  unlinkDirectionFromGapInCycle,
+                  linkStrategicDirectionToIndustryInCycle,
+                  unlinkStrategicDirectionFromIndustryInCycle,
+                  linkStrategicDirectionToBusinessModelInCycle,
+                  unlinkStrategicDirectionFromBusinessModelInCycle,
+                }}
+              />
             </div>
           </article>
           ) : null}
@@ -1728,11 +1488,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </article>
           ) : null}
           {activeStrategicTab === "strategy-matrix" ? (
-          <StrategyMatrixPage
-            searchParams={Promise.resolve({
-              drawer_direction_id: resolvedSearchParams.drawer_direction_id,
-            })}
-          />
+          <StrategyMatrixView drawerDirectionId={resolvedSearchParams.drawer_direction_id ?? null} />
           ) : null}
         </section>
       ) : null}
@@ -1879,7 +1635,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                             </option>
                           ))}
                         </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
+                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
                           Verknuepfen
                         </button>
                       </form>
@@ -2553,7 +2309,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         <button
                           type="submit"
                           disabled={!canWrite || promotedChallengeId !== null}
-                          className="brand-btn-secondary px-3 py-1.5 text-xs"
+                          className="brand-btn px-3 py-1.5 text-xs"
                         >
                           {promotedChallengeId ? "Bereits als Herausforderung uebernommen" : "Als Herausforderung uebernehmen"}
                         </button>

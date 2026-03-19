@@ -13,7 +13,7 @@ import {
 } from "@/lib/analysis-network/policy";
 import { writeAiStorageActionLog } from "@/lib/analysis-network/storage-log";
 
-type SupabaseClientLike = {
+export type SupabaseClientLike = {
   storage: {
     from: (bucket: string) => {
       upload: (

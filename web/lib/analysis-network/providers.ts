@@ -853,3 +853,27 @@ export async function proposeGraphLayoutWithLlm(input: {
     usage: groqRaw.usage,
   };
 }
+
+/** Generic LLM invocation for JSON responses. Used by objective-evaluation. */
+export async function invokeLlmForJson(
+  prompt: string,
+  maxOutputTokens?: number
+): Promise<{ text: string; usage: LlmUsage; provider: string; model: string } | null> {
+  const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, maxOutputTokens);
+  if (geminiRaw?.text) {
+    return {
+      text: geminiRaw.text,
+      usage: geminiRaw.usage,
+      provider: "gemini",
+      model: GEMINI_MODEL_ASSIST,
+    };
+  }
+  const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, maxOutputTokens);
+  if (!groqRaw?.text) return null;
+  return {
+    text: groqRaw.text,
+    usage: groqRaw.usage,
+    provider: "groq",
+    model: GROQ_MODEL,
+  };
+}

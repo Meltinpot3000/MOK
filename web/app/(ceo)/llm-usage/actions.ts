@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { runAndPersistModelHealthChecks } from "@/lib/analysis-network/model-health";
+import {
+  runAndPersistModelHealthChecks,
+  type SupabaseClientLike,
+} from "@/lib/analysis-network/model-health";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -17,7 +20,7 @@ export async function runLlmModelHealthCheckNow(formData: FormData) {
   const supabase = await createSupabaseServerClient();
 
   await runAndPersistModelHealthChecks({
-    supabase,
+    supabase: supabase as unknown as SupabaseClientLike,
     organizationId: pageAccess.access.organizationId,
     trigger: "manual",
   });
@@ -49,6 +52,8 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
   const llmFeatureChallenge =
     String(formData.get("llm_feature_challenge_recommendation") ?? "off") === "on";
   const llmFeatureModelHealth = String(formData.get("llm_feature_model_health_checks") ?? "off") === "on";
+  const llmFeatureObjectiveEvaluation =
+    String(formData.get("llm_feature_objective_evaluation") ?? "off") === "on";
   const llmDefaultMaxOutputTokens = Number(formData.get("llm_max_output_tokens_default") ?? 700);
   const llmMaxOutputQuality = Number(formData.get("llm_max_output_tokens_quality_scoring") ?? 500);
   const llmMaxOutputGraphLayout = Number(formData.get("llm_max_output_tokens_graph_layout") ?? 1000);
@@ -59,6 +64,9 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
     formData.get("llm_max_output_tokens_challenge_recommendation") ?? 900
   );
   const llmMaxOutputHealth = Number(formData.get("llm_max_output_tokens_model_health_checks") ?? 128);
+  const llmMaxOutputObjectiveEvaluation = Number(
+    formData.get("llm_max_output_tokens_objective_evaluation") ?? 600
+  );
   const llmDailySoftTokenLimit = Number(formData.get("llm_daily_soft_token_limit") ?? 150000);
   const llmMonthlyHardTokenLimit = Number(formData.get("llm_monthly_hard_token_limit") ?? 3000000);
 
@@ -88,6 +96,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
       gap_assessment: llmFeatureGap,
       challenge_recommendation: llmFeatureChallenge,
       model_health_checks: llmFeatureModelHealth,
+      objective_evaluation: llmFeatureObjectiveEvaluation,
     },
     llm_max_output_tokens_default: clampInt(llmDefaultMaxOutputTokens, 700, 64, 4096),
     llm_max_output_tokens_by_feature: {
@@ -98,6 +107,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
       gap_assessment: clampInt(llmMaxOutputGap, 380, 64, 4096),
       challenge_recommendation: clampInt(llmMaxOutputChallenge, 900, 64, 4096),
       model_health_checks: clampInt(llmMaxOutputHealth, 128, 64, 4096),
+      objective_evaluation: clampInt(llmMaxOutputObjectiveEvaluation, 600, 64, 4096),
     },
     llm_daily_soft_token_limit: clampInt(llmDailySoftTokenLimit, 150000, 0, 100000000),
     llm_monthly_hard_token_limit: clampInt(llmMonthlyHardTokenLimit, 3000000, 0, 1000000000),
