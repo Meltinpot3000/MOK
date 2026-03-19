@@ -19,7 +19,11 @@ export default async function OkrWorkspacePage() {
       </section>
     );
   }
-  const workspace = await getStrategyCycleWorkspaceData(context.organizationId, cycle.id);
+  const workspace = await getStrategyCycleWorkspaceData(
+    context.organizationId,
+    cycle.id,
+    cycle.legacy_planning_cycle_id ?? undefined
+  );
 
   return (
     <section className="space-y-4">

@@ -213,7 +213,11 @@ async function writeAiActionLogSafe(input: Parameters<typeof writeAiStorageActio
   }
 }
 
-type BackgroundJobType = "quality_backfill" | "graph_layout_recompute" | "entry_embedding_backfill";
+type BackgroundJobType =
+  | "quality_backfill"
+  | "graph_layout_recompute"
+  | "entry_embedding_backfill"
+  | "objective_evaluation_backfill";
 type BackgroundJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 type AnalysisNetworkConfig = {
@@ -2243,6 +2247,20 @@ export async function backfillEntryQuality(formData: FormData) {
   done(withSuccess(returnTo, "quality-backfill-queued"));
 }
 
+export async function queueObjectiveEvaluationBackfill(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const supabase = await createSupabaseServerClient();
+  await enqueueBackgroundJob({
+    supabase,
+    organizationId: context.organizationId,
+    cycleId: context.cycleId,
+    membershipId: context.membershipId,
+    jobType: "objective_evaluation_backfill",
+    payload: { trigger: "manual_objective_evaluation_backfill" },
+  });
+  done("/strategy-cycle?l1=objectives&success=objective-evaluation-backfill-queued");
+}
+
 export async function executeQualityBackfill(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   organizationId: string;
@@ -2480,6 +2498,235 @@ export async function executeGraphLayoutRecompute(params: {
   });
 }
 
+/** Delay between objective LLM calls (ms) to avoid free-tier rate limits (e.g. Gemini 15 RPM). */
+const OBJECTIVE_EVALUATION_DELAY_MS = 4000;
+
+export async function executeObjectiveEvaluationBackfill(params: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  cycleId: string;
+  trigger: string;
+}): Promise<{ evaluated: number; failed: number; skipped: number }> {
+  const startedAt = new Date().toISOString();
+  let evaluated = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  const { data: branding } = await params.supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", params.organizationId)
+    .maybeSingle();
+
+  const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
+  if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) {
+    throw new Error("AI evaluation disabled or LLM not enabled");
+  }
+
+  const kennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
+  const strategyRef = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
+  const missing = validateCompanyProfileForEvaluation(kennzahlen);
+  if (missing.length > 0) {
+    throw new Error(`Company profile incomplete: ${missing.join(", ")}`);
+  }
+
+  const budgetStatus = await evaluateLlmBudgetStatus({
+    supabase: params.supabase as unknown as BudgetSupabaseClientLike,
+    organizationId: params.organizationId,
+    policy,
+  });
+  if (!budgetStatus.allowed) {
+    throw new Error("LLM budget exceeded");
+  }
+
+  const companyProfile = buildCompanyProfileInput(kennzahlen, strategyRef);
+  const maxTokens = resolveLlmMaxOutputTokens(policy, "objective_evaluation");
+
+  const { contextJson } = await getOrBuildStrategicContext({
+    supabase: params.supabase,
+    organizationId: params.organizationId,
+    companyProfile,
+    maxOutputTokens: maxTokens,
+  });
+
+  const { data: objectives } = await params.supabase
+    .schema("app")
+    .from("objectives")
+    .select("id, title, description, importance_score")
+    .eq("organization_id", params.organizationId)
+    .eq("cycle_instance_id", params.cycleId);
+
+  const objectivesList = objectives ?? [];
+  const usageEvents: Array<{
+    organizationId: string;
+    cycleInstanceId: string | null;
+    feature: string;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    usageMissing?: boolean;
+  }> = [];
+
+  const objectivesWithClassifications: Array<{
+    id: string;
+    title: string;
+    classification: { external_internal: string; short_long_term: string; exploit_explore: string };
+  }> = [];
+
+  for (let i = 0; i < objectivesList.length; i++) {
+    const obj = objectivesList[i];
+    if (i > 0) {
+      await sleep(OBJECTIVE_EVALUATION_DELAY_MS);
+    }
+    try {
+      const response = await evaluateObjectiveWithLlm(
+        contextJson,
+        { title: obj.title, description: obj.description },
+        maxTokens
+      );
+      if (response.usage) {
+        usageEvents.push({
+          organizationId: params.organizationId,
+          cycleInstanceId: params.cycleId,
+          feature: "objective_evaluation",
+          provider: (response as { provider?: string }).provider ?? "gemini",
+          model: (response as { model?: string }).model ?? "gemini-assist",
+          promptVersion: "objective-eval-v1",
+          promptTokens: response.usage.promptTokens,
+          completionTokens: response.usage.completionTokens,
+          totalTokens: response.usage.totalTokens,
+          usageMissing: response.usage.usageMissing,
+        });
+      }
+      if (response.result) {
+        const r = response.result;
+        const aiObjectiveScore =
+          0.3 * r.strategic_relevance_score +
+          0.25 * r.fit_to_company_score +
+          0.2 * r.feasibility_score +
+          0.25 * r.clarity_score;
+        await params.supabase
+          .schema("app")
+          .from("objectives")
+          .update({
+            ai_clarity_score: r.clarity_score,
+            ai_strategic_relevance_score: r.strategic_relevance_score,
+            ai_feasibility_score: r.feasibility_score,
+            ai_fit_to_company_score: r.fit_to_company_score,
+            ai_confidence_score: r.confidence,
+            ai_external_internal_classification: r.dimension_classification.external_internal,
+            ai_short_long_term_classification: r.dimension_classification.short_long_term,
+            ai_exploit_explore_classification: r.dimension_classification.exploit_explore,
+            ai_issues_json: r.issues,
+            ai_improvement_suggestion: r.improvement_suggestion,
+            ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
+            ai_evaluation_status: "valid",
+            ai_evaluated_at: new Date().toISOString(),
+            ai_evaluation_version: "objective-eval-v1",
+          })
+          .eq("id", obj.id)
+          .eq("organization_id", params.organizationId)
+          .eq("cycle_instance_id", params.cycleId);
+        objectivesWithClassifications.push({
+          id: obj.id,
+          title: obj.title,
+          classification: r.dimension_classification,
+        });
+        evaluated += 1;
+      } else {
+        await params.supabase
+          .schema("app")
+          .from("objectives")
+          .update({ ai_evaluation_status: "failed" })
+          .eq("id", obj.id)
+          .eq("organization_id", params.organizationId)
+          .eq("cycle_instance_id", params.cycleId);
+        failed += 1;
+      }
+    } catch (err) {
+      await params.supabase
+        .schema("app")
+        .from("objectives")
+        .update({ ai_evaluation_status: "failed" })
+        .eq("id", obj.id)
+        .eq("organization_id", params.organizationId)
+        .eq("cycle_instance_id", params.cycleId);
+      failed += 1;
+    }
+  }
+
+  if (objectivesWithClassifications.length > 0) {
+    await sleep(OBJECTIVE_EVALUATION_DELAY_MS);
+    const objectivesForPortfolio = objectivesWithClassifications
+      .map(
+        (o) =>
+          `- ${o.title} | internal/external: ${o.classification.external_internal} | short/mid/long: ${o.classification.short_long_term} | exploit/explore: ${o.classification.exploit_explore}`
+      )
+      .join("\n");
+    const portfolioResponse = await evaluateObjectivePortfolioWithLlm(objectivesForPortfolio, maxTokens);
+    if (portfolioResponse.usage) {
+      usageEvents.push({
+        organizationId: params.organizationId,
+        cycleInstanceId: params.cycleId,
+        feature: "objective_evaluation",
+        provider: (portfolioResponse as { provider?: string }).provider ?? "gemini",
+        model: (portfolioResponse as { model?: string }).model ?? "gemini-assist",
+        promptVersion: "objective-portfolio-v1",
+        promptTokens: portfolioResponse.usage.promptTokens,
+        completionTokens: portfolioResponse.usage.completionTokens,
+        totalTokens: portfolioResponse.usage.totalTokens,
+        usageMissing: portfolioResponse.usage.usageMissing,
+      });
+    }
+    if (portfolioResponse.result) {
+      const pr = portfolioResponse.result;
+      await params.supabase
+        .schema("app")
+        .from("cycle_instance_portfolio_evaluation")
+        .upsert(
+          {
+            organization_id: params.organizationId,
+            cycle_instance_id: params.cycleId,
+            balance_score: pr.balance_score,
+            distribution_internal_external_json: pr.distribution,
+            distribution_exploit_explore_json: pr.distribution,
+            distribution_short_long_json: pr.distribution,
+            portfolio_gaps_json: pr.gaps,
+            portfolio_risks_json: pr.risks,
+            portfolio_recommendation: pr.recommendation,
+            portfolio_evaluated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "cycle_instance_id" }
+        );
+    }
+  }
+
+  if (usageEvents.length > 0) {
+    await recordLlmUsageEvents(params.supabase, usageEvents);
+  }
+
+  await writeAiActionLogSafe({
+    supabase: params.supabase,
+    organizationId: params.organizationId,
+    cycleInstanceId: params.cycleId,
+    feature: "strategy_cycle",
+    action: "objective_evaluation_backfill",
+    triggerType: "job",
+    status: failed > 0 ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    counts: { evaluated, failed, skipped, total: objectivesList.length },
+    metadata: { trigger: params.trigger },
+  });
+
+  return { evaluated, failed, skipped };
+}
+
 export async function processPendingBackgroundJobs(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<{ processed: number; failed: number }> {
@@ -2530,6 +2777,13 @@ export async function processPendingBackgroundJobs(
         });
       } else if (pending.job_type === "graph_layout_recompute") {
         await executeGraphLayoutRecompute({
+          supabase,
+          organizationId: pending.organization_id,
+          cycleId: pending.cycle_instance_id,
+          trigger,
+        });
+      } else if (pending.job_type === "objective_evaluation_backfill") {
+        await executeObjectiveEvaluationBackfill({
           supabase,
           organizationId: pending.organization_id,
           cycleId: pending.cycle_instance_id,
@@ -2832,6 +3086,109 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
   done("/strategy-cycle?l1=strategic-directions&l2=design&success=direction-created");
 }
 
+async function evaluateSingleObjectiveIfEnabled(params: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  cycleId: string;
+  objectiveId: string;
+  title: string;
+  description: string | null;
+}): Promise<void> {
+  const { data: branding } = await params.supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", params.organizationId)
+    .maybeSingle();
+
+  const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
+  if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) return;
+
+  const kennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
+  const missing = validateCompanyProfileForEvaluation(kennzahlen);
+  if (missing.length > 0) return;
+
+  const budgetStatus = await evaluateLlmBudgetStatus({
+    supabase: params.supabase as unknown as BudgetSupabaseClientLike,
+    organizationId: params.organizationId,
+    policy,
+  });
+  if (!budgetStatus.allowed) return;
+
+  const strategyRef = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
+  const companyProfile = buildCompanyProfileInput(kennzahlen, strategyRef);
+  const maxTokens = resolveLlmMaxOutputTokens(policy, "objective_evaluation");
+
+  const { contextJson } = await getOrBuildStrategicContext({
+    supabase: params.supabase,
+    organizationId: params.organizationId,
+    companyProfile,
+    maxOutputTokens: maxTokens,
+  });
+
+  const response = await evaluateObjectiveWithLlm(
+    contextJson,
+    { title: params.title, description: params.description },
+    maxTokens
+  );
+
+  if (response.usage) {
+    await recordLlmUsageEvents(params.supabase, [
+      {
+        organizationId: params.organizationId,
+        cycleInstanceId: params.cycleId,
+        feature: "objective_evaluation",
+        provider: (response as { provider?: string }).provider ?? "gemini",
+        model: (response as { model?: string }).model ?? "gemini-assist",
+        promptVersion: "objective-eval-v1",
+        promptTokens: response.usage.promptTokens,
+        completionTokens: response.usage.completionTokens,
+        totalTokens: response.usage.totalTokens,
+        usageMissing: response.usage.usageMissing,
+      },
+    ]);
+  }
+
+  if (response.result) {
+    const r = response.result;
+    const aiObjectiveScore =
+      0.3 * r.strategic_relevance_score +
+      0.25 * r.fit_to_company_score +
+      0.2 * r.feasibility_score +
+      0.25 * r.clarity_score;
+    await params.supabase
+      .schema("app")
+      .from("objectives")
+      .update({
+        ai_clarity_score: r.clarity_score,
+        ai_strategic_relevance_score: r.strategic_relevance_score,
+        ai_feasibility_score: r.feasibility_score,
+        ai_fit_to_company_score: r.fit_to_company_score,
+        ai_confidence_score: r.confidence,
+        ai_external_internal_classification: r.dimension_classification.external_internal,
+        ai_short_long_term_classification: r.dimension_classification.short_long_term,
+        ai_exploit_explore_classification: r.dimension_classification.exploit_explore,
+        ai_issues_json: r.issues,
+        ai_improvement_suggestion: r.improvement_suggestion,
+        ai_objective_score: Math.round(aiObjectiveScore * 100) / 100,
+        ai_evaluation_status: "valid",
+        ai_evaluated_at: new Date().toISOString(),
+        ai_evaluation_version: "objective-eval-v1",
+      })
+      .eq("id", params.objectiveId)
+      .eq("organization_id", params.organizationId)
+      .eq("cycle_instance_id", params.cycleId);
+  } else {
+    await params.supabase
+      .schema("app")
+      .from("objectives")
+      .update({ ai_evaluation_status: "failed" })
+      .eq("id", params.objectiveId)
+      .eq("organization_id", params.organizationId)
+      .eq("cycle_instance_id", params.cycleId);
+  }
+}
+
 export async function createObjectiveInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
@@ -2843,18 +3200,31 @@ export async function createObjectiveInCycle(formData: FormData) {
   const importanceScore = readSmallIntField(formData, "importance_score", 3);
   const status = String(formData.get("status") ?? "draft");
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.schema("app").from("objectives").insert({
-    organization_id: context.organizationId,
-    cycle_instance_id: context.cycleId,
-    title,
-    description,
-    time_horizon: timeHorizon,
-    importance_score: importanceScore,
-    status,
-  });
-  if (error) {
+  const { data: inserted, error } = await supabase
+    .schema("app")
+    .from("objectives")
+    .insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      title,
+      description,
+      time_horizon: timeHorizon,
+      importance_score: importanceScore,
+      status,
+    })
+    .select("id")
+    .single();
+  if (error || !inserted?.id) {
     done("/strategy-cycle?l1=objectives&error=objective-insert-failed");
   }
+  await evaluateSingleObjectiveIfEnabled({
+    supabase,
+    organizationId: context.organizationId,
+    cycleId: context.cycleId,
+    objectiveId: inserted.id,
+    title,
+    description,
+  });
   done("/strategy-cycle?l1=objectives&success=objective-created");
 }
 
@@ -2887,6 +3257,14 @@ export async function updateObjectiveInCycle(formData: FormData) {
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", objectiveId);
+  await evaluateSingleObjectiveIfEnabled({
+    supabase,
+    organizationId: context.organizationId,
+    cycleId: context.cycleId,
+    objectiveId,
+    title,
+    description,
+  });
   done("/strategy-cycle?l1=objectives&success=objective-updated");
 }
 

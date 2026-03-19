@@ -43,7 +43,7 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
   if (status === "not_run") {
     return (
       <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-        KI-Bewertung noch nicht ausgefuehrt.
+        Sentinel✨-Bewertung noch nicht ausgefuehrt.
       </div>
     );
   }
@@ -52,7 +52,7 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
     <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          KI-Bewertung
+          Sentinel✨-Bewertung
         </span>
         <span
           className={`rounded-full border px-2 py-0.5 text-xs font-medium ${getStatusBadge(status)}`}

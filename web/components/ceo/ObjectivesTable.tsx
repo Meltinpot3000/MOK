@@ -95,14 +95,14 @@ export function ObjectivesTable({
     },
     {
       id: "ai_objective_score",
-      label: "AI Score",
+      label: "Sentinel Score",
       defaultVisible: true,
       render: (o: Objective) =>
         o.ai_objective_score != null ? (o.ai_objective_score as number).toFixed(1) : "-",
     },
     {
       id: "ai_evaluation_status",
-      label: "AI Status",
+      label: "Sentinel Status",
       defaultVisible: true,
       render: (o: Objective) => o.ai_evaluation_status ?? "not_run",
     },

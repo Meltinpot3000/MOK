@@ -51,7 +51,11 @@ export default async function CeoDashboardPage() {
       .replace(/\s*\(L\d+\).*$/i, "")
       .replace(/\s*-\s*\d{3}(?:-\d{3})+$/i, "")
       .trim();
-  const strategyWorkspace = await getStrategyCycleWorkspaceData(access.organizationId, data.selectedCycle.id);
+  const strategyWorkspace = await getStrategyCycleWorkspaceData(
+    access.organizationId,
+    data.selectedCycle.id,
+    data.selectedCycle.legacy_planning_cycle_id ?? undefined
+  );
   const topChallenges = [...(strategyWorkspace.challenges ?? [])]
     .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
     .slice(0, 5);

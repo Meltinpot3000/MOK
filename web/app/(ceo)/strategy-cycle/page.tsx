@@ -53,7 +53,7 @@ import {
   updateStrategicChallengeAssessment,
   updateStrategicDirectionAssessment,
   updateAnalysisEntry,
-  runObjectiveEvaluation,
+  queueObjectiveEvaluationBackfill,
 } from "@/app/(ceo)/strategy-cycle/actions";
 import { StrategyMatrixView } from "@/app/(ceo)/strategy-matrix/StrategyMatrixView";
 import { AnalysisVisualizationWorkspace } from "@/components/analysis-visualization/AnalysisVisualizationWorkspace";
@@ -264,6 +264,10 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Objective wurde aktualisiert." };
   if (success === "objective-deleted")
     return { type: "success", text: "Objective wurde geloescht." };
+  if (success === "objective-evaluation-complete")
+    return { type: "success", text: "Objectives wurden von Sentinel✨ bewertet." };
+  if (success === "objective-evaluation-backfill-queued")
+    return { type: "success", text: "Objectives werden im Hintergrund neu bewertet." };
   if (success === "challenge-created")
     return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
   if (success === "challenge-deleted")
@@ -385,7 +389,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     );
   }
 
-  const workspace = await getStrategyCycleWorkspaceData(context.organizationId, selectedCycle.id);
+  const workspace = await getStrategyCycleWorkspaceData(
+    context.organizationId,
+    selectedCycle.id,
+    selectedCycle.legacy_planning_cycle_id ?? undefined
+  );
   const branding = await getTenantBranding(context.organizationId);
   const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
   const companyKennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
@@ -590,6 +598,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const runningJobs = activeOrFailedJobs.filter((job) => job.status === "pending" || job.status === "running");
   const hasRunningQualityBackfill = runningJobs.some((job) => job.job_type === "quality_backfill");
   const hasRunningGraphLayout = runningJobs.some((job) => job.job_type === "graph_layout_recompute");
+  const hasRunningObjectiveBackfill = runningJobs.some(
+    (job) => job.job_type === "objective_evaluation_backfill"
+  );
   const contributionWeightByPair = new Map<string, number>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
     const key = `${link.strategic_challenge_id}:${link.strategic_direction_id}`;
@@ -995,15 +1006,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <ObjectiveCreateForm action={createObjectiveInCycle} canWrite={canWrite} />
-              <form action={runObjectiveEvaluation}>
-                <button
-                  type="submit"
-                  disabled={!canWrite || (workspace.objectives ?? []).length === 0}
-                  className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                >
-                  Objectives KI-bewerten
-                </button>
-              </form>
             </div>
             <div className="mt-4">
               <ObjectivesTable
@@ -1028,10 +1030,23 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Portfolio-Bewertung</h3>
             <p className="mt-1 text-sm text-zinc-600">
-              Balance und Verteilung der Objectives nach KI-Bewertung.
+              Balance und Verteilung der Objectives nach Sentinel✨-Bewertung.
             </p>
-            <div className="mt-4">
+            <div className="mt-4 space-y-4">
               <PortfolioSummaryView portfolio={workspace.portfolioEvaluation ?? null} />
+              <form action={queueObjectiveEvaluationBackfill}>
+                <button
+                  type="submit"
+                  disabled={
+                    !canWrite ||
+                    (workspace.objectives ?? []).length === 0 ||
+                    hasRunningObjectiveBackfill
+                  }
+                  className="brand-btn rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  Objectives neu bewerten
+                </button>
+              </form>
             </div>
           </article>
 

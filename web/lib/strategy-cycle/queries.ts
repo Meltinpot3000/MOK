@@ -36,7 +36,11 @@ export type AnalysisEntry = {
   updated_at: string;
 };
 
-export async function getStrategyCycleWorkspaceData(organizationId: string, cycleInstanceId: string) {
+export async function getStrategyCycleWorkspaceData(
+  organizationId: string,
+  cycleInstanceId: string,
+  legacyPlanningCycleId?: string | null
+) {
   const supabase = await createSupabaseServerClient();
   const [
     entriesResult,
@@ -224,14 +228,23 @@ export async function getStrategyCycleWorkspaceData(organizationId: string, cycl
       )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
-    supabase
-      .schema("app")
-      .from("objectives")
-      .select(
-        "id, title, description, importance_score, time_horizon, status, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
-      )
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
+    (legacyPlanningCycleId
+      ? supabase
+          .schema("app")
+          .from("objectives")
+          .select(
+            "id, title, description, importance_score, time_horizon, status, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
+          )
+          .eq("organization_id", organizationId)
+          .or(`cycle_instance_id.eq.${cycleInstanceId},cycle_id.eq.${legacyPlanningCycleId}`)
+      : supabase
+          .schema("app")
+          .from("objectives")
+          .select(
+            "id, title, description, importance_score, time_horizon, status, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
+          )
+          .eq("organization_id", organizationId)
+          .eq("cycle_instance_id", cycleInstanceId)),
     supabase
       .schema("app")
       .from("cluster_objective_relations")

@@ -60,7 +60,7 @@ export function ObjectiveBalanceScatterPlot({
   if (!hasData || objectives.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-sm text-zinc-600">
-        Keine Klassifikationsdaten. Fuehre die Objectives KI-Bewertung aus.
+        Keine Klassifikationsdaten. Fuehre die Objectives-Bewertung aus.
       </div>
     );
   }
