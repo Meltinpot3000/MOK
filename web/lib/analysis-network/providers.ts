@@ -222,9 +222,9 @@ function buildClusterPrompt(input: {
   score: number;
   members: string[];
   strategyReferenceText?: string | null;
+  existingChallengeTitles?: string[];
 }): string {
-  return withStrategyReference(
-    [
+  const lines = [
     "Verbessere Label und Summary fuer einen strategischen Cluster.",
     "Antwort nur als valides JSON.",
     'Schema: {"label":"kurz","summary":"max 220 Zeichen","scoreAdjustment":-0.2..0.2,"explanation":"max 160 Zeichen"}',
@@ -234,9 +234,15 @@ function buildClusterPrompt(input: {
     `Aktueller Score: ${input.score}`,
     "Cluster-Findings:",
     ...input.members.map((member) => `- ${member}`),
-    ],
-    input.strategyReferenceText
-  );
+  ];
+  if (input.existingChallengeTitles && input.existingChallengeTitles.length > 0) {
+    lines.push(
+      "",
+      "Diese Challenge-Titel existieren bereits als strategische Herausforderungen. Wenn dein vorgeschlagenes Label inhaltlich einem davon entspricht oder sehr aehnlich ist, gib das aktuelle Label unveraendert zurueck.",
+      ...input.existingChallengeTitles.map((t) => `- ${t}`)
+    );
+  }
+  return withStrategyReference(lines, input.strategyReferenceText);
 }
 
 function buildGapPrompt(input: {
@@ -268,9 +274,9 @@ function buildChallengeCandidatesPrompt(input: {
   clusters: Array<{ id: string; label: string; summary: string; score: number }>;
   gaps: Array<{ id: string; dimension: string; gapType: string; severity: number; recommendation: string }>;
   strategyReferenceText?: string | null;
+  existingChallengeTitles?: string[];
 }): string {
-  return withStrategyReference(
-    [
+  const lines = [
     "Erzeuge bis zu 8 Strategic-Challenge-Kandidaten aus Clustern und Gaps.",
     "Antwort nur als valides JSON.",
     'Schema: {"candidates":[{"title":"...","description":"...","priority":1-5,"source":"cluster|gap","sourceRef":"id"}]}',
@@ -283,9 +289,15 @@ function buildChallengeCandidatesPrompt(input: {
     ...input.clusters.map((cluster) => `- [${cluster.id}] ${cluster.label} | score=${cluster.score} | ${cluster.summary}`),
     "Gaps:",
     ...input.gaps.map((gap) => `- [${gap.id}] ${gap.gapType}/${gap.dimension} | severity=${gap.severity} | ${gap.recommendation}`),
-    ],
-    input.strategyReferenceText
-  );
+  ];
+  if (input.existingChallengeTitles && input.existingChallengeTitles.length > 0) {
+    lines.push(
+      "",
+      "Diese Challenge-Titel existieren bereits. Schlage keine Kandidaten vor die diesen inhaltlich entsprechen.",
+      ...input.existingChallengeTitles.map((t) => `- ${t}`)
+    );
+  }
+  return withStrategyReference(lines, input.strategyReferenceText);
 }
 
 function buildGraphLayoutPrompt(input: {
@@ -707,6 +719,7 @@ export async function assessClusterWithLlm(input: {
   score: number;
   members: string[];
   strategyReferenceText?: string | null;
+  existingChallengeTitles?: string[];
   maxOutputTokens?: number;
 }): Promise<LlmScoreResponse<LlmClusterAssessment>> {
   const prompt = buildClusterPrompt(input);
@@ -821,6 +834,7 @@ export async function proposeChallengeCandidatesWithLlm(input: {
   clusters: Array<{ id: string; label: string; summary: string; score: number }>;
   gaps: Array<{ id: string; dimension: string; gapType: string; severity: number; recommendation: string }>;
   strategyReferenceText?: string | null;
+  existingChallengeTitles?: string[];
   maxOutputTokens?: number;
 }): Promise<LlmScoreResponse<LlmChallengeCandidate[]>> {
   if (input.clusters.length === 0 && input.gaps.length === 0) {

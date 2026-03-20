@@ -16,6 +16,8 @@ type GraphCanvas2DProps = {
   setSelectedEdgeId: (id: string | null) => void;
   onSelectNode?: (id: string, anchor: { x: number; y: number }) => void;
   onSelectEdge?: (id: string, anchor: { x: number; y: number }) => void;
+  linkFromNodeId?: string | null;
+  onCtrlClickNode?: (id: string, anchor: { x: number; y: number }) => void;
 };
 
 function getNodeColor(node: PositionedNode): string {
@@ -64,6 +66,8 @@ export function GraphCanvas2D({
   setSelectedEdgeId,
   onSelectNode,
   onSelectEdge,
+  linkFromNodeId = null,
+  onCtrlClickNode,
 }: GraphCanvas2DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -80,8 +84,8 @@ export function GraphCanvas2D({
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const labelPlacements = useMemo(
-    () => (showLabels ? buildNodeLabelPlacements(nodes, selectedNodeId, centerX, centerY, 38) : new Map()),
-    [showLabels, nodes, selectedNodeId, centerX, centerY]
+    () => (showLabels ? buildNodeLabelPlacements(nodes, selectedNodeId, centerX, centerY, 38, zoom) : new Map()),
+    [showLabels, nodes, selectedNodeId, centerX, centerY, zoom]
   );
   const renderedEdges = useMemo(
     () =>
@@ -156,7 +160,7 @@ export function GraphCanvas2D({
           setPanStart(null);
         }}
       >
-        <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] text-zinc-700 shadow-sm">
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-zinc-300 bg-white/90 px-2 py-1.5 text-[11px] text-zinc-700 shadow-sm">
           <span className="font-semibold text-zinc-800">Legende:</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" />Umfeld</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-500" />Unternehmen</span>
@@ -164,6 +168,10 @@ export function GraphCanvas2D({
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />SWOT</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Workshop</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-500" />Sonstige</span>
+          <span className="border-l border-zinc-300 pl-2" />
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#dc2626" }} />widerspricht</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />unterstuetzt/verstaerkt</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#94a3b8" }} />verbunden/verursacht/...</span>
         </div>
         <div className="pointer-events-none absolute right-3 top-3 z-10 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700 shadow-sm">
           Zoom: Shift + Scroll
@@ -206,25 +214,38 @@ export function GraphCanvas2D({
 
             {nodes.map((node) => {
               const placement = labelPlacements.get(node.id);
+              const isLinkFrom = linkFromNodeId === node.id;
+              const handleNodeClick = (event: React.MouseEvent) => {
+                event.stopPropagation();
+                if (wrapperRef.current) {
+                  const rect = wrapperRef.current.getBoundingClientRect();
+                  const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+                  if (event.ctrlKey && onCtrlClickNode) {
+                    onCtrlClickNode(node.id, anchor);
+                  } else {
+                    setSelectedNodeId(node.id);
+                    setSelectedEdgeId(null);
+                    onSelectNode?.(node.id, anchor);
+                  }
+                }
+              };
               return (
-                <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y})`}>
+                <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y}) scale(${1 / zoom})`}>
+                  {isLinkFrom ? (
+                    <circle
+                      r={Math.max(3, (5 + node.impact * 1.9) * 0.5) + 6}
+                      fill="none"
+                      stroke="#0ea5e9"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                    />
+                  ) : null}
                   <circle
                     r={Math.max(3, (5 + node.impact * 1.9) * 0.5)}
                     fill={getNodeColor(node)}
-                    stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
-                    strokeWidth={selectedNodeId === node.id ? 3 : 1.5}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedNodeId(node.id);
-                      setSelectedEdgeId(null);
-                      if (wrapperRef.current && onSelectNode) {
-                        const rect = wrapperRef.current.getBoundingClientRect();
-                        onSelectNode(node.id, {
-                          x: event.clientX - rect.left,
-                          y: event.clientY - rect.top,
-                        });
-                      }
-                    }}
+                    stroke={selectedNodeId === node.id ? "#0f172a" : isLinkFrom ? "#0ea5e9" : "#ffffff"}
+                    strokeWidth={selectedNodeId === node.id ? 3 : isLinkFrom ? 2 : 1.5}
+                    onClick={handleNodeClick}
                   />
                   {showLabels && placement ? (
                     <>
@@ -247,14 +268,16 @@ export function GraphCanvas2D({
                         style={{ cursor: "pointer" }}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setSelectedNodeId(node.id);
-                          setSelectedEdgeId(null);
-                          if (wrapperRef.current && onSelectNode) {
+                          if (wrapperRef.current) {
                             const rect = wrapperRef.current.getBoundingClientRect();
-                            onSelectNode(node.id, {
-                              x: event.clientX - rect.left,
-                              y: event.clientY - rect.top,
-                            });
+                            const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+                            if (event.ctrlKey && onCtrlClickNode) {
+                              onCtrlClickNode(node.id, anchor);
+                            } else {
+                              setSelectedNodeId(node.id);
+                              setSelectedEdgeId(null);
+                              onSelectNode?.(node.id, anchor);
+                            }
                           }
                         }}
                       />
@@ -266,14 +289,16 @@ export function GraphCanvas2D({
                         style={{ cursor: "pointer" }}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setSelectedNodeId(node.id);
-                          setSelectedEdgeId(null);
-                          if (wrapperRef.current && onSelectNode) {
+                          if (wrapperRef.current) {
                             const rect = wrapperRef.current.getBoundingClientRect();
-                            onSelectNode(node.id, {
-                              x: event.clientX - rect.left,
-                              y: event.clientY - rect.top,
-                            });
+                            const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+                            if (event.ctrlKey && onCtrlClickNode) {
+                              onCtrlClickNode(node.id, anchor);
+                            } else {
+                              setSelectedNodeId(node.id);
+                              setSelectedEdgeId(null);
+                              onSelectNode?.(node.id, anchor);
+                            }
                           }
                         }}
                       >
@@ -288,7 +313,7 @@ export function GraphCanvas2D({
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Zoom: Shift + Mousewheel | Drag: Pan | Klick: Node/Edge-Detail
+        Zoom: Shift + Mousewheel | Drag: Pan | Klick: Node/Edge-Detail | Ctrl+Klick: Verbindung erstellen
       </p>
     </div>
   );

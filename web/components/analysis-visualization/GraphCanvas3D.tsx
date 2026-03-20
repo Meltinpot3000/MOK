@@ -14,6 +14,8 @@ type GraphCanvas3DProps = {
   setSelectedEdgeId: (id: string | null) => void;
   onSelectNode?: (id: string, anchor: { x: number; y: number }) => void;
   onSelectEdge?: (id: string, anchor: { x: number; y: number }) => void;
+  linkFromNodeId?: string | null;
+  onCtrlClickNode?: (id: string, anchor: { x: number; y: number }) => void;
 };
 
 function getEdgeColor(edge: VisualizationEdge): string {
@@ -39,6 +41,8 @@ export function GraphCanvas3D({
   setSelectedEdgeId,
   onSelectNode,
   onSelectEdge,
+  linkFromNodeId = null,
+  onCtrlClickNode,
 }: GraphCanvas3DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(1200);
@@ -171,26 +175,31 @@ export function GraphCanvas3D({
                 />
               ))
             : null}
-          {sortedNodes.map((node) => (
+          {sortedNodes.map((node) => {
+            const isLinkFrom = linkFromNodeId === node.id;
+            const handleNodeClick = (event: React.MouseEvent) => {
+              event.stopPropagation();
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+                if (event.ctrlKey && onCtrlClickNode) {
+                  onCtrlClickNode(node.id, anchor);
+                } else {
+                  setSelectedNodeId(node.id);
+                  setSelectedEdgeId(null);
+                  onSelectNode?.(node.id, anchor);
+                }
+              }
+            };
+            return (
             <g key={node.id} transform={`translate(${node.px} ${node.py})`}>
               <circle
                 r={Math.max(4, (4 + node.impact * 1.4) * node.perspective)}
                 fill="#334155"
                 fillOpacity={0.9}
-                stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
-                strokeWidth={selectedNodeId === node.id ? 3 : 1.2}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSelectedNodeId(node.id);
-                  setSelectedEdgeId(null);
-                  if (containerRef.current && onSelectNode) {
-                    const rect = containerRef.current.getBoundingClientRect();
-                    onSelectNode(node.id, {
-                      x: event.clientX - rect.left,
-                      y: event.clientY - rect.top,
-                    });
-                  }
-                }}
+                stroke={selectedNodeId === node.id ? "#0f172a" : isLinkFrom ? "#0ea5e9" : "#ffffff"}
+                strokeWidth={selectedNodeId === node.id ? 3 : isLinkFrom ? 2 : 1.2}
+                onClick={handleNodeClick}
               />
               {showLabels ? (
                 <text
@@ -199,28 +208,18 @@ export function GraphCanvas3D({
                   fontSize={10}
                   fill="#111827"
                   style={{ cursor: "pointer" }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedNodeId(node.id);
-                    setSelectedEdgeId(null);
-                    if (containerRef.current && onSelectNode) {
-                      const rect = containerRef.current.getBoundingClientRect();
-                      onSelectNode(node.id, {
-                        x: event.clientX - rect.left,
-                        y: event.clientY - rect.top,
-                      });
-                    }
-                  }}
+                  onClick={handleNodeClick}
                 >
                   {node.label.length > 28 ? `${node.label.slice(0, 28)}...` : node.label}
                 </text>
               ) : null}
             </g>
-          ))}
+          );
+          })}
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        3D-Achsen: X intern/extern | Y Wirkung | Z kurz/langfristig
+        3D-Achsen: X intern/extern | Y Wirkung | Z kurz/langfristig | Ctrl+Klick: Verbindung erstellen
       </p>
     </div>
   );

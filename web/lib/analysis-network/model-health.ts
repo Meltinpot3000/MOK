@@ -67,6 +67,22 @@ function getFeatureTargets(): FeatureTarget[] {
   ];
 }
 
+/** Gemini-Modell, das als Fallback geprüft wird (z. B. wenn Groq für `llm_fallback` ausfällt). */
+function geminiFallbackModelForFeature(feature: string): string {
+  switch (feature) {
+    case "quality_scoring":
+      return GEMINI_MODEL_QUALITY;
+    case "link_draft_generation":
+      return GEMINI_MODEL_LINKS;
+    case "graph_layout":
+    case "cluster_gap_assist":
+    case "challenge_recommendation":
+    case "llm_fallback":
+    default:
+      return GEMINI_MODEL_ASSIST;
+  }
+}
+
 async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

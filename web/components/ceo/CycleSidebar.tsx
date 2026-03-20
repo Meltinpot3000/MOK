@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { PlanningCycle, TenantBranding } from "@/lib/ceo/queries";
 import { SIDEBAR_ITEMS, type SidebarPermissionMap } from "@/lib/sidebar-access";
+import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
 
 type CycleSidebarProps = {
   cycles: PlanningCycle[];
@@ -78,10 +79,13 @@ export function CycleSidebar({ cycles, branding, productName, permissions, nowIs
     (item) => item.section === "admin" && permissions[item.id].read
   );
 
+  const showJobBell = permissions["strategy-cycle"]?.read ?? false;
+
   return (
     <aside className="w-72 border-r border-zinc-200 bg-white p-4">
       <div className="mb-6">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
           {branding?.logo_url ? (
             <span
               className="inline-block h-[41px] w-16 rounded bg-zinc-100"
@@ -95,6 +99,8 @@ export function CycleSidebar({ cycles, branding, productName, permissions, nowIs
               title={branding.logo_url}
             />
           ) : null}
+          </div>
+          {showJobBell ? <JobNotificationsBell /> : null}
         </div>
         <h1 className="mt-2.5 break-words text-lg font-semibold leading-tight text-zinc-900">{productName}</h1>
         <a

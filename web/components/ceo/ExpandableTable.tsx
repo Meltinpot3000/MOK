@@ -18,6 +18,8 @@ type ExpandableTableProps<T> = {
   renderExpandedContent: (row: T) => React.ReactNode;
   emptyMessage?: string;
   expandLabel?: string;
+  /** Prefix for row id attribute (e.g. "entry-" for #entry-xxx anchors) */
+  rowIdPrefix?: string;
 };
 
 const PILL_BASE =
@@ -51,6 +53,7 @@ export function ExpandableTable<T>({
   renderExpandedContent,
   emptyMessage = "Keine Eintraege vorhanden.",
   expandLabel = "Details",
+  rowIdPrefix,
 }: ExpandableTableProps<T>) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -142,6 +145,7 @@ export function ExpandableTable<T>({
                   <Fragment key={id}>
                     <tr
                       key={id}
+                      id={rowIdPrefix ? `${rowIdPrefix}${id}` : undefined}
                       className="border-b border-zinc-200 bg-white hover:bg-zinc-50/50"
                     >
                       <td className="border border-zinc-200 px-2 py-1.5">

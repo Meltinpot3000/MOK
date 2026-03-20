@@ -87,6 +87,8 @@ export async function POST(request: Request) {
         strength: Math.round(strength),
         confidence: Math.max(0, Math.min(1, Number.isFinite(confidence) ? confidence : 0.5)),
         comment: comment && comment.length > 0 ? comment : null,
+        created_by_membership_id: access.access.membershipId ?? null,
+        created_by_source: "user",
         metadata: {
           ...(triScores ? { triScores } : {}),
           restored_at: new Date().toISOString(),

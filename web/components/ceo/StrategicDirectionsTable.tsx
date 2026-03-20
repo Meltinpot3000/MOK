@@ -23,38 +23,23 @@ type Direction = {
 type StrategicDirectionsTableProps = {
   directions: Direction[];
   challenges: Array<{ id: string; title: string }>;
-  clusters: Array<{ id: string; label: string }>;
   objectives: Array<{ id: string; title: string }>;
-  clusterObjectiveRelations: Array<{
-    id: string;
-    cluster_id: string;
-    objective_id: string;
-    gap_score: number | null;
-  }>;
   industries: Array<{ id: string; name: string }>;
   businessModels: Array<{ id: string; name: string }>;
   programsByDirectionId: Record<string, Array<{ id: string; title: string }>>;
   challengeIdsByDirection: Record<string, string[]>;
-  clusterIdsByDirection: Record<string, string[]>;
   objectiveIdsByDirection: Record<string, string[]>;
-  gapRelationIdsByDirection: Record<string, string[]>;
   industryIdsByDirection: Record<string, string[]>;
   businessModelIdsByDirection: Record<string, string[]>;
   directionCoverageById: Record<string, { linked: number; total: number; percent: number }>;
-  clusterById: Record<string, { label: string }>;
-  objectiveById: Record<string, { title: string }>;
   canWrite: boolean;
   actions: {
     updateStrategicDirectionAssessment: (formData: FormData) => Promise<void>;
     deleteStrategicDirectionInCycle: (formData: FormData) => Promise<void>;
     linkDirectionToChallengePredecessor: (formData: FormData) => Promise<void>;
     unlinkDirectionChallengePredecessor: (formData: FormData) => Promise<void>;
-    linkDirectionToClusterInCycle: (formData: FormData) => Promise<void>;
-    unlinkDirectionFromClusterInCycle: (formData: FormData) => Promise<void>;
     linkDirectionToObjectiveInCycle: (formData: FormData) => Promise<void>;
     unlinkDirectionFromObjectiveInCycle: (formData: FormData) => Promise<void>;
-    linkDirectionToGapInCycle: (formData: FormData) => Promise<void>;
-    unlinkDirectionFromGapInCycle: (formData: FormData) => Promise<void>;
     linkStrategicDirectionToIndustryInCycle: (formData: FormData) => Promise<void>;
     unlinkStrategicDirectionFromIndustryInCycle: (formData: FormData) => Promise<void>;
     linkStrategicDirectionToBusinessModelInCycle: (formData: FormData) => Promise<void>;
@@ -80,21 +65,15 @@ function PillSection({
 export function StrategicDirectionsTable({
   directions,
   challenges,
-  clusters,
   objectives,
-  clusterObjectiveRelations,
   industries,
   businessModels,
   programsByDirectionId,
   challengeIdsByDirection,
-  clusterIdsByDirection,
   objectiveIdsByDirection,
-  gapRelationIdsByDirection,
   industryIdsByDirection,
   businessModelIdsByDirection,
   directionCoverageById,
-  clusterById,
-  objectiveById,
   canWrite,
   actions,
 }: StrategicDirectionsTableProps) {
@@ -250,14 +229,8 @@ export function StrategicDirectionsTable({
         const linkedChallengeIds = new Set(
           challengeIdsByDirection[direction.id] ?? []
         );
-        const linkedClusterIds = new Set(
-          clusterIdsByDirection[direction.id] ?? []
-        );
         const linkedObjectiveIds = new Set(
           objectiveIdsByDirection[direction.id] ?? []
-        );
-        const linkedGapIds = new Set(
-          gapRelationIdsByDirection[direction.id] ?? []
         );
         const linkedIndustryIds = new Set(
           industryIdsByDirection[direction.id] ?? []
@@ -411,29 +384,6 @@ export function StrategicDirectionsTable({
                 })}
               </PillSection>
 
-              <PillSection title="Cluster">
-                {clusters.map((cluster) => {
-                  const isLinked = linkedClusterIds.has(cluster.id);
-                  return (
-                    <EntityPillButton
-                      key={cluster.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ cluster_id: cluster.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkDirectionToClusterInCycle}
-                      unlinkAction={actions.unlinkDirectionFromClusterInCycle}
-                      canWrite={canWrite}
-                      title={cluster.label}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {cluster.label}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
-
               <PillSection title="Objectives">
                 {objectives.map((objective) => {
                   const isLinked = linkedObjectiveIds.has(objective.id);
@@ -452,32 +402,6 @@ export function StrategicDirectionsTable({
                       unlinkedClassName={pillNeutral()}
                     >
                       {objective.title}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
-
-              <PillSection title="Gaps (Cluster → Objective)">
-                {clusterObjectiveRelations.map((relation) => {
-                  const cluster = clusterById[relation.cluster_id];
-                  const objective = objectiveById[relation.objective_id];
-                  const label = `${cluster?.label ?? relation.cluster_id} → ${objective?.title ?? relation.objective_id} (${Number(relation.gap_score ?? 0).toFixed(2)})`;
-                  const isLinked = linkedGapIds.has(relation.id);
-                  return (
-                    <EntityPillButton
-                      key={relation.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ cluster_objective_relation_id: relation.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkDirectionToGapInCycle}
-                      unlinkAction={actions.unlinkDirectionFromGapInCycle}
-                      canWrite={canWrite}
-                      title={label}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      <span className="max-w-[180px] truncate">{label}</span>
                     </EntityPillButton>
                   );
                 })}

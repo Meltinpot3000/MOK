@@ -1,12 +1,6 @@
 "use server";
 
-type SupabaseClientLike = {
-  schema: (name: string) => {
-    from: (table: string) => {
-      insert: (values: unknown) => Promise<{ error: { message: string } | null }>;
-    };
-  };
-};
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type LlmUsageEventInput = {
   organizationId: string;
@@ -24,7 +18,7 @@ export type LlmUsageEventInput = {
 };
 
 export async function recordLlmUsageEvents(
-  supabase: SupabaseClientLike,
+  supabase: SupabaseClient,
   events: LlmUsageEventInput[]
 ): Promise<void> {
   if (events.length === 0) return;

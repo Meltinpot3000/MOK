@@ -1,5 +1,6 @@
 "use client";
 
+import { formatCreatorLabel } from "@/lib/creator/format";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 import { ObjectiveAiPanel } from "./ObjectiveAiPanel";
@@ -11,6 +12,8 @@ type Objective = {
   importance_score: number | null;
   time_horizon: string | null;
   status: string | null;
+  created_by_membership_id?: string | null;
+  created_by_source?: string | null;
   ai_objective_score?: number | null;
   ai_clarity_score?: number | null;
   ai_strategic_relevance_score?: number | null;
@@ -32,6 +35,7 @@ type ObjectivesTableProps = {
   businessModels: Array<{ id: string; name: string }>;
   industryIdsByObjective: Record<string, string[]>;
   businessModelIdsByObjective: Record<string, string[]>;
+  creatorDisplayNameByMembershipId?: Record<string, string>;
   canWrite: boolean;
   actions: {
     updateObjectiveInCycle: (formData: FormData) => Promise<void>;
@@ -83,6 +87,7 @@ export function ObjectivesTable({
   businessModels,
   industryIdsByObjective,
   businessModelIdsByObjective,
+  creatorDisplayNameByMembershipId,
   canWrite,
   actions,
 }: ObjectivesTableProps) {
@@ -93,6 +98,16 @@ export function ObjectivesTable({
       render: (o: Objective) => (
         <span className="font-medium text-zinc-900">{o.title}</span>
       ),
+    },
+    {
+      id: "creator",
+      label: "Ersteller",
+      defaultVisible: true,
+      render: (o: Objective) =>
+        formatCreatorLabel(
+          o.created_by_source,
+          o.created_by_membership_id ? creatorDisplayNameByMembershipId?.[o.created_by_membership_id] : undefined
+        ),
     },
     {
       id: "time_horizon",

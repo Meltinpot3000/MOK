@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnalysisTableView } from "@/components/analysis-visualization/AnalysisTableView";
+import { CreateLinkDialog } from "@/components/analysis-visualization/CreateLinkDialog";
 import { DetailPanel } from "@/components/analysis-visualization/DetailPanel";
 import { FilterPanel } from "@/components/analysis-visualization/FilterPanel";
 import { GraphCanvas2D } from "@/components/analysis-visualization/GraphCanvas2D";
@@ -327,6 +328,12 @@ export function AnalysisVisualizationWorkspace({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [overlayAnchor, setOverlayAnchor] = useState<{ x: number; y: number } | null>(null);
   const [undoCandidate, setUndoCandidate] = useState<VisualizationEdge | null>(null);
+  const [linkFromNodeId, setLinkFromNodeId] = useState<string | null>(null);
+  const [createLinkState, setCreateLinkState] = useState<{
+    sourceId: string;
+    targetId: string;
+    anchor: { x: number; y: number };
+  } | null>(null);
 
   const clusterIdByEntryId = useMemo(() => {
     const map = new Map<string, string>();
@@ -500,13 +507,33 @@ export function AnalysisVisualizationWorkspace({
   function handleSelectNode(id: string, anchor: { x: number; y: number }) {
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
+    setLinkFromNodeId(null);
     setOverlayAnchor(anchor);
   }
 
   function handleSelectEdge(id: string, anchor: { x: number; y: number }) {
     setSelectedEdgeId(id);
     setSelectedNodeId(null);
+    setLinkFromNodeId(null);
     setOverlayAnchor(anchor);
+  }
+
+  function handleCtrlClickNode(id: string, anchor: { x: number; y: number }) {
+    if (!canWrite) return;
+    if (!linkFromNodeId) {
+      setLinkFromNodeId(id);
+      return;
+    }
+    if (linkFromNodeId === id) {
+      setLinkFromNodeId(null);
+      return;
+    }
+    const sourceNode = positionedNodes.find((n) => n.id === linkFromNodeId);
+    const targetNode = positionedNodes.find((n) => n.id === id);
+    if (sourceNode && targetNode) {
+      setCreateLinkState({ sourceId: linkFromNodeId, targetId: id, anchor });
+    }
+    setLinkFromNodeId(null);
   }
 
   function handleSelectNodeFromTable(id: string) {
@@ -573,6 +600,71 @@ export function AnalysisVisualizationWorkspace({
     window.setTimeout(() => {
       setUndoCandidate((current) => (current?.id === edge.id ? null : current));
     }, 10000);
+  }
+
+  async function createLink(payload: { linkType: string; strength: number; comment: string | null }) {
+    if (!createLinkState) return;
+    const response = await fetch("/api/analysis-item-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceAnalysisItemId: createLinkState.sourceId,
+        targetAnalysisItemId: createLinkState.targetId,
+        linkType: payload.linkType,
+        strength: payload.strength,
+        confidence: 0.5,
+        comment: payload.comment,
+      }),
+    });
+    if (!response.ok) {
+      let message = "Verbindung konnte nicht erstellt werden.";
+      try {
+        const body = (await response.json()) as { error?: string };
+        if (body.error === "forbidden") message = "Keine Schreibberechtigung.";
+        else if (body.error === "source_not_found") message = "Quelleintrag nicht gefunden.";
+        else if (body.error === "invalid_payload") message = "Ungültige Angaben (Quelle, Ziel oder Verbindungstyp).";
+        else if (body.error === "invalid_strength") message = "Stärke muss zwischen 1 und 5 liegen.";
+        else if (body.error === "restore_failed") message = "Speichern fehlgeschlagen (evtl. Duplikat oder Datenbankfehler).";
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+    const data = (await response.json()) as {
+      edge: {
+        id: string;
+        source: string;
+        target: string;
+        linkType: string;
+        strength: number;
+        confidence: number;
+        comment: string | null;
+        triScores?: unknown;
+        createdAt?: string | null;
+        updatedAt?: string | null;
+        history?: unknown[];
+      };
+    };
+    setLiveEdges((prev) => [
+      ...prev,
+      {
+        id: data.edge.id,
+        source: data.edge.source,
+        target: data.edge.target,
+        linkType: data.edge.linkType,
+        strength: data.edge.strength,
+        confidence: data.edge.confidence,
+        comment: data.edge.comment,
+        triScores: normalizeTriScores(data.edge.triScores),
+        createdAt: data.edge.createdAt ?? null,
+        updatedAt: data.edge.updatedAt ?? null,
+        history: Array.isArray(data.edge.history)
+          ? (data.edge.history as VisualizationEdge["history"])
+          : [],
+        isDraft: false,
+      },
+    ]);
+    setCreateLinkState(null);
   }
 
   async function restoreEdge() {
@@ -664,6 +756,11 @@ export function AnalysisVisualizationWorkspace({
         <span className="rounded border border-zinc-300 bg-white px-2 py-0.5">
           Umfang: {linkScope === "approved" ? "freigegeben" : linkScope === "draft" ? "Entwurf" : "beide"}
         </span>
+        {linkFromNodeId && canWrite ? (
+          <span className="rounded border border-sky-300 bg-sky-50 px-2 py-0.5 text-sky-800">
+            Quelle ausgew&auml;hlt – Ctrl+Klick auf Zielpunkt f&uuml;r Verbindung
+          </span>
+        ) : null}
       </div>
       {undoCandidate ? (
         <div className="mt-3 flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -727,6 +824,8 @@ export function AnalysisVisualizationWorkspace({
               setSelectedEdgeId={setSelectedEdgeId}
               onSelectNode={handleSelectNode}
               onSelectEdge={handleSelectEdge}
+              linkFromNodeId={canWrite ? linkFromNodeId : null}
+              onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
             />
           ) : is3D ? (
             <GraphCanvas3D
@@ -740,6 +839,8 @@ export function AnalysisVisualizationWorkspace({
               setSelectedEdgeId={setSelectedEdgeId}
               onSelectNode={handleSelectNode}
               onSelectEdge={handleSelectEdge}
+              linkFromNodeId={canWrite ? linkFromNodeId : null}
+              onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
             />
           ) : (
             <GraphCanvas2D
@@ -754,8 +855,26 @@ export function AnalysisVisualizationWorkspace({
               setSelectedEdgeId={setSelectedEdgeId}
               onSelectNode={handleSelectNode}
               onSelectEdge={handleSelectEdge}
+              linkFromNodeId={canWrite ? linkFromNodeId : null}
+              onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
             />
           )}
+          {createLinkState && canWrite ? (() => {
+            const sourceNode = positionedNodes.find((n) => n.id === createLinkState.sourceId);
+            const targetNode = positionedNodes.find((n) => n.id === createLinkState.targetId);
+            if (!sourceNode || !targetNode) return null;
+            return (
+              <CreateLinkDialog
+                sourceNode={sourceNode}
+                targetNode={targetNode}
+                anchor={createLinkState.anchor}
+                onConfirm={(payload) => {
+                  void createLink(payload);
+                }}
+                onCancel={() => setCreateLinkState(null)}
+              />
+            );
+          })() : null}
           {(selectedNode || selectedEdge) && overlayAnchor && viewMode !== "table" ? (
             <div
               className="pointer-events-none absolute z-20"

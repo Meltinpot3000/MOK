@@ -22,13 +22,21 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+/** Zoom-basierter Faktor für Fähnchenlänge: bei höherem Zoom mehr Platz → längere Labels */
+function effectiveMaxChars(baseMaxChars: number, zoom: number): number {
+  const scaled = Math.round(baseMaxChars * zoom);
+  return Math.max(24, Math.min(72, scaled));
+}
+
 export function buildNodeLabelPlacements(
   nodes: PositionedNode[],
   selectedNodeId: string | null,
   centerX: number,
   centerY: number,
-  maxChars: number
+  maxChars: number,
+  zoom?: number
 ): Map<string, LabelPlacement> {
+  const effectiveChars = zoom != null ? effectiveMaxChars(maxChars, zoom) : maxChars;
   const sorted = [...nodes].sort((a, b) => {
     if (a.id === selectedNodeId) return -1;
     if (b.id === selectedNodeId) return 1;
@@ -51,7 +59,7 @@ export function buildNodeLabelPlacements(
   });
 
   for (const node of sorted) {
-    const text = node.label.length > maxChars ? `${node.label.slice(0, maxChars)}...` : node.label;
+    const text = node.label.length > effectiveChars ? `${node.label.slice(0, effectiveChars)}...` : node.label;
     const labelWidth = Math.max(36, text.length * 6.2);
     const labelHeight = 12;
     const padX = 3;

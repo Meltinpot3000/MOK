@@ -19,6 +19,8 @@ type TerrainMap2DProps = {
   setSelectedEdgeId: (id: string | null) => void;
   onSelectNode?: (id: string, anchor: { x: number; y: number }) => void;
   onSelectEdge?: (id: string, anchor: { x: number; y: number }) => void;
+  linkFromNodeId?: string | null;
+  onCtrlClickNode?: (id: string, anchor: { x: number; y: number }) => void;
 };
 
 function getNodeColor(analysisType: string): string {
@@ -62,6 +64,8 @@ export function TerrainMap2D({
   setSelectedEdgeId,
   onSelectNode,
   onSelectEdge,
+  linkFromNodeId = null,
+  onCtrlClickNode,
 }: TerrainMap2DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -77,8 +81,8 @@ export function TerrainMap2D({
 
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const labelPlacements = useMemo(
-    () => (showLabels ? buildNodeLabelPlacements(nodes, selectedNodeId, centerX, centerY, 36) : new Map()),
-    [showLabels, nodes, selectedNodeId, centerX, centerY]
+    () => (showLabels ? buildNodeLabelPlacements(nodes, selectedNodeId, centerX, centerY, 36, zoom) : new Map()),
+    [showLabels, nodes, selectedNodeId, centerX, centerY, zoom]
   );
   const renderedEdges = useMemo(
     () =>
@@ -217,7 +221,7 @@ export function TerrainMap2D({
           setPanStart(null);
         }}
       >
-        <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] text-zinc-700 shadow-sm">
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-zinc-300 bg-white/90 px-2 py-1.5 text-[11px] text-zinc-700 shadow-sm">
           <span className="font-semibold text-zinc-800">Legende:</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" />Umfeld</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-500" />Unternehmen</span>
@@ -225,6 +229,10 @@ export function TerrainMap2D({
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />SWOT</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Workshop</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-500" />Sonstige</span>
+          <span className="border-l border-zinc-300 pl-2" />
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#dc2626" }} />widerspricht</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />unterstuetzt/verstaerkt</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#64748b" }} />verbunden/verursacht/...</span>
         </div>
         <div className="pointer-events-none absolute right-3 top-3 z-10 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700 shadow-sm">
           Zoom: Shift + Scroll
@@ -233,10 +241,10 @@ export function TerrainMap2D({
           <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
             <line x1={centerX - 420} y1={centerY} x2={centerX + 420} y2={centerY} stroke="#cbd5e1" strokeWidth={1.5} />
             <line x1={centerX} y1={centerY - 255} x2={centerX} y2={centerY + 255} stroke="#cbd5e1" strokeWidth={1.5} />
-            <text x={centerX - 410} y={centerY - 8} fontSize={10} fill="#64748b">internal</text>
-            <text x={centerX + 350} y={centerY - 8} fontSize={10} fill="#64748b">external</text>
-            <text x={centerX + 6} y={centerY - 236} fontSize={10} fill="#64748b">strategic</text>
-            <text x={centerX + 6} y={centerY + 246} fontSize={10} fill="#64748b">operational</text>
+            <g transform={`translate(${centerX - 410} ${centerY - 8}) scale(${1 / zoom})`}><text x={0} y={0} fontSize={10} fill="#64748b">internal</text></g>
+            <g transform={`translate(${centerX + 350} ${centerY - 8}) scale(${1 / zoom})`}><text x={0} y={0} fontSize={10} fill="#64748b">external</text></g>
+            <g transform={`translate(${centerX + 6} ${centerY - 236}) scale(${1 / zoom})`}><text x={0} y={0} fontSize={10} fill="#64748b">strategic</text></g>
+            <g transform={`translate(${centerX + 6} ${centerY + 246}) scale(${1 / zoom})`}><text x={0} y={0} fontSize={10} fill="#64748b">operational</text></g>
 
             {showDensity
               ? densitySpots.map((spot, index) => (
@@ -308,35 +316,50 @@ export function TerrainMap2D({
                   strokeOpacity={0.45}
                 />
                 {showClusterLabels && cluster.size >= 2 ? (
-                  <text x={centerX + cluster.cx + 6} y={centerY + cluster.cy - 6} fontSize={10} fill="#334155">
-                    {cluster.label.length > 26 ? `${cluster.label.slice(0, 26)}...` : cluster.label}
-                  </text>
+                  <g transform={`translate(${centerX + cluster.cx + 6} ${centerY + cluster.cy - 6}) scale(${1 / zoom})`}>
+                    <text x={0} y={0} fontSize={10} fill="#334155">
+                      {cluster.label.length > 26 ? `${cluster.label.slice(0, 26)}...` : cluster.label}
+                    </text>
+                  </g>
                 ) : null}
               </g>
             ))}
 
             {nodes.map((node) => {
               const placement = labelPlacements.get(node.id);
+              const isLinkFrom = linkFromNodeId === node.id;
+              const handleNodeClick = (event: React.MouseEvent) => {
+                event.stopPropagation();
+                if (wrapperRef.current) {
+                  const rect = wrapperRef.current.getBoundingClientRect();
+                  const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+                  if (event.ctrlKey && onCtrlClickNode) {
+                    onCtrlClickNode(node.id, anchor);
+                  } else {
+                    setSelectedNodeId(node.id);
+                    setSelectedEdgeId(null);
+                    onSelectNode?.(node.id, anchor);
+                  }
+                }
+              };
               return (
-                <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y})`}>
+                <g key={node.id} transform={`translate(${centerX + node.x} ${centerY + node.y}) scale(${1 / zoom})`}>
+                  {isLinkFrom ? (
+                    <circle
+                      r={Math.max(3, (5 + node.impact * 1.9) * 0.5) + 6}
+                      fill="none"
+                      stroke="#0ea5e9"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                    />
+                  ) : null}
                   <circle
                     r={Math.max(3, (5 + node.impact * 1.9) * 0.5)}
                     fill={getNodeColor(node.analysisType)}
                     fillOpacity={0.9}
-                    stroke={selectedNodeId === node.id ? "#0f172a" : "#ffffff"}
-                    strokeWidth={selectedNodeId === node.id ? 2.6 : 1.4}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedNodeId(node.id);
-                      setSelectedEdgeId(null);
-                      if (wrapperRef.current && onSelectNode) {
-                        const rect = wrapperRef.current.getBoundingClientRect();
-                        onSelectNode(node.id, {
-                          x: event.clientX - rect.left,
-                          y: event.clientY - rect.top,
-                        });
-                      }
-                    }}
+                    stroke={selectedNodeId === node.id ? "#0f172a" : isLinkFrom ? "#0ea5e9" : "#ffffff"}
+                    strokeWidth={selectedNodeId === node.id ? 2.6 : isLinkFrom ? 2 : 1.4}
+                    onClick={handleNodeClick}
                   />
                   {showChallengeLayer && node.challengeMapped ? (
                     <circle r={Math.max(8, 8 + node.impact * 1.7)} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
@@ -382,7 +405,7 @@ export function TerrainMap2D({
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Strategic Terrain Map: X internal/external | Y operational/strategic | Zoom mit Shift + Wheel, Pan per Drag.
+        Strategic Terrain Map: X internal/external | Y operational/strategic | Zoom mit Shift + Wheel, Pan per Drag | Ctrl+Klick: Verbindung erstellen
       </p>
     </div>
   );

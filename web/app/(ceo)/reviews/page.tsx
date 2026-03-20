@@ -13,6 +13,8 @@ import {
   getIndustries,
   getOperatingModels,
 } from "@/lib/strategy-dimensions/queries";
+import { getReviewDashboardData } from "@/lib/review/queries";
+import { ReviewDashboard } from "@/components/ceo/ReviewDashboard";
 
 type ReviewsPageProps = {
   searchParams: Promise<{ tab?: string; error?: string; success?: string }>;
@@ -30,7 +32,13 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
   if (pageAccess.state === "forbidden") redirect("/no-access");
   const canWrite = pageAccess.canWrite;
   const params = await searchParams;
-  const activeTab = params.tab === "annual-targets" ? "annual-targets" : "overview";
+  const tabParam = params.tab ?? "dashboard";
+  const activeTab =
+    tabParam === "annual-targets"
+      ? "annual-targets"
+      : tabParam === "overview"
+        ? "overview"
+        : "dashboard";
   const status = getStatus(params.error, params.success);
 
   const context = await getPhase0Context();
@@ -38,11 +46,12 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
 
-  const [industries, businessModels, operatingModels, links] = await Promise.all([
+  const [industries, businessModels, operatingModels, links, reviewData] = await Promise.all([
     getIndustries(context.organizationId, cycle.id),
     getBusinessModels(context.organizationId, cycle.id),
     getOperatingModels(context.organizationId, cycle.id),
     getDimensionLinks(context.organizationId, cycle.id),
+    getReviewDashboardData(context.organizationId, cycle.id),
   ]);
 
   const industryIdsByTarget = new Map<string, string[]>();
@@ -78,6 +87,14 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         <Link
           href="/reviews"
           className={`rounded-md px-3 py-1.5 text-sm ${
+            activeTab === "dashboard" ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+          }`}
+        >
+          Dashboard
+        </Link>
+        <Link
+          href="/reviews?tab=overview"
+          className={`rounded-md px-3 py-1.5 text-sm ${
             activeTab === "overview" ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
           }`}
         >
@@ -93,7 +110,9 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         </Link>
       </div>
 
-      {activeTab === "overview" ? (
+      {activeTab === "dashboard" ? (
+        <ReviewDashboard data={reviewData} cycleName={cycle.name} canWrite={canWrite} />
+      ) : activeTab === "overview" ? (
         <section className="brand-card p-6">
           <h2 className="text-lg font-semibold text-zinc-900">Uebersicht</h2>
           <p className="mt-1 text-sm text-zinc-600">

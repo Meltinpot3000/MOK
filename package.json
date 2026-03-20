@@ -8,6 +8,7 @@
     "lint": "npm --prefix web run lint",
     "db:migrate": "node scripts/run-dbmate.mjs --migrations-dir supabase/migrations up",
     "db:migrate:status": "node scripts/run-dbmate.mjs --migrations-dir supabase/migrations status",
+    "db:push": "node scripts/run-dbmate.mjs --migrations-dir supabase/migrations up",
     "tenant:isolation": "npm --prefix web run tenant:isolation",
     "strategy:rollout": "npm --prefix web run strategy:rollout"
   }

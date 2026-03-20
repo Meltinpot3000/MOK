@@ -18,16 +18,19 @@ function loadLocalEnv(filePath) {
   return out;
 }
 
+const rootEnv = loadLocalEnv(resolve(process.cwd(), ".env"));
 const localEnv = loadLocalEnv(resolve(process.cwd(), ".env.local"));
+const merged = { ...rootEnv, ...localEnv };
+// Pooler zuerst: IPv4 / Session-Pooler; sonst direkte DB-URL (oft nur IPv6).
 const databaseUrl =
-  process.env.DATABASE_URL ||
   process.env.SUPABASE_POOLER_DB_URL ||
-  localEnv.DATABASE_URL ||
-  localEnv.SUPABASE_POOLER_DB_URL;
+  process.env.DATABASE_URL ||
+  merged.SUPABASE_POOLER_DB_URL ||
+  merged.DATABASE_URL;
 
 if (!databaseUrl) {
   console.error(
-    "DATABASE_URL fehlt. Setze DATABASE_URL oder SUPABASE_POOLER_DB_URL in .env.local."
+    "DATABASE_URL fehlt. Setze SUPABASE_POOLER_DB_URL oder DATABASE_URL in .env oder .env.local (siehe .env.example)."
   );
   process.exit(1);
 }

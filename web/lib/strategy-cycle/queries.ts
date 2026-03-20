@@ -51,9 +51,7 @@ export async function getStrategyCycleWorkspaceData(
     clusterMembersResult,
     gapFindingsResult,
     challengeDirectionLinksResult,
-    directionClusterLinksResult,
     directionObjectiveLinksResult,
-    directionGapLinksResult,
     challengeIndustriesResult,
     challengeBusinessModelsResult,
     directionIndustriesResult,
@@ -139,25 +137,13 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("challenge_direction_links")
-      .select("strategic_challenge_id, strategic_direction_id")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
-    supabase
-      .schema("app")
-      .from("strategic_direction_cluster_links")
-      .select("strategic_direction_id, cluster_id")
+      .select("strategic_challenge_id, strategic_direction_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("strategic_direction_objective_links")
       .select("strategic_direction_id, objective_id")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
-    supabase
-      .schema("app")
-      .from("strategic_direction_gap_links")
-      .select("strategic_direction_id, cluster_objective_relation_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -233,7 +219,7 @@ export async function getStrategyCycleWorkspaceData(
           .schema("app")
           .from("objectives")
           .select(
-            "id, title, description, importance_score, time_horizon, status, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
+            "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
           )
           .eq("organization_id", organizationId)
           .or(`cycle_instance_id.eq.${cycleInstanceId},cycle_id.eq.${legacyPlanningCycleId}`)
@@ -241,7 +227,7 @@ export async function getStrategyCycleWorkspaceData(
           .schema("app")
           .from("objectives")
           .select(
-            "id, title, description, importance_score, time_horizon, status, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
+            "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
           )
           .eq("organization_id", organizationId)
           .eq("cycle_instance_id", cycleInstanceId)),
@@ -312,11 +298,25 @@ export async function getStrategyCycleWorkspaceData(
   ]);
 
   const promotedBySourceId = new Map<string, string>();
+  const promotedClusterIds = new Set<string>();
   for (const challenge of promotedResult.data ?? []) {
     if (challenge.source_analysis_entry_id) {
       promotedBySourceId.set(challenge.source_analysis_entry_id, challenge.id);
     }
   }
+  const { data: promotedClusters, error: promotedClustersError } = await supabase
+    .schema("app")
+    .from("strategic_challenges")
+    .select("source_cluster_id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .not("source_cluster_id", "is", null);
+  if (!promotedClustersError && promotedClusters) {
+    for (const row of promotedClusters) {
+      if (row.source_cluster_id) promotedClusterIds.add(row.source_cluster_id);
+    }
+  }
+  // promotedClustersError occurs when source_cluster_id column does not exist (before migration 0065)
 
   const entries = (entriesResult.data ?? []) as AnalysisEntry[];
   const grouped = {
@@ -454,15 +454,33 @@ export async function getStrategyCycleWorkspaceData(
   }));
   const strategicDirections = strategicDirectionsResult.data ?? [];
   const objectives = objectivesResult.data ?? [];
+  const creatorMembershipIds = [
+    ...new Set(
+      (objectives as Array<{ created_by_membership_id?: string | null }>)
+        .map((o) => o.created_by_membership_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const creatorDisplayNameByMembershipId = new Map<string, string>();
+  if (creatorMembershipIds.length > 0) {
+    const { data: creatorRows } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id, responsibles!organization_memberships_responsible_id_fkey(full_name, email)")
+      .in("id", creatorMembershipIds);
+    for (const row of creatorRows ?? []) {
+      const resp = (row as { responsibles?: { full_name?: string; email?: string } | null }).responsibles;
+      const label = resp?.full_name?.trim() || resp?.email?.trim() || null;
+      if (label) creatorDisplayNameByMembershipId.set(row.id, label);
+    }
+  }
   const clusterObjectiveRelations = clusterObjectiveRelationsResult.data ?? [];
   const correlationStatusOverrides = correlationOverridesResult.data ?? [];
   const programs = programsResult.data ?? [];
   const annualTargets = annualTargetsResult.data ?? [];
   const initiatives = initiativesResult.data ?? [];
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
-  const directionClusterLinks = directionClusterLinksResult.data ?? [];
   const directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
-  const directionGapLinks = directionGapLinksResult.data ?? [];
   const initiativeTargetLinks = initiativeTargetLinksResult.data ?? [];
 
   const challengeIdsByDirectionId = new Map<string, Set<string>>();
@@ -495,13 +513,18 @@ export async function getStrategyCycleWorkspaceData(
     initiativeCoverageById.set(initiative.id, { linked, total: totalTargets, percent });
   }
 
+  const clustersFiltered = (clustersResult.data ?? []).filter(
+    (c) => !promotedClusterIds.has(c.id)
+  );
+
   return {
     entries,
     grouped,
     promotedBySourceId,
+    promotedClusterIds,
     linkDrafts: linkDraftsResult.data ?? [],
     approvedLinks: linksResult.data ?? [],
-    clusters: clustersResult.data ?? [],
+    clusters: clustersFiltered,
     clusterMembers: clusterMembersResult.data ?? [],
     clusterMembersByClusterId,
     gapFindings: gapFindingsResult.data ?? [],
@@ -516,9 +539,7 @@ export async function getStrategyCycleWorkspaceData(
     annualTargets,
     initiatives,
     challengeDirectionLinks,
-    directionClusterLinks,
     directionObjectiveLinks,
-    directionGapLinks,
     directionIndustries: directionIndustriesResult.data ?? [],
     directionBusinessModels: directionBusinessModelsResult.data ?? [],
     challengeIndustries: challengeIndustriesResult.data ?? [],
@@ -532,6 +553,7 @@ export async function getStrategyCycleWorkspaceData(
     businessModelIdsByChallengeId,
     industryIdsByObjectiveId,
     businessModelIdsByObjectiveId,
+    creatorDisplayNameByMembershipId: Object.fromEntries(creatorDisplayNameByMembershipId),
     entryDimensionsByEntryId,
     entryDirectionIdsByEntryId,
     availableDimensions: {
