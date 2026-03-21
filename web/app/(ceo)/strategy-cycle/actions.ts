@@ -44,7 +44,9 @@ import {
   clampScore1to5,
   computeChallengeScore,
   computeDirectionScore,
+  computeDirectionPriorityFromAssessment,
 } from "@/lib/strategy-cycle/scoring";
+import { normalizeContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import {
   proposeMatrixProgramWithGemini,
   type MatrixProgramProposalResult,
@@ -3187,7 +3189,6 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&error=missing-title");
   }
 
-  const priority = readSmallIntField(formData, "priority", 3);
   const strategicValueScore = readSmallIntField(formData, "strategic_value_score", 3);
   const capabilityFitScore = readSmallIntField(formData, "capability_fit_score", 3);
   const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
@@ -3199,13 +3200,16 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     feasibilityScore,
     riskScore: riskLevel,
   });
+  const priority = computeDirectionPriorityFromAssessment({
+    strategicValueScore,
+    capabilityFitScore,
+    feasibilityScore,
+    riskScore: riskLevel,
+  });
   const status = String(formData.get("status") ?? "draft");
   const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
-  const { data: direction } = await supabase
-    .schema("app")
-    .from("strategic_directions")
-    .insert({
+  await supabase.schema("app").from("strategic_directions").insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
     title,
@@ -3219,23 +3223,8 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     direction_score: directionScore,
     status,
     created_by_membership_id: context.membershipId,
-    })
-    .select("id")
-    .single();
+  });
 
-  const objectiveId = String(formData.get("objective_id") ?? "").trim();
-  if (direction?.id && objectiveId) {
-    await supabase.schema("app").from("strategic_direction_objective_links").upsert(
-      {
-        organization_id: context.organizationId,
-        cycle_instance_id: context.cycleId,
-        strategic_direction_id: direction.id,
-        objective_id: objectiveId,
-        created_by_membership_id: context.membershipId,
-      },
-      { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
-    );
-  }
   done("/strategy-cycle?l1=strategic-directions&l2=design&success=direction-created");
 }
 
@@ -3704,6 +3693,12 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     feasibilityScore,
     riskScore: riskLevel,
   });
+  const priority = computeDirectionPriorityFromAssessment({
+    strategicValueScore,
+    capabilityFitScore,
+    feasibilityScore,
+    riskScore: riskLevel,
+  });
   const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
   await supabase
@@ -3712,6 +3707,7 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     .update({
       ...(title ? { title } : {}),
       description,
+      priority,
       strategic_value_score: strategicValueScore,
       capability_fit_score: capabilityFitScore,
       feasibility_score: feasibilityScore,
@@ -3739,7 +3735,7 @@ export async function linkDirectionToChallengePredecessor(formData: FormData) {
       cycle_instance_id: context.cycleId,
       strategic_direction_id: directionId,
       strategic_challenge_id: challengeId,
-      contribution_level: String(formData.get("contribution_level") ?? "medium"),
+      contribution_level: normalizeContributionLevel(String(formData.get("contribution_level") ?? "medium")),
       note: String(formData.get("note") ?? "").trim() || null,
       created_by_membership_id: context.membershipId,
     },
@@ -3781,6 +3777,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
       cycle_instance_id: context.cycleId,
       strategic_direction_id: directionId,
       objective_id: objectiveId,
+      contribution_level: normalizeContributionLevel(String(formData.get("contribution_level") ?? "medium")),
       created_by_membership_id: context.membershipId,
     },
     { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }

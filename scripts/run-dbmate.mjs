@@ -36,7 +36,8 @@ if (!databaseUrl) {
 }
 
 const args = process.argv.slice(2);
-const result = spawnSync("dbmate", args, {
+const dbmateArgs = ["--yes", "dbmate", ...args];
+const result = spawnSync("npx", dbmateArgs, {
   stdio: "inherit",
   env: {
     ...process.env,

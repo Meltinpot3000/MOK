@@ -1,5 +1,8 @@
 "use client";
 
+import type { ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
+import { COVERAGE_LEVEL_META } from "@/lib/strategy-cycle/coverage-level";
+import { CoverageStrengthPillButton } from "./CoverageStrengthPillButton";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 
@@ -28,7 +31,9 @@ type StrategicDirectionsTableProps = {
   businessModels: Array<{ id: string; name: string }>;
   programsByDirectionId: Record<string, Array<{ id: string; title: string }>>;
   challengeIdsByDirection: Record<string, string[]>;
+  challengeCoverageByDirection: Record<string, Record<string, ContributionLevel>>;
   objectiveIdsByDirection: Record<string, string[]>;
+  objectiveCoverageByDirection: Record<string, Record<string, ContributionLevel>>;
   industryIdsByDirection: Record<string, string[]>;
   businessModelIdsByDirection: Record<string, string[]>;
   directionCoverageById: Record<string, { linked: number; total: number; percent: number }>;
@@ -70,7 +75,9 @@ export function StrategicDirectionsTable({
   businessModels,
   programsByDirectionId,
   challengeIdsByDirection,
+  challengeCoverageByDirection,
   objectiveIdsByDirection,
+  objectiveCoverageByDirection,
   industryIdsByDirection,
   businessModelIdsByDirection,
   directionCoverageById,
@@ -87,7 +94,7 @@ export function StrategicDirectionsTable({
     },
     {
       id: "priority",
-      label: "Prioritaet",
+      label: "Prioritaet (auto.)",
       defaultVisible: true,
       render: (d: Direction) => String(d.priority ?? "-"),
     },
@@ -105,7 +112,7 @@ export function StrategicDirectionsTable({
     },
     {
       id: "direction_score",
-      label: "Direction Score",
+      label: "Stossrichtungs-Score",
       defaultVisible: true,
       render: (d: Direction) =>
         d.direction_score != null
@@ -124,25 +131,25 @@ export function StrategicDirectionsTable({
     },
     {
       id: "strategic_value",
-      label: "Strategic Value",
+      label: "Strategischer Wert",
       defaultVisible: false,
       render: (d: Direction) => String(d.strategic_value_score ?? "-"),
     },
     {
       id: "capability_fit",
-      label: "Capability Fit",
+      label: "Passung Kompetenzen",
       defaultVisible: false,
       render: (d: Direction) => String(d.capability_fit_score ?? "-"),
     },
     {
       id: "feasibility",
-      label: "Feasibility",
+      label: "Machbarkeit",
       defaultVisible: false,
       render: (d: Direction) => String(d.feasibility_score ?? "-"),
     },
     {
       id: "risk",
-      label: "Risk",
+      label: "Risiko",
       defaultVisible: false,
       render: (d: Direction) => String(d.risk_level ?? "-"),
     },
@@ -156,15 +163,23 @@ export function StrategicDirectionsTable({
         if (linked.length === 0) return <span className="text-zinc-400">-</span>;
         return (
           <div className="flex flex-wrap gap-1">
-            {linked.slice(0, 3).map((c) => (
-              <span
-                key={c.id}
-                className={`${pillLinked()} max-w-[140px] truncate`}
-                title={c.title}
-              >
-                {c.title}
-              </span>
-            ))}
+            {linked.slice(0, 3).map((c) => {
+              const level = challengeCoverageByDirection[d.id]?.[c.id];
+              return (
+                <span
+                  key={c.id}
+                  className={`${pillLinked()} inline-flex max-w-[168px] items-center gap-0.5`}
+                  title={c.title}
+                >
+                  <span className="min-w-0 truncate">{c.title}</span>
+                  {level ? (
+                    <span className="shrink-0" title={COVERAGE_LEVEL_META[level].labelDe}>
+                      {COVERAGE_LEVEL_META[level].emoji}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })}
             {linked.length > 3 && (
               <span className={pillLinked()}>+{linked.length - 3}</span>
             )}
@@ -256,8 +271,11 @@ export function StrategicDirectionsTable({
                   Abdeckung {coverage.percent}% ({coverage.linked}/
                   {coverage.total || 0})
                 </span>
+                <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
+                  Prioritaet: {direction.priority ?? "—"}
+                </span>
                 <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  Direction Score:{" "}
+                  Stossrichtungs-Score:{" "}
                   {Number(direction.direction_score ?? 0).toFixed(2)}
                 </span>
                 <form action={actions.deleteStrategicDirectionInCycle} className="inline">
@@ -307,8 +325,11 @@ export function StrategicDirectionsTable({
                   className="mt-1 block w-full min-w-[320px] max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
                 />
               </label>
+              <p className="w-full text-[11px] text-zinc-500">
+                Prioritaet (1–5) und Stossrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
+              </p>
               <label className="text-xs text-zinc-600">
-                Strategic
+                Strategischer Wert
                 <input
                   type="number"
                   name="strategic_value_score"
@@ -319,7 +340,7 @@ export function StrategicDirectionsTable({
                 />
               </label>
               <label className="text-xs text-zinc-600">
-                Capability
+                Passung Kompetenzen
                 <input
                   type="number"
                   name="capability_fit_score"
@@ -330,7 +351,7 @@ export function StrategicDirectionsTable({
                 />
               </label>
               <label className="text-xs text-zinc-600">
-                Feasibility
+                Machbarkeit
                 <input
                   type="number"
                   name="feasibility_score"
@@ -341,7 +362,7 @@ export function StrategicDirectionsTable({
                 />
               </label>
               <label className="text-xs text-zinc-600">
-                Risk
+                Risiko
                 <input
                   type="number"
                   name="risk_score"
@@ -364,13 +385,15 @@ export function StrategicDirectionsTable({
               <PillSection title="Herausforderungen (Vorgaenger)">
                 {challenges.map((challenge) => {
                   const isLinked = linkedChallengeIds.has(challenge.id);
+                  const level = challengeCoverageByDirection[direction.id]?.[challenge.id] ?? null;
                   return (
-                    <EntityPillButton
+                    <CoverageStrengthPillButton
                       key={challenge.id}
                       entityKey="strategic_direction_id"
                       entityValue={direction.id}
                       extraFields={{ strategic_challenge_id: challenge.id }}
                       isLinked={isLinked}
+                      contributionLevel={isLinked ? level ?? "medium" : null}
                       linkAction={actions.linkDirectionToChallengePredecessor}
                       unlinkAction={actions.unlinkDirectionChallengePredecessor}
                       canWrite={canWrite}
@@ -379,21 +402,23 @@ export function StrategicDirectionsTable({
                       unlinkedClassName={pillNeutral()}
                     >
                       {challenge.title}
-                    </EntityPillButton>
+                    </CoverageStrengthPillButton>
                   );
                 })}
               </PillSection>
 
-              <PillSection title="Objectives">
+              <PillSection title="Ziele (Objectives)">
                 {objectives.map((objective) => {
                   const isLinked = linkedObjectiveIds.has(objective.id);
+                  const level = objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
                   return (
-                    <EntityPillButton
+                    <CoverageStrengthPillButton
                       key={objective.id}
                       entityKey="strategic_direction_id"
                       entityValue={direction.id}
                       extraFields={{ objective_id: objective.id }}
                       isLinked={isLinked}
+                      contributionLevel={isLinked ? level ?? "medium" : null}
                       linkAction={actions.linkDirectionToObjectiveInCycle}
                       unlinkAction={actions.unlinkDirectionFromObjectiveInCycle}
                       canWrite={canWrite}
@@ -402,7 +427,7 @@ export function StrategicDirectionsTable({
                       unlinkedClassName={pillNeutral()}
                     >
                       {objective.title}
-                    </EntityPillButton>
+                    </CoverageStrengthPillButton>
                   );
                 })}
               </PillSection>

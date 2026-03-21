@@ -143,7 +143,7 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("strategic_direction_objective_links")
-      .select("strategic_direction_id, objective_id")
+      .select("strategic_direction_id, objective_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -480,7 +480,21 @@ export async function getStrategyCycleWorkspaceData(
   const annualTargets = annualTargetsResult.data ?? [];
   const initiatives = initiativesResult.data ?? [];
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
-  const directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
+  let directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
+  if (directionObjectiveLinksResult.error && directionObjectiveLinks.length === 0) {
+    const { data: fallbackObjectiveLinks } = await supabase
+      .schema("app")
+      .from("strategic_direction_objective_links")
+      .select("strategic_direction_id, objective_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId);
+    if (fallbackObjectiveLinks?.length) {
+      directionObjectiveLinks = fallbackObjectiveLinks.map((row) => ({
+        ...row,
+        contribution_level: "medium",
+      }));
+    }
+  }
   const initiativeTargetLinks = initiativeTargetLinksResult.data ?? [];
 
   const challengeIdsByDirectionId = new Map<string, Set<string>>();

@@ -941,6 +941,37 @@ $$;
 
 
 --
+-- Name: enforce_direction_activation_links(); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.enforce_direction_activation_links() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  cluster_count integer;
+  objective_count integer;
+begin
+  if new.status = 'active' then
+    select count(*) into cluster_count
+    from app.strategic_direction_cluster_links
+    where organization_id = new.organization_id
+      and cycle_instance_id = new.cycle_instance_id
+      and strategic_direction_id = new.id;
+    select count(*) into objective_count
+    from app.strategic_direction_objective_links
+    where organization_id = new.organization_id
+      and cycle_instance_id = new.cycle_instance_id
+      and strategic_direction_id = new.id;
+    if cluster_count < 1 or objective_count < 1 then
+      raise exception 'direction-needs-cluster-and-objective';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: ensure_key_result_context(); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -1002,12 +1033,23 @@ CREATE FUNCTION app.ensure_objective_context() RETURNS trigger
 declare
   v_has_directions boolean;
   v_has_targets boolean;
+  v_cycle_id uuid;
 begin
+  -- When using cycle_instance_id (v3 strategy framework), allow objectives without pre-existing directions/targets.
+  if new.cycle_instance_id is not null then
+    return new;
+  end if;
+
+  v_cycle_id := new.cycle_id;
+  if v_cycle_id is null then
+    raise exception 'Cannot create objective: cycle_id or cycle_instance_id required.';
+  end if;
+
   select exists (
     select 1
     from app.strategic_directions d
     where d.organization_id = new.organization_id
-      and d.planning_cycle_id = new.cycle_id
+      and (d.planning_cycle_id = v_cycle_id or d.cycle_instance_id = v_cycle_id)
   ) into v_has_directions;
 
   if not v_has_directions then
@@ -1018,7 +1060,7 @@ begin
     select 1
     from app.annual_targets t
     where t.organization_id = new.organization_id
-      and t.planning_cycle_id = new.cycle_id
+      and (t.planning_cycle_id = v_cycle_id or t.cycle_instance_id = v_cycle_id)
   ) into v_has_targets;
 
   if not v_has_targets then
@@ -1416,8 +1458,10 @@ begin
     end if;
   end if;
 
+  -- planning_cycle_id must reference planning_cycles(id). Use ONLY legacy_planning_cycle_id.
+  -- When null, set planning_cycle_id to null (avoids FK violation: cycle_instances.id != planning_cycles.id).
   if payload ? 'planning_cycle_id' and v_cycle_instance_id is not null then
-    select coalesce(legacy_planning_cycle_id, id) into v_legacy_cycle_id
+    select legacy_planning_cycle_id into v_legacy_cycle_id
     from app.cycle_instances
     where id = v_cycle_instance_id
     limit 1;
@@ -3864,7 +3908,7 @@ CREATE TABLE app.analysis_background_jobs (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT analysis_background_jobs_attempt_count_check CHECK ((attempt_count >= 0)),
-    CONSTRAINT analysis_background_jobs_job_type_check CHECK ((job_type = ANY (ARRAY['quality_backfill'::text, 'graph_layout_recompute'::text, 'entry_embedding_backfill'::text]))),
+    CONSTRAINT analysis_background_jobs_job_type_check CHECK ((job_type = ANY (ARRAY['quality_backfill'::text, 'graph_layout_recompute'::text, 'entry_embedding_backfill'::text, 'objective_evaluation_backfill'::text, 'link_draft_generation'::text, 'cluster_recompute'::text, 'gaps_recompute'::text]))),
     CONSTRAINT analysis_background_jobs_max_attempts_check CHECK ((max_attempts >= 1)),
     CONSTRAINT analysis_background_jobs_progress_done_check CHECK ((progress_done >= 0)),
     CONSTRAINT analysis_background_jobs_progress_total_check CHECK ((progress_total >= 0)),
@@ -3890,6 +3934,8 @@ CREATE TABLE app.analysis_challenge_candidates (
     created_by_membership_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    CONSTRAINT analysis_challenge_candidates_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT analysis_challenge_candidates_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
     CONSTRAINT analysis_challenge_candidates_source_type_check CHECK ((source_type = ANY (ARRAY['cluster'::text, 'gap'::text]))),
     CONSTRAINT analysis_challenge_candidates_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'promoted'::text, 'dismissed'::text])))
@@ -3929,7 +3975,9 @@ CREATE TABLE app.analysis_clusters (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    cycle_instance_id uuid NOT NULL
+    cycle_instance_id uuid NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    CONSTRAINT analysis_clusters_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text])))
 );
 
 
@@ -3976,7 +4024,9 @@ CREATE TABLE app.analysis_entries (
     semantic_embedding_version text,
     semantic_embedding_calculated_at timestamp with time zone,
     semantic_embedding_status text,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
     CONSTRAINT analysis_entries_analysis_type_check CHECK ((analysis_type = ANY (ARRAY['environment'::text, 'company'::text, 'competitor'::text, 'swot'::text, 'pestel'::text, 'workshop'::text, 'other'::text]))),
+    CONSTRAINT analysis_entries_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT analysis_entries_graph_layout_confidence_check CHECK (((graph_layout_confidence IS NULL) OR ((graph_layout_confidence >= (0)::double precision) AND (graph_layout_confidence <= (1)::double precision)))),
     CONSTRAINT analysis_entries_graph_layout_fallback_reason_check CHECK (((graph_layout_fallback_reason IS NULL) OR (graph_layout_fallback_reason = ANY (ARRAY['llm_not_requested'::text, 'llm_no_result'::text])))),
     CONSTRAINT analysis_entries_graph_layout_source_check CHECK (((graph_layout_source IS NULL) OR (graph_layout_source = ANY (ARRAY['llm'::text, 'rule'::text])))),
@@ -4012,6 +4062,8 @@ CREATE TABLE app.analysis_gap_findings (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    CONSTRAINT analysis_gap_findings_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT analysis_gap_findings_gap_type_check CHECK ((gap_type = ANY (ARRAY['coverage'::text, 'connectivity'::text, 'traceability'::text, 'evidence'::text]))),
     CONSTRAINT analysis_gap_findings_severity_check CHECK (((severity >= 1) AND (severity <= 5))),
     CONSTRAINT analysis_gap_findings_status_check CHECK ((status = ANY (ARRAY['open'::text, 'accepted'::text, 'resolved'::text])))
@@ -4038,8 +4090,11 @@ CREATE TABLE app.analysis_item_link (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    created_by_membership_id uuid,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
     CONSTRAINT analysis_item_link_check CHECK ((source_analysis_item_id <> target_analysis_item_id)),
     CONSTRAINT analysis_item_link_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT analysis_item_link_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT analysis_item_link_link_type_check CHECK ((link_type = ANY (ARRAY['related_to'::text, 'causes'::text, 'supports'::text, 'contradicts'::text, 'amplifies'::text, 'depends_on'::text, 'duplicates'::text]))),
     CONSTRAINT analysis_item_link_strength_check CHECK (((strength >= 1) AND (strength <= 5)))
 );
@@ -4071,8 +4126,10 @@ CREATE TABLE app.analysis_item_link_draft (
     reviewed_at timestamp with time zone,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
     CONSTRAINT analysis_item_link_draft_check CHECK ((source_analysis_item_id <> target_analysis_item_id)),
     CONSTRAINT analysis_item_link_draft_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT analysis_item_link_draft_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT analysis_item_link_draft_link_type_check CHECK ((link_type = ANY (ARRAY['related_to'::text, 'causes'::text, 'supports'::text, 'contradicts'::text, 'amplifies'::text, 'depends_on'::text, 'duplicates'::text]))),
     CONSTRAINT analysis_item_link_draft_origin_check CHECK ((origin = ANY (ARRAY['rule'::text, 'llm'::text, 'hybrid'::text, 'manual'::text]))),
     CONSTRAINT analysis_item_link_draft_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'approved'::text, 'rejected'::text]))),
@@ -4144,6 +4201,8 @@ CREATE TABLE app.annual_targets (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    CONSTRAINT annual_targets_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT annual_targets_progress_percent_check CHECK (((progress_percent >= (0)::numeric) AND (progress_percent <= (100)::numeric)))
 );
 
@@ -4215,6 +4274,26 @@ CREATE TABLE app.challenge_direction_links (
 
 
 --
+-- Name: cluster_objective_relations; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.cluster_objective_relations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    cluster_id uuid NOT NULL,
+    objective_id uuid NOT NULL,
+    relation_strength smallint DEFAULT 1 NOT NULL,
+    gap_score numeric(10,2) DEFAULT 0 NOT NULL,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cluster_objective_relations_relation_strength_check CHECK (((relation_strength >= 0) AND (relation_strength <= 3)))
+);
+
+
+--
 -- Name: cycle_cutover_snapshots; Type: TABLE; Schema: app; Owner: -
 --
 
@@ -4262,6 +4341,28 @@ CREATE TABLE app.cycle_instance_lock (
     locked_by_membership_id uuid,
     reason text,
     locked_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.cycle_instance_portfolio_evaluation (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    cycle_instance_id uuid NOT NULL,
+    balance_score smallint,
+    distribution_internal_external_json jsonb DEFAULT '{}'::jsonb,
+    distribution_exploit_explore_json jsonb DEFAULT '{}'::jsonb,
+    distribution_short_long_json jsonb DEFAULT '{}'::jsonb,
+    portfolio_gaps_json jsonb DEFAULT '[]'::jsonb,
+    portfolio_risks_json jsonb DEFAULT '[]'::jsonb,
+    portfolio_recommendation text,
+    portfolio_evaluated_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cycle_instance_portfolio_evaluation_balance_score_check CHECK (((balance_score IS NULL) OR ((balance_score >= 1) AND (balance_score <= 5))))
 );
 
 
@@ -4489,6 +4590,22 @@ CREATE TABLE app.initiative_industries (
 
 
 --
+-- Name: initiative_key_result_links; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.initiative_key_result_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    initiative_id uuid NOT NULL,
+    key_result_id uuid NOT NULL,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: initiative_operating_models; Type: TABLE; Schema: app; Owner: -
 --
 
@@ -4541,7 +4658,17 @@ CREATE TABLE app.initiatives (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    program_id uuid NOT NULL,
+    linked_okrs jsonb DEFAULT '[]'::jsonb NOT NULL,
+    deliverables jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    execution_health_override text,
+    execution_health_override_by_membership_id uuid,
+    execution_health_override_at timestamp with time zone,
+    review_comment text,
     CONSTRAINT initiatives_check CHECK (((start_date IS NULL) OR (end_date IS NULL) OR (start_date <= end_date))),
+    CONSTRAINT initiatives_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
+    CONSTRAINT initiatives_execution_health_override_check CHECK (((execution_health_override IS NULL) OR (execution_health_override = ANY (ARRAY['on_track'::text, 'at_risk'::text, 'off_track'::text])))),
     CONSTRAINT initiatives_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
     CONSTRAINT initiatives_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'planned'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
 );
@@ -4628,6 +4755,9 @@ CREATE TABLE app.key_results (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     measurement_unit text,
+    created_by_membership_id uuid,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    CONSTRAINT key_results_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT key_results_metric_type_check CHECK ((metric_type = ANY (ARRAY['numeric'::text, 'percent'::text, 'boolean'::text]))),
     CONSTRAINT key_results_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
 );
@@ -4654,7 +4784,7 @@ CREATE TABLE app.llm_model_health_status (
     checked_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT llm_model_health_status_fallback_mode_check CHECK ((fallback_mode = ANY (ARRAY['none'::text, 'groq'::text, 'rule'::text]))),
+    CONSTRAINT llm_model_health_status_fallback_mode_check CHECK ((fallback_mode = ANY (ARRAY['none'::text, 'groq'::text, 'gemini'::text, 'rule'::text]))),
     CONSTRAINT llm_model_health_status_provider_check CHECK ((provider = ANY (ARRAY['gemini'::text, 'groq'::text]))),
     CONSTRAINT llm_model_health_status_status_check CHECK ((status = ANY (ARRAY['healthy'::text, 'degraded'::text, 'down'::text])))
 );
@@ -4807,7 +4937,44 @@ CREATE TABLE app.objectives (
     okr_cycle_id uuid,
     confidence_level smallint,
     cycle_instance_id uuid NOT NULL,
+    time_horizon text,
+    importance_score smallint DEFAULT 3 NOT NULL,
+    ai_clarity_score smallint,
+    ai_strategic_relevance_score smallint,
+    ai_feasibility_score smallint,
+    ai_fit_to_company_score smallint,
+    ai_confidence_score smallint,
+    ai_external_internal_classification text,
+    ai_short_long_term_classification text,
+    ai_exploit_explore_classification text,
+    ai_issues_json jsonb DEFAULT '[]'::jsonb,
+    ai_improvement_suggestion text,
+    ai_summary text,
+    ai_objective_score numeric(6,2),
+    ai_evaluation_status text DEFAULT 'not_run'::text,
+    ai_evaluated_at timestamp with time zone,
+    ai_evaluation_version text,
+    ai_manual_override boolean DEFAULT false NOT NULL,
+    ai_manual_comment text,
+    created_by_membership_id uuid,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    objective_health_override text,
+    objective_health_override_by_membership_id uuid,
+    objective_health_override_at timestamp with time zone,
+    objective_review_comment text,
+    CONSTRAINT objectives_ai_clarity_score_check CHECK (((ai_clarity_score IS NULL) OR ((ai_clarity_score >= 1) AND (ai_clarity_score <= 5)))),
+    CONSTRAINT objectives_ai_confidence_score_check CHECK (((ai_confidence_score IS NULL) OR ((ai_confidence_score >= 1) AND (ai_confidence_score <= 5)))),
+    CONSTRAINT objectives_ai_evaluation_status_check CHECK ((ai_evaluation_status = ANY (ARRAY['not_run'::text, 'valid'::text, 'outdated'::text, 'failed'::text]))),
+    CONSTRAINT objectives_ai_exploit_explore_classification_check CHECK (((ai_exploit_explore_classification IS NULL) OR (ai_exploit_explore_classification = ANY (ARRAY['exploit'::text, 'explore'::text, 'balanced'::text])))),
+    CONSTRAINT objectives_ai_external_internal_classification_check CHECK (((ai_external_internal_classification IS NULL) OR (ai_external_internal_classification = ANY (ARRAY['internal'::text, 'external'::text, 'balanced'::text])))),
+    CONSTRAINT objectives_ai_feasibility_score_check CHECK (((ai_feasibility_score IS NULL) OR ((ai_feasibility_score >= 1) AND (ai_feasibility_score <= 5)))),
+    CONSTRAINT objectives_ai_fit_to_company_score_check CHECK (((ai_fit_to_company_score IS NULL) OR ((ai_fit_to_company_score >= 1) AND (ai_fit_to_company_score <= 5)))),
+    CONSTRAINT objectives_ai_short_long_term_classification_check CHECK (((ai_short_long_term_classification IS NULL) OR (ai_short_long_term_classification = ANY (ARRAY['short'::text, 'mid'::text, 'long'::text])))),
+    CONSTRAINT objectives_ai_strategic_relevance_score_check CHECK (((ai_strategic_relevance_score IS NULL) OR ((ai_strategic_relevance_score >= 1) AND (ai_strategic_relevance_score <= 5)))),
     CONSTRAINT objectives_confidence_level_check CHECK (((confidence_level >= 1) AND (confidence_level <= 10))),
+    CONSTRAINT objectives_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
+    CONSTRAINT objectives_importance_score_check CHECK (((importance_score >= 1) AND (importance_score <= 5))),
+    CONSTRAINT objectives_objective_health_override_check CHECK (((objective_health_override IS NULL) OR (objective_health_override = ANY (ARRAY['on_track'::text, 'at_risk'::text, 'off_track'::text])))),
     CONSTRAINT objectives_progress_percent_check CHECK (((progress_percent >= (0)::numeric) AND (progress_percent <= (100)::numeric))),
     CONSTRAINT objectives_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
 );
@@ -5124,6 +5291,72 @@ CREATE TABLE app.responsibles (
 
 
 --
+-- Name: review_feedback; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.review_feedback (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    cycle_instance_id uuid NOT NULL,
+    feedback_type text NOT NULL,
+    object_type text NOT NULL,
+    object_id uuid NOT NULL,
+    comment text,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT review_feedback_feedback_type_check CHECK ((feedback_type = ANY (ARRAY['continue'::text, 'adjust'::text, 'stop'::text, 'escalate'::text, 'revisit_direction'::text, 'revisit_objective'::text]))),
+    CONSTRAINT review_feedback_object_type_check CHECK ((object_type = ANY (ARRAY['objective'::text, 'strategic_direction'::text, 'strategy_program'::text, 'initiative'::text, 'key_result'::text])))
+);
+
+
+--
+-- Name: review_snapshots; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.review_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    cycle_instance_id uuid NOT NULL,
+    snapshot_type text NOT NULL,
+    snapshot_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by_membership_id uuid,
+    summary_json jsonb,
+    comment text,
+    CONSTRAINT review_snapshots_snapshot_type_check CHECK ((snapshot_type = ANY (ARRAY['periodic'::text, 'ad_hoc'::text, 'quarterly'::text])))
+);
+
+
+--
+-- Name: strategic_challenge_business_models; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_challenge_business_models (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_challenge_id uuid NOT NULL,
+    business_model_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: strategic_challenge_industries; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_challenge_industries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_challenge_id uuid NOT NULL,
+    industry_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: strategic_challenges; Type: TABLE; Schema: app; Owner: -
 --
 
@@ -5139,8 +5372,41 @@ CREATE TABLE app.strategic_challenges (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     source_analysis_entry_id uuid,
     cycle_instance_id uuid NOT NULL,
+    relevance_level smallint DEFAULT 3 NOT NULL,
+    risk_level smallint DEFAULT 3 NOT NULL,
+    description text,
+    impact_score smallint DEFAULT 3 NOT NULL,
+    urgency_score smallint DEFAULT 3 NOT NULL,
+    scope_score smallint DEFAULT 3 NOT NULL,
+    root_cause_score smallint DEFAULT 3 NOT NULL,
+    challenge_score numeric(6,2) DEFAULT 3.00 NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    source_cluster_id uuid,
+    CONSTRAINT strategic_challenges_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
+    CONSTRAINT strategic_challenges_impact_score_check CHECK (((impact_score >= 1) AND (impact_score <= 5))),
     CONSTRAINT strategic_challenges_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
+    CONSTRAINT strategic_challenges_relevance_level_check CHECK (((relevance_level >= 1) AND (relevance_level <= 5))),
+    CONSTRAINT strategic_challenges_risk_level_check CHECK (((risk_level >= 1) AND (risk_level <= 5))),
+    CONSTRAINT strategic_challenges_root_cause_score_check CHECK (((root_cause_score >= 1) AND (root_cause_score <= 5))),
+    CONSTRAINT strategic_challenges_scope_score_check CHECK (((scope_score >= 1) AND (scope_score <= 5))),
+    CONSTRAINT strategic_challenges_urgency_score_check CHECK (((urgency_score >= 1) AND (urgency_score <= 5))),
     CONSTRAINT strategic_challenges_visibility_check CHECK ((visibility = ANY (ARRAY['internal'::text, 'private'::text, 'public'::text])))
+);
+
+
+--
+-- Name: strategic_context_cache; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_context_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    context_json jsonb NOT NULL,
+    is_current boolean DEFAULT true NOT NULL,
+    provider text,
+    model text,
+    prompt_version text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -5160,6 +5426,38 @@ CREATE TABLE app.strategic_direction_business_models (
 
 
 --
+-- Name: strategic_direction_cluster_links; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_direction_cluster_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_direction_id uuid NOT NULL,
+    cluster_id uuid NOT NULL,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: strategic_direction_gap_links; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_direction_gap_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_direction_id uuid NOT NULL,
+    cluster_objective_relation_id uuid NOT NULL,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: strategic_direction_industries; Type: TABLE; Schema: app; Owner: -
 --
 
@@ -5171,6 +5469,24 @@ CREATE TABLE app.strategic_direction_industries (
     industry_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_instance_id uuid NOT NULL
+);
+
+
+--
+-- Name: strategic_direction_objective_links; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategic_direction_objective_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_direction_id uuid NOT NULL,
+    objective_id uuid NOT NULL,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    contribution_level text DEFAULT 'medium'::text NOT NULL,
+    CONSTRAINT strategic_direction_objective_links_contribution_level_check CHECK ((contribution_level = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text])))
 );
 
 
@@ -5207,8 +5523,22 @@ CREATE TABLE app.strategic_directions (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    relevance_level smallint DEFAULT 3 NOT NULL,
+    risk_level smallint DEFAULT 3 NOT NULL,
+    strategic_value_score smallint DEFAULT 3 NOT NULL,
+    capability_fit_score smallint DEFAULT 3 NOT NULL,
+    feasibility_score smallint DEFAULT 3 NOT NULL,
+    direction_score numeric(6,2) DEFAULT 3.00 NOT NULL,
+    created_by_source text DEFAULT 'user'::text NOT NULL,
+    review_comment text,
+    CONSTRAINT strategic_directions_capability_fit_score_check CHECK (((capability_fit_score >= 1) AND (capability_fit_score <= 5))),
+    CONSTRAINT strategic_directions_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
+    CONSTRAINT strategic_directions_feasibility_score_check CHECK (((feasibility_score >= 1) AND (feasibility_score <= 5))),
     CONSTRAINT strategic_directions_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
-    CONSTRAINT strategic_directions_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'on_hold'::text, 'completed'::text, 'archived'::text])))
+    CONSTRAINT strategic_directions_relevance_level_check CHECK (((relevance_level >= 1) AND (relevance_level <= 5))),
+    CONSTRAINT strategic_directions_risk_level_check CHECK (((risk_level >= 1) AND (risk_level <= 5))),
+    CONSTRAINT strategic_directions_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'on_hold'::text, 'completed'::text, 'archived'::text]))),
+    CONSTRAINT strategic_directions_strategic_value_score_check CHECK (((strategic_value_score >= 1) AND (strategic_value_score <= 5)))
 );
 
 
@@ -5258,6 +5588,27 @@ CREATE TABLE app.strategic_metrics (
 
 
 --
+-- Name: strategy_correlation_status_overrides; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategy_correlation_status_overrides (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    objective_id uuid NOT NULL,
+    challenge_id uuid NOT NULL,
+    strategic_direction_id uuid NOT NULL,
+    status text DEFAULT 'unknown'::text NOT NULL,
+    note text,
+    updated_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT strategy_correlation_status_overrides_status_check CHECK ((status = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text, 'unknown'::text])))
+);
+
+
+--
 -- Name: strategy_dimension_alignment; Type: VIEW; Schema: app; Owner: -
 --
 
@@ -5291,6 +5642,63 @@ UNION ALL
     om.id AS operating_model_id
    FROM (app.strategic_direction_operating_models sdom
      JOIN app.operating_models om ON ((om.id = sdom.operating_model_id)));
+
+
+--
+-- Name: strategy_programs; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategy_programs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    planning_cycle_id uuid,
+    cycle_instance_id uuid NOT NULL,
+    strategic_direction_id uuid,
+    title text NOT NULL,
+    description text,
+    owner_membership_id uuid,
+    budget numeric(18,2),
+    timeline text,
+    created_by_membership_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    review_comment text,
+    strategic_challenge_id uuid,
+    program_origin text DEFAULT 'manual'::text NOT NULL,
+    matrix_cell_score numeric(10,2),
+    supported_objective_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    CONSTRAINT strategy_programs_program_origin_check CHECK ((program_origin = ANY (ARRAY['manual'::text, 'matrix'::text]))),
+    CONSTRAINT strategy_programs_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'archived'::text])))
+);
+
+
+--
+-- Name: COLUMN strategy_programs.strategic_challenge_id; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategy_programs.strategic_challenge_id IS 'Optional: strategische Herausforderung (z. B. aus Mapping-Matrix).';
+
+
+--
+-- Name: COLUMN strategy_programs.program_origin; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategy_programs.program_origin IS 'manual | matrix';
+
+
+--
+-- Name: COLUMN strategy_programs.matrix_cell_score; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategy_programs.matrix_cell_score IS 'Snapshot des Matrix-Zellen-Scores bei Erzeugung aus der Matrix.';
+
+
+--
+-- Name: COLUMN strategy_programs.supported_objective_ids; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategy_programs.supported_objective_ids IS 'Objectives, die das Programm laut Matrix-Kontext unterstuetzt.';
 
 
 --
@@ -6501,6 +6909,14 @@ ALTER TABLE ONLY app.challenge_direction_links
 
 
 --
+-- Name: cluster_objective_relations cluster_objective_relations_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: cycle_cutover_snapshots cycle_cutover_snapshots_cutover_id_from_cycle_instance_id_t_key; Type: CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -6546,6 +6962,22 @@ ALTER TABLE ONLY app.cycle_instance_lock
 
 ALTER TABLE ONLY app.cycle_instance_lock
     ADD CONSTRAINT cycle_instance_lock_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_evaluation_cycle_instance_id_key; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cycle_instance_portfolio_evaluation
+    ADD CONSTRAINT cycle_instance_portfolio_evaluation_cycle_instance_id_key UNIQUE (cycle_instance_id);
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_evaluation_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cycle_instance_portfolio_evaluation
+    ADD CONSTRAINT cycle_instance_portfolio_evaluation_pkey PRIMARY KEY (id);
 
 
 --
@@ -6738,6 +7170,22 @@ ALTER TABLE ONLY app.initiative_industries
 
 ALTER TABLE ONLY app.initiative_industries
     ADD CONSTRAINT initiative_industries_planning_cycle_id_initiative_id_indus_key UNIQUE (planning_cycle_id, initiative_id, industry_id);
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_cycle_instance_id_initiative_id_key; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_cycle_instance_id_initiative_id_key UNIQUE (cycle_instance_id, initiative_id, key_result_id);
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_pkey PRIMARY KEY (id);
 
 
 --
@@ -7237,11 +7685,75 @@ ALTER TABLE ONLY app.responsibles
 
 
 --
+-- Name: review_feedback review_feedback_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_feedback
+    ADD CONSTRAINT review_feedback_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: review_snapshots review_snapshots_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_snapshots
+    ADD CONSTRAINT review_snapshots_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business__planning_cycle_id_strategic_c_key; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business__planning_cycle_id_strategic_c_key UNIQUE (planning_cycle_id, strategic_challenge_id, business_model_id);
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industrie_planning_cycle_id_strategic_c_key; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industrie_planning_cycle_id_strategic_c_key UNIQUE (planning_cycle_id, strategic_challenge_id, industry_id);
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: strategic_challenges strategic_challenges_pkey; Type: CONSTRAINT; Schema: app; Owner: -
 --
 
 ALTER TABLE ONLY app.strategic_challenges
     ADD CONSTRAINT strategic_challenges_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategic_context_cache strategic_context_cache_organization_id_key; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_context_cache
+    ADD CONSTRAINT strategic_context_cache_organization_id_key UNIQUE (organization_id);
+
+
+--
+-- Name: strategic_context_cache strategic_context_cache_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_context_cache
+    ADD CONSTRAINT strategic_context_cache_pkey PRIMARY KEY (id);
 
 
 --
@@ -7261,6 +7773,22 @@ ALTER TABLE ONLY app.strategic_direction_business_models
 
 
 --
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: strategic_direction_industries strategic_direction_industrie_planning_cycle_id_strategic_d_key; Type: CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -7274,6 +7802,14 @@ ALTER TABLE ONLY app.strategic_direction_industries
 
 ALTER TABLE ONLY app.strategic_direction_industries
     ADD CONSTRAINT strategic_direction_industries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_pkey PRIMARY KEY (id);
 
 
 --
@@ -7322,6 +7858,22 @@ ALTER TABLE ONLY app.strategic_metrics
 
 ALTER TABLE ONLY app.strategic_metrics
     ADD CONSTRAINT strategic_metrics_planning_cycle_id_name_key UNIQUE (planning_cycle_id, name);
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: strategy_programs strategy_programs_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_pkey PRIMARY KEY (id);
 
 
 --
@@ -8005,6 +8557,13 @@ CREATE INDEX idx_cycle_cutovers_org_status_cutover ON app.cycle_cutovers USING b
 
 
 --
+-- Name: idx_cycle_instance_portfolio_eval_org; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_cycle_instance_portfolio_eval_org ON app.cycle_instance_portfolio_evaluation USING btree (organization_id);
+
+
+--
 -- Name: idx_cycle_instances_org_level_dates; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -8142,6 +8701,27 @@ CREATE INDEX idx_initiative_industries_org_cycle ON app.initiative_industries US
 --
 
 CREATE INDEX idx_initiative_industries_org_cycle_instance ON app.initiative_industries USING btree (organization_id, cycle_instance_id);
+
+
+--
+-- Name: idx_initiative_key_result_links_initiative; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_initiative_key_result_links_initiative ON app.initiative_key_result_links USING btree (initiative_id);
+
+
+--
+-- Name: idx_initiative_key_result_links_key_result; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_initiative_key_result_links_key_result ON app.initiative_key_result_links USING btree (key_result_id);
+
+
+--
+-- Name: idx_initiative_key_result_links_org_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_initiative_key_result_links_org_cycle ON app.initiative_key_result_links USING btree (organization_id, cycle_instance_id);
 
 
 --
@@ -8600,6 +9180,41 @@ CREATE INDEX idx_responsibles_org ON app.responsibles USING btree (organization_
 
 
 --
+-- Name: idx_review_feedback_object; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_review_feedback_object ON app.review_feedback USING btree (object_type, object_id);
+
+
+--
+-- Name: idx_review_feedback_org_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_review_feedback_org_cycle ON app.review_feedback USING btree (organization_id, cycle_instance_id, created_at DESC);
+
+
+--
+-- Name: idx_review_snapshots_org_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_review_snapshots_org_cycle ON app.review_snapshots USING btree (organization_id, cycle_instance_id, snapshot_at DESC);
+
+
+--
+-- Name: idx_strategic_challenge_business_models_org_cycle_instance; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategic_challenge_business_models_org_cycle_instance ON app.strategic_challenge_business_models USING btree (organization_id, cycle_instance_id);
+
+
+--
+-- Name: idx_strategic_challenge_industries_org_cycle_instance; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategic_challenge_industries_org_cycle_instance ON app.strategic_challenge_industries USING btree (organization_id, cycle_instance_id);
+
+
+--
 -- Name: idx_strategic_challenges_org_cycle; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -8611,6 +9226,20 @@ CREATE INDEX idx_strategic_challenges_org_cycle ON app.strategic_challenges USIN
 --
 
 CREATE INDEX idx_strategic_challenges_org_cycle_instance ON app.strategic_challenges USING btree (organization_id, cycle_instance_id);
+
+
+--
+-- Name: idx_strategic_challenges_source_cluster_id; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategic_challenges_source_cluster_id ON app.strategic_challenges USING btree (source_cluster_id) WHERE (source_cluster_id IS NOT NULL);
+
+
+--
+-- Name: idx_strategic_context_cache_org_current; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategic_context_cache_org_current ON app.strategic_context_cache USING btree (organization_id, is_current) WHERE (is_current = true);
 
 
 --
@@ -8698,6 +9327,20 @@ CREATE INDEX idx_strategic_metrics_org_cycle_instance ON app.strategic_metrics U
 
 
 --
+-- Name: idx_strategy_correlation_status_overrides_lookup; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategy_correlation_status_overrides_lookup ON app.strategy_correlation_status_overrides USING btree (cycle_instance_id, objective_id, challenge_id);
+
+
+--
+-- Name: idx_strategy_programs_challenge; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategy_programs_challenge ON app.strategy_programs USING btree (organization_id, cycle_instance_id, strategic_challenge_id) WHERE (strategic_challenge_id IS NOT NULL);
+
+
+--
 -- Name: idx_target_metric_links_org_cycle; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -8709,6 +9352,97 @@ CREATE INDEX idx_target_metric_links_org_cycle ON app.target_metric_links USING 
 --
 
 CREATE INDEX idx_target_metric_links_org_cycle_instance ON app.target_metric_links USING btree (organization_id, cycle_instance_id);
+
+
+--
+-- Name: uq_analysis_item_link_cycle_instance_source_target_type; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_analysis_item_link_cycle_instance_source_target_type ON app.analysis_item_link USING btree (cycle_instance_id, source_analysis_item_id, target_analysis_item_id, link_type);
+
+
+--
+-- Name: uq_challenge_direction_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_challenge_direction_links_cycle ON app.challenge_direction_links USING btree (cycle_instance_id, strategic_direction_id, strategic_challenge_id);
+
+
+--
+-- Name: uq_cluster_objective_relations_cycle_cluster_objective; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_cluster_objective_relations_cycle_cluster_objective ON app.cluster_objective_relations USING btree (cycle_instance_id, cluster_id, objective_id);
+
+
+--
+-- Name: uq_direction_cluster_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_direction_cluster_links_cycle ON app.strategic_direction_cluster_links USING btree (cycle_instance_id, strategic_direction_id, cluster_id);
+
+
+--
+-- Name: uq_direction_gap_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_direction_gap_links_cycle ON app.strategic_direction_gap_links USING btree (cycle_instance_id, strategic_direction_id, cluster_objective_relation_id);
+
+
+--
+-- Name: uq_direction_objective_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_direction_objective_links_cycle ON app.strategic_direction_objective_links USING btree (cycle_instance_id, strategic_direction_id, objective_id);
+
+
+--
+-- Name: uq_initiative_target_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_initiative_target_links_cycle ON app.initiative_target_links USING btree (cycle_instance_id, initiative_id, annual_target_id);
+
+
+--
+-- Name: uq_objective_direction_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_objective_direction_links_cycle ON app.objective_direction_links USING btree (cycle_instance_id, objective_id, strategic_direction_id);
+
+
+--
+-- Name: uq_objective_target_links_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_objective_target_links_cycle ON app.objective_target_links USING btree (cycle_instance_id, objective_id, annual_target_id);
+
+
+--
+-- Name: uq_strategic_challenge_business_models_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_strategic_challenge_business_models_cycle ON app.strategic_challenge_business_models USING btree (cycle_instance_id, strategic_challenge_id, business_model_id);
+
+
+--
+-- Name: uq_strategic_challenge_industries_cycle; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_strategic_challenge_industries_cycle ON app.strategic_challenge_industries USING btree (cycle_instance_id, strategic_challenge_id, industry_id);
+
+
+--
+-- Name: uq_strategy_correlation_status_overrides_triplet; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_strategy_correlation_status_overrides_triplet ON app.strategy_correlation_status_overrides USING btree (cycle_instance_id, objective_id, challenge_id, strategic_direction_id);
+
+
+--
+-- Name: uq_strategy_programs_cycle_title; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_strategy_programs_cycle_title ON app.strategy_programs USING btree (cycle_instance_id, title);
 
 
 --
@@ -9328,6 +10062,13 @@ CREATE TRIGGER trg_audit_industries AFTER INSERT OR DELETE OR UPDATE ON app.indu
 
 
 --
+-- Name: initiative_key_result_links trg_audit_initiative_key_result_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_audit_initiative_key_result_links AFTER INSERT OR DELETE OR UPDATE ON app.initiative_key_result_links FOR EACH ROW EXECUTE FUNCTION audit.log_row_change();
+
+
+--
 -- Name: initiatives trg_audit_initiatives; Type: TRIGGER; Schema: app; Owner: -
 --
 
@@ -9426,6 +10167,20 @@ CREATE TRIGGER trg_audit_responsibles AFTER INSERT OR DELETE OR UPDATE ON app.re
 
 
 --
+-- Name: review_feedback trg_audit_review_feedback; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_audit_review_feedback AFTER INSERT OR DELETE OR UPDATE ON app.review_feedback FOR EACH ROW EXECUTE FUNCTION audit.log_row_change();
+
+
+--
+-- Name: review_snapshots trg_audit_review_snapshots; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_audit_review_snapshots AFTER INSERT OR DELETE OR UPDATE ON app.review_snapshots FOR EACH ROW EXECUTE FUNCTION audit.log_row_change();
+
+
+--
 -- Name: strategic_goals trg_audit_strategic_goals; Type: TRIGGER; Schema: app; Owner: -
 --
 
@@ -9458,6 +10213,20 @@ CREATE TRIGGER trg_business_models_updated_at BEFORE UPDATE ON app.business_mode
 --
 
 CREATE TRIGGER trg_challenge_direction_links_updated_at BEFORE UPDATE ON app.challenge_direction_links FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation trg_cycle_instance_portfolio_eval_updated_at; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_cycle_instance_portfolio_eval_updated_at BEFORE UPDATE ON app.cycle_instance_portfolio_evaluation FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
+
+
+--
+-- Name: strategic_directions trg_enforce_direction_activation_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_enforce_direction_activation_links BEFORE INSERT OR UPDATE ON app.strategic_directions FOR EACH ROW EXECUTE FUNCTION app.enforce_direction_activation_links();
 
 
 --
@@ -9755,6 +10524,13 @@ CREATE TRIGGER trg_sync_cycles_challenge_direction_links BEFORE INSERT OR UPDATE
 
 
 --
+-- Name: cluster_objective_relations trg_sync_cycles_cluster_objective_relations; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_cluster_objective_relations BEFORE INSERT OR UPDATE ON app.cluster_objective_relations FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
 -- Name: dashboard_column_config trg_sync_cycles_dashboard_column_config; Type: TRIGGER; Schema: app; Owner: -
 --
 
@@ -9808,6 +10584,13 @@ CREATE TRIGGER trg_sync_cycles_initiative_business_models BEFORE INSERT OR UPDAT
 --
 
 CREATE TRIGGER trg_sync_cycles_initiative_industries BEFORE INSERT OR UPDATE ON app.initiative_industries FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: initiative_key_result_links trg_sync_cycles_initiative_key_result_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_initiative_key_result_links BEFORE INSERT OR UPDATE ON app.initiative_key_result_links FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
 
 
 --
@@ -9965,6 +10748,20 @@ CREATE TRIGGER trg_sync_cycles_responsibility_assignments BEFORE INSERT OR UPDAT
 
 
 --
+-- Name: strategic_challenge_business_models trg_sync_cycles_strategic_challenge_business_models; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategic_challenge_business_models BEFORE INSERT OR UPDATE ON app.strategic_challenge_business_models FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: strategic_challenge_industries trg_sync_cycles_strategic_challenge_industries; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategic_challenge_industries BEFORE INSERT OR UPDATE ON app.strategic_challenge_industries FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
 -- Name: strategic_challenges trg_sync_cycles_strategic_challenges; Type: TRIGGER; Schema: app; Owner: -
 --
 
@@ -9979,10 +10776,31 @@ CREATE TRIGGER trg_sync_cycles_strategic_direction_business_models BEFORE INSERT
 
 
 --
+-- Name: strategic_direction_cluster_links trg_sync_cycles_strategic_direction_cluster_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategic_direction_cluster_links BEFORE INSERT OR UPDATE ON app.strategic_direction_cluster_links FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: strategic_direction_gap_links trg_sync_cycles_strategic_direction_gap_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategic_direction_gap_links BEFORE INSERT OR UPDATE ON app.strategic_direction_gap_links FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
 -- Name: strategic_direction_industries trg_sync_cycles_strategic_direction_industries; Type: TRIGGER; Schema: app; Owner: -
 --
 
 CREATE TRIGGER trg_sync_cycles_strategic_direction_industries BEFORE INSERT OR UPDATE ON app.strategic_direction_industries FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: strategic_direction_objective_links trg_sync_cycles_strategic_direction_objective_links; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategic_direction_objective_links BEFORE INSERT OR UPDATE ON app.strategic_direction_objective_links FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
 
 
 --
@@ -10011,6 +10829,20 @@ CREATE TRIGGER trg_sync_cycles_strategic_goals BEFORE INSERT OR UPDATE ON app.st
 --
 
 CREATE TRIGGER trg_sync_cycles_strategic_metrics BEFORE INSERT OR UPDATE ON app.strategic_metrics FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: strategy_correlation_status_overrides trg_sync_cycles_strategy_correlation_status_overrides; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategy_correlation_status_overrides BEFORE INSERT OR UPDATE ON app.strategy_correlation_status_overrides FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
+
+
+--
+-- Name: strategy_programs trg_sync_cycles_strategy_programs; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_sync_cycles_strategy_programs BEFORE INSERT OR UPDATE ON app.strategy_programs FOR EACH ROW EXECUTE FUNCTION app.sync_legacy_cycle_columns();
 
 
 --
@@ -10270,6 +11102,14 @@ ALTER TABLE ONLY app.analysis_gap_findings
 
 ALTER TABLE ONLY app.analysis_item_link
     ADD CONSTRAINT analysis_item_link_activated_by_membership_id_fkey FOREIGN KEY (activated_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: analysis_item_link analysis_item_link_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.analysis_item_link
+    ADD CONSTRAINT analysis_item_link_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
 
 
 --
@@ -10585,6 +11425,54 @@ ALTER TABLE ONLY app.challenge_direction_links
 
 
 --
+-- Name: cluster_objective_relations cluster_objective_relations_cluster_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_cluster_id_fkey FOREIGN KEY (cluster_id) REFERENCES app.analysis_clusters(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_objective_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_objective_id_fkey FOREIGN KEY (objective_id) REFERENCES app.objectives(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cluster_objective_relations
+    ADD CONSTRAINT cluster_objective_relations_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: cycle_cutover_snapshots cycle_cutover_snapshots_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -10670,6 +11558,22 @@ ALTER TABLE ONLY app.cycle_instance_lock
 
 ALTER TABLE ONLY app.cycle_instance_lock
     ADD CONSTRAINT cycle_instance_lock_locked_by_membership_id_fkey FOREIGN KEY (locked_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_evaluation_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cycle_instance_portfolio_evaluation
+    ADD CONSTRAINT cycle_instance_portfolio_evaluation_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_evaluation_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cycle_instance_portfolio_evaluation
+    ADD CONSTRAINT cycle_instance_portfolio_evaluation_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
 
 
 --
@@ -10945,6 +11849,54 @@ ALTER TABLE ONLY app.initiative_industries
 
 
 --
+-- Name: initiative_key_result_links initiative_key_result_links_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_initiative_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_initiative_id_fkey FOREIGN KEY (initiative_id) REFERENCES app.initiatives(id) ON DELETE CASCADE;
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_key_result_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_key_result_id_fkey FOREIGN KEY (key_result_id) REFERENCES app.key_results(id) ON DELETE CASCADE;
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiative_key_result_links
+    ADD CONSTRAINT initiative_key_result_links_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
 -- Name: initiative_operating_models initiative_operating_models_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -11025,6 +11977,14 @@ ALTER TABLE ONLY app.initiatives
 
 
 --
+-- Name: initiatives initiatives_execution_health_override_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiatives
+    ADD CONSTRAINT initiatives_execution_health_override_by_membership_id_fkey FOREIGN KEY (execution_health_override_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
 -- Name: initiatives initiatives_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -11038,6 +11998,14 @@ ALTER TABLE ONLY app.initiatives
 
 ALTER TABLE ONLY app.initiatives
     ADD CONSTRAINT initiatives_owner_membership_id_fkey FOREIGN KEY (owner_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: initiatives initiatives_program_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.initiatives
+    ADD CONSTRAINT initiatives_program_id_fkey FOREIGN KEY (program_id) REFERENCES app.strategy_programs(id) ON DELETE SET NULL;
 
 
 --
@@ -11166,6 +12134,14 @@ ALTER TABLE ONLY app.key_result_target_links
 
 ALTER TABLE ONLY app.key_result_target_links
     ADD CONSTRAINT key_result_target_links_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: key_results key_results_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.key_results
+    ADD CONSTRAINT key_results_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
 
 
 --
@@ -11393,11 +12369,27 @@ ALTER TABLE ONLY app.objective_target_links
 
 
 --
+-- Name: objectives objectives_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.objectives
+    ADD CONSTRAINT objectives_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
 -- Name: objectives objectives_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
 ALTER TABLE ONLY app.objectives
     ADD CONSTRAINT objectives_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: objectives objectives_objective_health_override_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.objectives
+    ADD CONSTRAINT objectives_objective_health_override_by_membership_id_fkey FOREIGN KEY (objective_health_override_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
 
 
 --
@@ -11825,6 +12817,134 @@ ALTER TABLE ONLY app.responsibles
 
 
 --
+-- Name: review_feedback review_feedback_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_feedback
+    ADD CONSTRAINT review_feedback_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: review_feedback review_feedback_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_feedback
+    ADD CONSTRAINT review_feedback_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: review_feedback review_feedback_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_feedback
+    ADD CONSTRAINT review_feedback_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: review_snapshots review_snapshots_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_snapshots
+    ADD CONSTRAINT review_snapshots_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: review_snapshots review_snapshots_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_snapshots
+    ADD CONSTRAINT review_snapshots_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: review_snapshots review_snapshots_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.review_snapshots
+    ADD CONSTRAINT review_snapshots_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_business_model_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_business_model_id_fkey FOREIGN KEY (business_model_id) REFERENCES app.business_models(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_strategic_challenge_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_business_models
+    ADD CONSTRAINT strategic_challenge_business_models_strategic_challenge_id_fkey FOREIGN KEY (strategic_challenge_id) REFERENCES app.strategic_challenges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_industry_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_industry_id_fkey FOREIGN KEY (industry_id) REFERENCES app.industries(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_strategic_challenge_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenge_industries
+    ADD CONSTRAINT strategic_challenge_industries_strategic_challenge_id_fkey FOREIGN KEY (strategic_challenge_id) REFERENCES app.strategic_challenges(id) ON DELETE CASCADE;
+
+
+--
 -- Name: strategic_challenges strategic_challenges_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -11854,6 +12974,22 @@ ALTER TABLE ONLY app.strategic_challenges
 
 ALTER TABLE ONLY app.strategic_challenges
     ADD CONSTRAINT strategic_challenges_source_analysis_entry_id_fkey FOREIGN KEY (source_analysis_entry_id) REFERENCES app.analysis_entries(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategic_challenges strategic_challenges_source_cluster_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_challenges
+    ADD CONSTRAINT strategic_challenges_source_cluster_id_fkey FOREIGN KEY (source_cluster_id) REFERENCES app.analysis_clusters(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategic_context_cache strategic_context_cache_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_context_cache
+    ADD CONSTRAINT strategic_context_cache_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
 
 
 --
@@ -11889,6 +13025,102 @@ ALTER TABLE ONLY app.strategic_direction_business_models
 
 
 --
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_cluster_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_cluster_id_fkey FOREIGN KEY (cluster_id) REFERENCES app.analysis_clusters(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_strategic_direction_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_cluster_links
+    ADD CONSTRAINT strategic_direction_cluster_links_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_cluster_objective_relation_i_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_cluster_objective_relation_i_fkey FOREIGN KEY (cluster_objective_relation_id) REFERENCES app.cluster_objective_relations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_strategic_direction_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_gap_links
+    ADD CONSTRAINT strategic_direction_gap_links_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE CASCADE;
+
+
+--
 -- Name: strategic_direction_industries strategic_direction_industries_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -11918,6 +13150,54 @@ ALTER TABLE ONLY app.strategic_direction_industries
 
 ALTER TABLE ONLY app.strategic_direction_industries
     ADD CONSTRAINT strategic_direction_industries_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_lin_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_lin_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_objective_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_objective_id_fkey FOREIGN KEY (objective_id) REFERENCES app.objectives(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_strategic_direction_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategic_direction_objective_links
+    ADD CONSTRAINT strategic_direction_objective_links_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE CASCADE;
 
 
 --
@@ -12038,6 +13318,118 @@ ALTER TABLE ONLY app.strategic_metrics
 
 ALTER TABLE ONLY app.strategic_metrics
     ADD CONSTRAINT strategic_metrics_owner_membership_id_fkey FOREIGN KEY (owner_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overr_updated_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overr_updated_by_membership_id_fkey FOREIGN KEY (updated_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrid_strategic_direction_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrid_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_challenge_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_challenge_id_fkey FOREIGN KEY (challenge_id) REFERENCES app.strategic_challenges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_objective_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_objective_id_fkey FOREIGN KEY (objective_id) REFERENCES app.objectives(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_correlation_status_overrides
+    ADD CONSTRAINT strategy_correlation_status_overrides_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_programs strategy_programs_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_created_by_membership_id_fkey FOREIGN KEY (created_by_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_programs strategy_programs_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_programs strategy_programs_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_programs strategy_programs_owner_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_owner_membership_id_fkey FOREIGN KEY (owner_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_programs strategy_programs_planning_cycle_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_planning_cycle_id_fkey FOREIGN KEY (planning_cycle_id) REFERENCES app.planning_cycles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_programs strategy_programs_strategic_challenge_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_strategic_challenge_id_fkey FOREIGN KEY (strategic_challenge_id) REFERENCES app.strategic_challenges(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_programs strategy_programs_strategic_direction_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_programs
+    ADD CONSTRAINT strategy_programs_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE SET NULL;
 
 
 --
@@ -12645,6 +14037,26 @@ CREATE POLICY challenge_direction_links_select ON app.challenge_direction_links 
 
 
 --
+-- Name: cluster_objective_relations; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.cluster_objective_relations ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY cluster_objective_relations_modify ON app.cluster_objective_relations USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: cluster_objective_relations cluster_objective_relations_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY cluster_objective_relations_select ON app.cluster_objective_relations FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
+
+
+--
 -- Name: cycle_cutover_snapshots; Type: ROW SECURITY; Schema: app; Owner: -
 --
 
@@ -12709,6 +14121,26 @@ CREATE POLICY cycle_instance_lock_select ON app.cycle_instance_lock FOR SELECT U
    FROM app.cycle_instances i
   WHERE ((i.id = cycle_instance_lock.cycle_instance_id) AND app.has_permission(i.organization_id, 'cycle_scheme.read'::text)))));
 
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_eval_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY cycle_instance_portfolio_eval_modify ON app.cycle_instance_portfolio_evaluation USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation cycle_instance_portfolio_eval_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY cycle_instance_portfolio_eval_select ON app.cycle_instance_portfolio_evaluation FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
+
+
+--
+-- Name: cycle_instance_portfolio_evaluation; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.cycle_instance_portfolio_evaluation ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: cycle_instances; Type: ROW SECURITY; Schema: app; Owner: -
@@ -12957,6 +14389,26 @@ CREATE POLICY initiative_industries_select ON app.initiative_industries FOR SELE
 
 
 --
+-- Name: initiative_key_result_links; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.initiative_key_result_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY initiative_key_result_links_modify ON app.initiative_key_result_links USING (app.has_permission(organization_id, 'traceability.write'::text)) WITH CHECK (app.has_permission(organization_id, 'traceability.write'::text));
+
+
+--
+-- Name: initiative_key_result_links initiative_key_result_links_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY initiative_key_result_links_select ON app.initiative_key_result_links FOR SELECT USING (app.has_permission(organization_id, 'traceability.read'::text));
+
+
+--
 -- Name: initiative_operating_models; Type: ROW SECURITY; Schema: app; Owner: -
 --
 
@@ -13013,7 +14465,7 @@ CREATE POLICY initiatives_modify ON app.initiatives USING (app.has_permission(or
 -- Name: initiatives initiatives_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY initiatives_select ON app.initiatives FOR SELECT USING (app.has_permission(organization_id, 'initiative.read'::text));
+CREATE POLICY initiatives_select ON app.initiatives FOR SELECT USING ((app.has_permission(organization_id, 'initiative.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
 
 
 --
@@ -13221,14 +14673,14 @@ ALTER TABLE app.objective_business_models ENABLE ROW LEVEL SECURITY;
 -- Name: objective_business_models objective_business_models_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY objective_business_models_modify ON app.objective_business_models USING (app.has_permission(organization_id, 'traceability.write'::text)) WITH CHECK (app.has_permission(organization_id, 'traceability.write'::text));
+CREATE POLICY objective_business_models_modify ON app.objective_business_models USING ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
 
 
 --
 -- Name: objective_business_models objective_business_models_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY objective_business_models_select ON app.objective_business_models FOR SELECT USING (app.has_permission(organization_id, 'traceability.read'::text));
+CREATE POLICY objective_business_models_select ON app.objective_business_models FOR SELECT USING ((app.has_permission(organization_id, 'traceability.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
 
 
 --
@@ -13261,14 +14713,14 @@ ALTER TABLE app.objective_industries ENABLE ROW LEVEL SECURITY;
 -- Name: objective_industries objective_industries_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY objective_industries_modify ON app.objective_industries USING (app.has_permission(organization_id, 'traceability.write'::text)) WITH CHECK (app.has_permission(organization_id, 'traceability.write'::text));
+CREATE POLICY objective_industries_modify ON app.objective_industries USING ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
 
 
 --
 -- Name: objective_industries objective_industries_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY objective_industries_select ON app.objective_industries FOR SELECT USING (app.has_permission(organization_id, 'traceability.read'::text));
+CREATE POLICY objective_industries_select ON app.objective_industries FOR SELECT USING ((app.has_permission(organization_id, 'traceability.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
 
 
 --
@@ -13321,7 +14773,7 @@ ALTER TABLE app.objectives ENABLE ROW LEVEL SECURITY;
 -- Name: objectives objectives_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY objectives_modify ON app.objectives USING (app.has_permission(organization_id, 'okr.write'::text)) WITH CHECK (app.has_permission(organization_id, 'okr.write'::text));
+CREATE POLICY objectives_modify ON app.objectives USING ((app.has_permission(organization_id, 'okr.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'okr.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
 
 
 --
@@ -13645,6 +15097,86 @@ CREATE POLICY responsibles_select ON app.responsibles FOR SELECT USING (app.is_m
 
 
 --
+-- Name: review_feedback; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.review_feedback ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: review_feedback review_feedback_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY review_feedback_modify ON app.review_feedback USING (app.has_permission(organization_id, 'review.write'::text)) WITH CHECK (app.has_permission(organization_id, 'review.write'::text));
+
+
+--
+-- Name: review_feedback review_feedback_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY review_feedback_select ON app.review_feedback FOR SELECT USING (app.has_permission(organization_id, 'review.read'::text));
+
+
+--
+-- Name: review_snapshots; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.review_snapshots ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: review_snapshots review_snapshots_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY review_snapshots_modify ON app.review_snapshots USING (app.has_permission(organization_id, 'review.write'::text)) WITH CHECK (app.has_permission(organization_id, 'review.write'::text));
+
+
+--
+-- Name: review_snapshots review_snapshots_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY review_snapshots_select ON app.review_snapshots FOR SELECT USING (app.has_permission(organization_id, 'review.read'::text));
+
+
+--
+-- Name: strategic_challenge_business_models; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_challenge_business_models ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_challenge_business_models_modify ON app.strategic_challenge_business_models USING ((app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text)));
+
+
+--
+-- Name: strategic_challenge_business_models strategic_challenge_business_models_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_challenge_business_models_select ON app.strategic_challenge_business_models FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text)));
+
+
+--
+-- Name: strategic_challenge_industries; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_challenge_industries ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_challenge_industries_modify ON app.strategic_challenge_industries USING ((app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.write'::text)));
+
+
+--
+-- Name: strategic_challenge_industries strategic_challenge_industries_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_challenge_industries_select ON app.strategic_challenge_industries FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text)));
+
+
+--
 -- Name: strategic_challenges; Type: ROW SECURITY; Schema: app; Owner: -
 --
 
@@ -13662,6 +15194,26 @@ CREATE POLICY strategic_challenges_modify ON app.strategic_challenges USING ((ap
 --
 
 CREATE POLICY strategic_challenges_select ON app.strategic_challenges FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text)));
+
+
+--
+-- Name: strategic_context_cache; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_context_cache ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_context_cache strategic_context_cache_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_context_cache_modify ON app.strategic_context_cache USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategic_context_cache strategic_context_cache_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_context_cache_select ON app.strategic_context_cache FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
 
 
 --
@@ -13685,6 +15237,46 @@ CREATE POLICY strategic_direction_business_models_select ON app.strategic_direct
 
 
 --
+-- Name: strategic_direction_cluster_links; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_direction_cluster_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_cluster_links_modify ON app.strategic_direction_cluster_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategic_direction_cluster_links strategic_direction_cluster_links_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_cluster_links_select ON app.strategic_direction_cluster_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
+
+
+--
+-- Name: strategic_direction_gap_links; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_direction_gap_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_gap_links_modify ON app.strategic_direction_gap_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategic_direction_gap_links strategic_direction_gap_links_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_gap_links_select ON app.strategic_direction_gap_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
+
+
+--
 -- Name: strategic_direction_industries; Type: ROW SECURITY; Schema: app; Owner: -
 --
 
@@ -13702,6 +15294,26 @@ CREATE POLICY strategic_direction_industries_modify ON app.strategic_direction_i
 --
 
 CREATE POLICY strategic_direction_industries_select ON app.strategic_direction_industries FOR SELECT USING (app.has_permission(organization_id, 'traceability.read'::text));
+
+
+--
+-- Name: strategic_direction_objective_links; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategic_direction_objective_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_objective_links_modify ON app.strategic_direction_objective_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategic_direction_objective_links strategic_direction_objective_links_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategic_direction_objective_links_select ON app.strategic_direction_objective_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
 
 
 --
@@ -13741,7 +15353,7 @@ CREATE POLICY strategic_directions_modify ON app.strategic_directions USING (app
 -- Name: strategic_directions strategic_directions_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY strategic_directions_select ON app.strategic_directions FOR SELECT USING (app.has_permission(organization_id, 'nav.strategy-matrix.read'::text));
+CREATE POLICY strategic_directions_select ON app.strategic_directions FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
 
 
 --
@@ -13782,6 +15394,46 @@ CREATE POLICY strategic_metrics_modify ON app.strategic_metrics USING (app.has_p
 --
 
 CREATE POLICY strategic_metrics_select ON app.strategic_metrics FOR SELECT USING (app.has_permission(organization_id, 'metric.read'::text));
+
+
+--
+-- Name: strategy_correlation_status_overrides; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategy_correlation_status_overrides ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_correlation_status_overrides_modify ON app.strategy_correlation_status_overrides USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategy_correlation_status_overrides strategy_correlation_status_overrides_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_correlation_status_overrides_select ON app.strategy_correlation_status_overrides FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text)));
+
+
+--
+-- Name: strategy_programs; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategy_programs ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategy_programs strategy_programs_modify; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_programs_modify ON app.strategy_programs USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+
+
+--
+-- Name: strategy_programs strategy_programs_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_programs_select ON app.strategy_programs FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
 
 
 --
@@ -14122,6 +15774,44 @@ ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: objects tenant_ai_logs_delete; Type: POLICY; Schema: storage; Owner: -
+--
+
+CREATE POLICY tenant_ai_logs_delete ON storage.objects FOR DELETE USING (((bucket_id = 'tenant-ai-logs'::text) AND (split_part(name, '/'::text, 1) = 'organizations'::text) AND (EXISTS ( SELECT 1
+   FROM app.organization_memberships m
+  WHERE ((m.user_id = auth.uid()) AND (m.status = 'active'::text) AND (split_part(objects.name, '/'::text, 2) = (m.organization_id)::text))))));
+
+
+--
+-- Name: objects tenant_ai_logs_insert; Type: POLICY; Schema: storage; Owner: -
+--
+
+CREATE POLICY tenant_ai_logs_insert ON storage.objects FOR INSERT WITH CHECK (((bucket_id = 'tenant-ai-logs'::text) AND (split_part(name, '/'::text, 1) = 'organizations'::text) AND (EXISTS ( SELECT 1
+   FROM app.organization_memberships m
+  WHERE ((m.user_id = auth.uid()) AND (m.status = 'active'::text) AND (split_part(objects.name, '/'::text, 2) = (m.organization_id)::text))))));
+
+
+--
+-- Name: objects tenant_ai_logs_select; Type: POLICY; Schema: storage; Owner: -
+--
+
+CREATE POLICY tenant_ai_logs_select ON storage.objects FOR SELECT USING (((bucket_id = 'tenant-ai-logs'::text) AND (split_part(name, '/'::text, 1) = 'organizations'::text) AND (EXISTS ( SELECT 1
+   FROM app.organization_memberships m
+  WHERE ((m.user_id = auth.uid()) AND (m.status = 'active'::text) AND (split_part(objects.name, '/'::text, 2) = (m.organization_id)::text))))));
+
+
+--
+-- Name: objects tenant_ai_logs_update; Type: POLICY; Schema: storage; Owner: -
+--
+
+CREATE POLICY tenant_ai_logs_update ON storage.objects FOR UPDATE USING (((bucket_id = 'tenant-ai-logs'::text) AND (split_part(name, '/'::text, 1) = 'organizations'::text) AND (EXISTS ( SELECT 1
+   FROM app.organization_memberships m
+  WHERE ((m.user_id = auth.uid()) AND (m.status = 'active'::text) AND (split_part(objects.name, '/'::text, 2) = (m.organization_id)::text)))))) WITH CHECK (((bucket_id = 'tenant-ai-logs'::text) AND (split_part(name, '/'::text, 1) = 'organizations'::text) AND (EXISTS ( SELECT 1
+   FROM app.organization_memberships m
+  WHERE ((m.user_id = auth.uid()) AND (m.status = 'active'::text) AND (split_part(objects.name, '/'::text, 2) = (m.organization_id)::text))))));
+
+
+--
 -- Name: objects tenant_branding_logo_delete; Type: POLICY; Schema: storage; Owner: -
 --
 
@@ -14290,8 +15980,31 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0048'),
     ('0049'),
     ('005'),
+    ('0050'),
+    ('0051'),
+    ('0052'),
+    ('0053'),
+    ('0054'),
+    ('0055'),
+    ('0056'),
+    ('0057'),
+    ('0058'),
+    ('0059'),
     ('006'),
+    ('0060'),
+    ('0061'),
+    ('0062'),
+    ('0063'),
+    ('0064'),
+    ('0065'),
+    ('0066'),
+    ('0067'),
+    ('0068'),
+    ('0069'),
     ('007'),
+    ('0070'),
+    ('0071'),
+    ('0072'),
     ('008'),
     ('009'),
     ('010');

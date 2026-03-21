@@ -92,6 +92,7 @@ import {
 import { coerceStrategicContextOutput } from "@/lib/analysis-network/objective-evaluation-providers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildProgramMatrix } from "@/lib/strategy-cycle/program-matrix";
+import { normalizeContributionLevel, type ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { ProgramMappingMatrix } from "@/components/ceo/ProgramMappingMatrix";
 
 type StrategyCycleViewPageProps = {
@@ -549,6 +550,24 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     current.push(link.objective_id);
     objectiveIdsByDirection.set(link.strategic_direction_id, current);
   }
+  const challengeCoverageByDirection: Record<string, Record<string, ContributionLevel>> = {};
+  for (const link of workspace.challengeDirectionLinks ?? []) {
+    const dirId = link.strategic_direction_id;
+    const chId = link.strategic_challenge_id;
+    if (!challengeCoverageByDirection[dirId]) challengeCoverageByDirection[dirId] = {};
+    challengeCoverageByDirection[dirId][chId] = normalizeContributionLevel(
+      (link as { contribution_level?: string | null }).contribution_level
+    );
+  }
+  const objectiveCoverageByDirection: Record<string, Record<string, ContributionLevel>> = {};
+  for (const link of workspace.directionObjectiveLinks ?? []) {
+    const dirId = link.strategic_direction_id;
+    const obId = link.objective_id;
+    if (!objectiveCoverageByDirection[dirId]) objectiveCoverageByDirection[dirId] = {};
+    objectiveCoverageByDirection[dirId][obId] = normalizeContributionLevel(
+      (link as { contribution_level?: string | null }).contribution_level
+    );
+  }
   const directionCountByChallengeId = new Map<string, number>();
   const directionIdsByChallengeId = new Map<string, Set<string>>();
   for (const link of workspace.challengeDirectionLinks ?? []) {
@@ -681,7 +700,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   );
   const programMatrix = buildProgramMatrix({
     challenges: workspace.challenges ?? [],
-    directions: workspace.strategicDirections ?? [],
+    directions: (workspace.strategicDirections ?? []).map((d) => ({
+      id: d.id,
+      title: d.title,
+      direction_score: d.direction_score,
+      priority: (d as { priority?: number | string | null }).priority ?? null,
+    })),
     challengeDirectionLinks: (workspace.challengeDirectionLinks ?? []).map((link) => ({
       strategic_challenge_id: link.strategic_challenge_id,
       strategic_direction_id: link.strategic_direction_id,
@@ -1350,7 +1374,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <article className="brand-card p-6">
               <h2 className="text-lg font-semibold text-zinc-900">Stossrichtung erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">
-                Unabhaengig erstellen und direkt mit Herausforderungen verknuepfen.
+                Unabhaengig anlegen; Verknuepfungen zu Herausforderungen und Zielen erfolgen in der Tabelle per
+                Pills.
               </p>
               <form action={createStrategicDirectionInCycle} className="mt-4 space-y-3">
                 <div>
@@ -1367,23 +1392,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   <textarea
                     name="description"
                     rows={3}
-                    placeholder="Loesungslogik (solution-agnostic)"
+                    placeholder="Kurzbeschreibung, Loesungslogik (losgeloest von konkreten Massnahmen)"
                     className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
                   />
                 </div>
+                <p className="text-xs text-zinc-500">
+                  Prioritaet (1–5) wird automatisch aus den vier Bewertungen berechnet — gleiche Gewichtung wie der
+                  Stossrichtungs-Score, ganzzahlig gerundet.
+                </p>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Prioritaet</label>
-                  <input
-                    type="number"
-                    name="priority"
-                    defaultValue={3}
-                    min={1}
-                    max={5}
-                    className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Strategic Value</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700">Strategischer Wert</label>
                   <input
                     type="number"
                     name="strategic_value_score"
@@ -1394,7 +1412,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Capability Fit</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700">Passung / Kompetenzen</label>
                   <input
                     type="number"
                     name="capability_fit_score"
@@ -1405,7 +1423,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Feasibility</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700">Machbarkeit</label>
                   <input
                     type="number"
                     name="feasibility_score"
@@ -1416,7 +1434,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Risk</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700">Risiko</label>
                   <input
                     type="number"
                     name="risk_score"
@@ -1425,21 +1443,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     max={5}
                     className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                   />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Objective (optional)</label>
-                  <select
-                    name="objective_id"
-                    defaultValue=""
-                    className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="">Optional waehlen</option>
-                    {(workspace.objectives ?? []).map((objective) => (
-                      <option key={objective.id} value={objective.id}>
-                        {objective.title}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <button type="submit" disabled={!canWrite} className="brand-btn w-full px-4 py-2 text-sm">
                   Stossrichtung speichern
@@ -1457,7 +1460,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 businessModels={workspace.availableDimensions.businessModels ?? []}
                 programsByDirectionId={Object.fromEntries(programsByDirectionId)}
                 challengeIdsByDirection={Object.fromEntries(challengeIdsByDirection)}
+                challengeCoverageByDirection={challengeCoverageByDirection}
                 objectiveIdsByDirection={Object.fromEntries(objectiveIdsByDirection)}
+                objectiveCoverageByDirection={objectiveCoverageByDirection}
                 industryIdsByDirection={Object.fromEntries(directionIndustryIdsById)}
                 businessModelIdsByDirection={Object.fromEntries(directionBusinessModelIdsById)}
                 directionCoverageById={Object.fromEntries(workspace.directionCoverageById)}
