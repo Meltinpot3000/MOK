@@ -11,7 +11,7 @@ export type MatrixDirection = {
   id: string;
   title: string;
   owner_membership_id: string | null;
-  priority: number;
+  priority: number | string;
   status: string;
   grouping: string | null;
 };

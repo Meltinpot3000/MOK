@@ -2,6 +2,16 @@
 
 import type { ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { COVERAGE_LEVEL_META } from "@/lib/strategy-cycle/coverage-level";
+import {
+  STRATEGIC_DIRECTION_STATUSES,
+  STRATEGIC_DIRECTION_STATUS_LABELS_DE,
+  normalizeStrategicDirectionStatus,
+} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
+import {
+  addressedLinkCountToneClass,
+  MATRIX_TABLE_LINK_PILLS_MAX,
+} from "@/lib/strategy-cycle/matrix-link-count-tone";
+import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
 import { CoverageStrengthPillButton } from "./CoverageStrengthPillButton";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
@@ -10,7 +20,7 @@ type Direction = {
   id: string;
   title: string;
   description: string | null;
-  priority: number | null;
+  priority: number | string | null;
   status: string | null;
   grouping: string | null;
   relevance_level: number | null;
@@ -18,7 +28,6 @@ type Direction = {
   strategic_value_score: number | null;
   capability_fit_score: number | null;
   feasibility_score: number | null;
-  direction_score: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -26,7 +35,7 @@ type Direction = {
 type StrategicDirectionsTableProps = {
   directions: Direction[];
   challenges: Array<{ id: string; title: string }>;
-  objectives: Array<{ id: string; title: string }>;
+  objectives: Array<{ id: string; title: string; status: string | null }>;
   industries: Array<{ id: string; name: string }>;
   businessModels: Array<{ id: string; name: string }>;
   programsByDirectionId: Record<string, Array<{ id: string; title: string }>>;
@@ -88,41 +97,38 @@ export function StrategicDirectionsTable({
     {
       id: "title",
       label: "Titel",
+      sortValue: (d: Direction) =>
+        `${normalizeStrategicDirectionStatus(d.status)} ${d.title}`,
       render: (d: Direction) => (
-        <span className="font-medium text-zinc-900">{d.title}</span>
+        <div className="min-w-0">
+          <div className="truncate font-medium text-zinc-900">{d.title}</div>
+          <div className="text-xs text-zinc-500">
+            {STRATEGIC_DIRECTION_STATUS_LABELS_DE[normalizeStrategicDirectionStatus(d.status)]}
+          </div>
+        </div>
       ),
     },
     {
       id: "priority",
-      label: "Prioritaet (auto.)",
+      label: "Prioritaet (Score)",
       defaultVisible: true,
-      render: (d: Direction) => String(d.priority ?? "-"),
-    },
-    {
-      id: "status",
-      label: "Status",
-      defaultVisible: false,
-      render: (d: Direction) => d.status ?? "-",
+      sortValue: (d: Direction) =>
+        d.priority != null && d.priority !== "" ? Number(d.priority) : null,
+      render: (d: Direction) =>
+        d.priority != null && d.priority !== "" ? Number(d.priority).toFixed(2) : "-",
     },
     {
       id: "grouping",
       label: "Gruppierung",
       defaultVisible: false,
+      sortValue: (d: Direction) => d.grouping ?? null,
       render: (d: Direction) => d.grouping ?? "-",
-    },
-    {
-      id: "direction_score",
-      label: "Stossrichtungs-Score",
-      defaultVisible: true,
-      render: (d: Direction) =>
-        d.direction_score != null
-          ? Number(d.direction_score).toFixed(2)
-          : "-",
     },
     {
       id: "coverage",
       label: "Abdeckung",
-      defaultVisible: true,
+      defaultVisible: false,
+      sortValue: (d: Direction) => directionCoverageById[d.id]?.percent ?? null,
       render: (d: Direction) => {
         const cov = directionCoverageById[d.id];
         if (!cov) return "-";
@@ -133,56 +139,116 @@ export function StrategicDirectionsTable({
       id: "strategic_value",
       label: "Strategischer Wert",
       defaultVisible: false,
+      sortValue: (d: Direction) => d.strategic_value_score ?? null,
       render: (d: Direction) => String(d.strategic_value_score ?? "-"),
     },
     {
       id: "capability_fit",
       label: "Passung Kompetenzen",
       defaultVisible: false,
+      sortValue: (d: Direction) => d.capability_fit_score ?? null,
       render: (d: Direction) => String(d.capability_fit_score ?? "-"),
     },
     {
       id: "feasibility",
       label: "Machbarkeit",
       defaultVisible: false,
+      sortValue: (d: Direction) => d.feasibility_score ?? null,
       render: (d: Direction) => String(d.feasibility_score ?? "-"),
     },
     {
       id: "risk",
       label: "Risiko",
       defaultVisible: false,
+      sortValue: (d: Direction) => d.risk_level ?? null,
       render: (d: Direction) => String(d.risk_level ?? "-"),
     },
     {
       id: "challenges",
       label: "Herausforderungen",
       defaultVisible: true,
+      sortValue: (d: Direction) => (challengeIdsByDirection[d.id] ?? []).length,
       render: (d: Direction) => {
         const ids = challengeIdsByDirection[d.id] ?? [];
         const linked = challenges.filter((c) => ids.includes(c.id));
         if (linked.length === 0) return <span className="text-zinc-400">-</span>;
+        const n = linked.length;
+        const total = challenges.length;
         return (
-          <div className="flex flex-wrap gap-1">
-            {linked.slice(0, 3).map((c) => {
-              const level = challengeCoverageByDirection[d.id]?.[c.id];
-              return (
-                <span
-                  key={c.id}
-                  className={`${pillLinked()} inline-flex max-w-[168px] items-center gap-0.5`}
-                  title={c.title}
-                >
-                  <span className="min-w-0 truncate">{c.title}</span>
-                  {level ? (
-                    <span className="shrink-0" title={COVERAGE_LEVEL_META[level].labelDe}>
-                      {COVERAGE_LEVEL_META[level].emoji}
-                    </span>
-                  ) : null}
-                </span>
-              );
-            })}
-            {linked.length > 3 && (
-              <span className={pillLinked()}>+{linked.length - 3}</span>
-            )}
+          <div className="space-y-1">
+            <div
+              className={`text-[10px] font-semibold tabular-nums ${addressedLinkCountToneClass(n)}`}
+              title="Anzahl verknuepfter Herausforderungen vs. alle im Zyklus (Farbe wie Strategie-Matrix)"
+            >
+              HF {n}/{total}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {linked.slice(0, MATRIX_TABLE_LINK_PILLS_MAX).map((c) => {
+                const level = challengeCoverageByDirection[d.id]?.[c.id];
+                return (
+                  <span
+                    key={c.id}
+                    className={`${pillLinked()} inline-flex max-w-[168px] items-center gap-0.5`}
+                    title={c.title}
+                  >
+                    <span className="min-w-0 truncate">{c.title}</span>
+                    {level ? (
+                      <span className="shrink-0" title={COVERAGE_LEVEL_META[level].labelDe}>
+                        {COVERAGE_LEVEL_META[level].emoji}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })}
+              {n > MATRIX_TABLE_LINK_PILLS_MAX ? (
+                <span className={pillLinked()}>+{n - MATRIX_TABLE_LINK_PILLS_MAX}</span>
+              ) : null}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "objectives",
+      label: "Objectives",
+      defaultVisible: true,
+      sortValue: (d: Direction) => (objectiveIdsByDirection[d.id] ?? []).length,
+      render: (d: Direction) => {
+        const ids = objectiveIdsByDirection[d.id] ?? [];
+        const linked = objectives.filter((o) => ids.includes(o.id));
+        if (linked.length === 0) return <span className="text-zinc-400">-</span>;
+        const n = linked.length;
+        const total = objectives.length;
+        return (
+          <div className="space-y-1">
+            <div
+              className={`text-[10px] font-semibold tabular-nums ${addressedLinkCountToneClass(n)}`}
+              title="Anzahl verknuepfter Ziele vs. alle Objectives im Zyklus (Farbe wie Strategie-Matrix)"
+            >
+              Obj {n}/{total}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {linked.slice(0, MATRIX_TABLE_LINK_PILLS_MAX).map((o) => {
+                const level = objectiveCoverageByDirection[d.id]?.[o.id];
+                return (
+                  <span
+                    key={o.id}
+                    className={`${pillLinked()} inline-flex max-w-[168px] items-center gap-0.5`}
+                    title={o.title}
+                  >
+                    <span className="min-w-0 truncate">{o.title}</span>
+                    {level ? (
+                      <span className="shrink-0" title={COVERAGE_LEVEL_META[level].labelDe}>
+                        {COVERAGE_LEVEL_META[level].emoji}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })}
+              {n > MATRIX_TABLE_LINK_PILLS_MAX ? (
+                <span className={pillLinked()}>+{n - MATRIX_TABLE_LINK_PILLS_MAX}</span>
+              ) : null}
+            </div>
           </div>
         );
       },
@@ -191,6 +257,14 @@ export function StrategicDirectionsTable({
       id: "industries",
       label: "Industrien",
       defaultVisible: true,
+      sortValue: (d: Direction) => {
+        const ids = industryIdsByDirection[d.id] ?? [];
+        const names = industries
+          .filter((i) => ids.includes(i.id))
+          .map((i) => i.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (d: Direction) => {
         const ids = industryIdsByDirection[d.id] ?? [];
         const linked = industries.filter((i) => ids.includes(i.id));
@@ -213,6 +287,14 @@ export function StrategicDirectionsTable({
       id: "business_models",
       label: "Geschaeftsmodelle",
       defaultVisible: true,
+      sortValue: (d: Direction) => {
+        const ids = businessModelIdsByDirection[d.id] ?? [];
+        const names = businessModels
+          .filter((m) => ids.includes(m.id))
+          .map((m) => m.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (d: Direction) => {
         const ids = businessModelIdsByDirection[d.id] ?? [];
         const linked = businessModels.filter((m) => ids.includes(m.id));
@@ -272,11 +354,10 @@ export function StrategicDirectionsTable({
                   {coverage.total || 0})
                 </span>
                 <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
-                  Prioritaet: {direction.priority ?? "—"}
-                </span>
-                <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  Stossrichtungs-Score:{" "}
-                  {Number(direction.direction_score ?? 0).toFixed(2)}
+                  Prioritaet (Score):{" "}
+                  {direction.priority != null && direction.priority !== ""
+                    ? Number(direction.priority).toFixed(2)
+                    : "—"}
                 </span>
                 <form action={actions.deleteStrategicDirectionInCycle} className="inline">
                   <input
@@ -300,34 +381,22 @@ export function StrategicDirectionsTable({
 
             <form
               action={actions.updateStrategicDirectionAssessment}
-              className="flex flex-wrap items-end gap-2"
+              className="grid grid-cols-1 gap-2 md:grid-cols-5"
             >
               <input
                 type="hidden"
                 name="strategic_direction_id"
                 value={direction.id}
               />
-              <label className="text-xs text-zinc-600">
+              <label className="text-xs text-zinc-600 md:col-span-2">
                 Titel
                 <input
                   name="title"
                   defaultValue={direction.title}
                   required
-                  className="ml-2 w-72 rounded border border-zinc-300 px-2 py-1 text-xs"
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                 />
               </label>
-              <label className="block text-xs text-zinc-600">
-                Beschreibung
-                <textarea
-                  name="description"
-                  defaultValue={direction.description ?? ""}
-                  rows={4}
-                  className="mt-1 block w-full min-w-[320px] max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                />
-              </label>
-              <p className="w-full text-[11px] text-zinc-500">
-                Prioritaet (1–5) und Stossrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
-              </p>
               <label className="text-xs text-zinc-600">
                 Strategischer Wert
                 <input
@@ -336,7 +405,7 @@ export function StrategicDirectionsTable({
                   defaultValue={direction.strategic_value_score ?? 3}
                   min={1}
                   max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                 />
               </label>
               <label className="text-xs text-zinc-600">
@@ -347,7 +416,7 @@ export function StrategicDirectionsTable({
                   defaultValue={direction.capability_fit_score ?? 3}
                   min={1}
                   max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                 />
               </label>
               <label className="text-xs text-zinc-600">
@@ -358,7 +427,7 @@ export function StrategicDirectionsTable({
                   defaultValue={direction.feasibility_score ?? 3}
                   min={1}
                   max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                 />
               </label>
               <label className="text-xs text-zinc-600">
@@ -369,16 +438,44 @@ export function StrategicDirectionsTable({
                   defaultValue={direction.risk_level ?? 3}
                   min={1}
                   max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                 />
               </label>
-              <button
-                type="submit"
-                disabled={!canWrite}
-                className="brand-btn px-3 py-1.5 text-xs"
-              >
-                Bewertung speichern
-              </button>
+              <label className="text-xs text-zinc-600">
+                Status
+                <select
+                  name="status"
+                  defaultValue={normalizeStrategicDirectionStatus(direction.status)}
+                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                >
+                  {STRATEGIC_DIRECTION_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-zinc-600 md:col-span-5">
+                Beschreibung
+                <textarea
+                  name="description"
+                  defaultValue={direction.description ?? ""}
+                  rows={3}
+                  className="mt-1 block w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <p className="text-[11px] text-zinc-500 md:col-span-5">
+                Prioritaet (1–5) und Stossrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
+              </p>
+              <div className="md:col-span-5">
+                <button
+                  type="submit"
+                  disabled={!canWrite}
+                  className="brand-btn px-3 py-1.5 text-xs"
+                >
+                  Stossrichtung aktualisieren
+                </button>
+              </div>
             </form>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -411,6 +508,7 @@ export function StrategicDirectionsTable({
                 {objectives.map((objective) => {
                   const isLinked = linkedObjectiveIds.has(objective.id);
                   const level = objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
+                  const linkOk = isObjectiveEligibleForDirectionLink(objective.status);
                   return (
                     <CoverageStrengthPillButton
                       key={objective.id}
@@ -422,7 +520,12 @@ export function StrategicDirectionsTable({
                       linkAction={actions.linkDirectionToObjectiveInCycle}
                       unlinkAction={actions.unlinkDirectionFromObjectiveInCycle}
                       canWrite={canWrite}
-                      title={objective.title}
+                      linkSelectionDisabled={!linkOk}
+                      title={
+                        linkOk
+                          ? objective.title
+                          : `${objective.title} — Verknuepfen nur bei Status aktiv oder auffaellig (at_risk)`
+                      }
                       linkedClassName={pillLinked()}
                       unlinkedClassName={pillNeutral()}
                     >

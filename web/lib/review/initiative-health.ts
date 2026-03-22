@@ -29,6 +29,7 @@ export function deriveInitiativeHealth(initiative: InitiativeRow): ReviewStatus 
 
   if (status === "completed") return "on_track";
   if (status === "archived") return "on_track";
+  if (status === "on_hold") return "at_risk";
   if (status === "at_risk") return "at_risk";
   if (status === "draft" || status === "planned") return "on_track";
 

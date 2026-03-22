@@ -1,5 +1,10 @@
 import type { ContributionLevel } from "./coverage-level";
 import { normalizeContributionLevel } from "./coverage-level";
+import {
+  type StrategicDirectionStatus,
+  isStrategicDirectionVisibleInProgramMatrix,
+  normalizeStrategicDirectionStatus,
+} from "./strategic-direction-lifecycle";
 
 /**
  * Programm-Matrix: Zeilen = Stossrichtungen; Spalten = Herausforderungen, danach Objectives.
@@ -27,6 +32,7 @@ export type ProgramMatrixObjective = {
   title: string;
   importance_score?: number | null;
   ai_objective_score?: number | string | null;
+  status?: string | null;
 };
 
 export type ProgramMatrixCell = {
@@ -52,6 +58,7 @@ export type ProgramMatrixObjectiveCell = {
   objectiveId: string;
   directionId: string;
   objectiveTitle: string;
+  objectiveStatus: string | null;
   directionTitle: string;
   score: number;
   statusTier: "strong" | "medium" | "weak";
@@ -76,6 +83,7 @@ export function matrixObjectiveCellCountsAsAddressedForOverlap(
 export type ProgramMatrixDirectionRow = {
   directionId: string;
   directionTitle: string;
+  directionStatus: StrategicDirectionStatus;
   rowScoreSum: number;
   /** Verknuepfte Objectives der Stossrichtung (fuer Zeilen-Info unabhaengig von Challenge-Spalten). */
   linkedObjectives: ProgramMatrixObjective[];
@@ -118,8 +126,8 @@ export type BuildProgramMatrixInput = {
   directions: Array<{
     id: string;
     title: string;
-    direction_score?: number | string | null;
     priority?: number | string | null;
+    status?: string | null;
   }>;
   challengeDirectionLinks: Array<{
     strategic_challenge_id: string;
@@ -164,7 +172,8 @@ export function matrixCoverageFactorFromLevel(level: string | null | undefined):
   return 1;
 }
 
-function directionPriorityValue(priority: number | string | null | undefined): number {
+/** Prioritaet Stossrichtung (1–5); gleiche Logik wie in der Programm-Matrix. */
+export function directionPriorityValue(priority: number | string | null | undefined): number {
   let p = num(priority);
   if (!Number.isFinite(p) || p <= 0) p = 1;
   return p;
@@ -323,6 +332,11 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   const totalObjectives = Math.max(0, input.objectives.length);
   const objectiveById = new Map(input.objectives.map((o) => [o.id, o] as const));
 
+  const directionsForMatrix = input.directions.filter((d) =>
+    isStrategicDirectionVisibleInProgramMatrix(d.status)
+  );
+  const visibleDirectionIds = new Set(directionsForMatrix.map((d) => d.id));
+
   const objectiveIdsByDirection = new Map<string, Set<string>>();
   for (const link of input.directionObjectiveLinks) {
     const dir = link.strategic_direction_id;
@@ -335,7 +349,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   }
 
   const weightedOISumByDirection = new Map<string, number>();
-  for (const direction of input.directions) {
+  for (const direction of directionsForMatrix) {
     let sum = 0;
     for (const link of input.directionObjectiveLinks) {
       if (link.strategic_direction_id !== direction.id) continue;
@@ -357,6 +371,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
 
   const challengeLinkCounts = new Map<string, number>();
   for (const link of input.challengeDirectionLinks) {
+    if (!visibleDirectionIds.has(link.strategic_direction_id)) continue;
     challengeLinkCounts.set(
       link.strategic_challenge_id,
       (challengeLinkCounts.get(link.strategic_challenge_id) ?? 0) + 1
@@ -375,7 +390,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   const objectiveDrafts = new Map<string, Map<string, ObjectiveCellDraft>>();
   let maxRaw = 0;
 
-  for (const direction of input.directions) {
+  for (const direction of directionsForMatrix) {
     const rowChallenge = new Map<string, ChallengeCellDraft>();
     const rowObjective = new Map<string, ObjectiveCellDraft>();
     const dirObjIds = [...(objectiveIdsByDirection.get(direction.id) ?? [])];
@@ -444,7 +459,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   const rawChallengeCells = new Map<string, Map<string, Omit<ProgramMatrixCell, "isTopInRow">>>();
   const rawObjectiveCells = new Map<string, Map<string, Omit<ProgramMatrixObjectiveCell, "isTopInRow">>>();
 
-  for (const direction of input.directions) {
+  for (const direction of directionsForMatrix) {
     const rowC = new Map<string, Omit<ProgramMatrixCell, "isTopInRow">>();
     const dirObjIds = [...(objectiveIdsByDirection.get(direction.id) ?? [])];
     const linkedObjectives = dirObjIds
@@ -499,6 +514,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
         objectiveId: objective.id,
         directionId: direction.id,
         objectiveTitle: objective.title,
+        objectiveStatus: objective.status ?? null,
         directionTitle: direction.title,
         score: normalizedScore,
         statusTier: st,
@@ -527,9 +543,9 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   const objectiveColumnSums = new Map<string, number>();
   for (const o of input.objectives) objectiveColumnSums.set(o.id, 0);
   const rowSums = new Map<string, number>();
-  for (const d of input.directions) rowSums.set(d.id, 0);
+  for (const d of directionsForMatrix) rowSums.set(d.id, 0);
 
-  for (const d of input.directions) {
+  for (const d of directionsForMatrix) {
     const rowC = rawChallengeCells.get(d.id);
     const rowO = rawObjectiveCells.get(d.id);
     if (rowC) {
@@ -550,7 +566,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
     }
   }
 
-  const sortedDirections = [...input.directions].sort(
+  const sortedDirections = [...directionsForMatrix].sort(
     (a, b) => (rowSums.get(b.id) ?? 0) - (rowSums.get(a.id) ?? 0)
   );
   const sortedChallenges = [...input.challenges].sort(
@@ -583,6 +599,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
     return {
       directionId: direction.id,
       directionTitle: direction.title,
+      directionStatus: normalizeStrategicDirectionStatus(direction.status),
       rowScoreSum: rowSums.get(direction.id) ?? 0,
       linkedObjectives: linkedObjectivesRow,
       cells,

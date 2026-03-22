@@ -14,10 +14,13 @@ import {
   unlinkDirectionFromObjectiveInCycle,
 } from "@/app/(ceo)/strategy-cycle/actions";
 import { CoverageStrengthPillButton } from "@/components/ceo/CoverageStrengthPillButton";
+import { addressedLinkCountToneClass } from "@/lib/strategy-cycle/matrix-link-count-tone";
+import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
+import { STRATEGIC_DIRECTION_STATUS_LABELS_DE } from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 
 function cellSurfaceClasses(cell: ProgramMatrixCell): string {
   if (cell.isGap) {
-    let s = "border-2 border-red-500 bg-red-50/60 text-red-950 shadow-sm";
+    let s = "border border-zinc-300 bg-zinc-100 text-zinc-700";
     if (cell.isLinked) s += " ring-2 ring-green-600 ring-offset-1";
     return s;
   }
@@ -27,8 +30,6 @@ function cellSurfaceClasses(cell: ProgramMatrixCell): string {
   else base = "border border-zinc-300 bg-zinc-100 text-zinc-800";
   /** Formal Challenge–Stossrichtung verknuepft (Gruen — zaehlt in Spalten-„Ueberlappung“). */
   if (cell.isLinked) base += " ring-2 ring-green-600 ring-offset-1";
-  /** Hoechster Matrix-Score in dieser Zeile (Nur-Anzeige; kein formaler Link) — Blau, damit nicht mit Link-Gruen verwechselt wird */
-  else if (cell.isTopInRow) base += " ring-2 ring-sky-600 ring-offset-1";
   return base;
 }
 
@@ -55,20 +56,20 @@ function objectiveCellSurfaceClasses(cell: ProgramMatrixObjectiveCell): string {
   else if (cell.score >= 40) base = "border border-indigo-200 bg-indigo-50/80 text-indigo-950";
   else base = "border border-zinc-300 bg-zinc-50 text-zinc-800";
   if (cell.isLinked) base += " ring-2 ring-green-600 ring-offset-1";
-  else if (cell.isTopInRow) base += " ring-2 ring-sky-600 ring-offset-1";
   return base;
 }
 
-function challengeColumnHeaderClasses(band: ProgramMatrixRedundancyBand): string {
+/** Farbe der Zeile mit Stossrichtungs-Anzahl im Spaltenkopf (Ueberdeckung). */
+function redundancyBandMetaTextClass(band: ProgramMatrixRedundancyBand): string {
   switch (band) {
     case "focus":
-      return "border-emerald-300 bg-emerald-50 text-emerald-900";
+      return "text-emerald-700";
     case "ok":
-      return "border-amber-300 bg-amber-50 text-amber-900";
+      return "text-amber-700";
     case "alert":
-      return "border-red-400 bg-red-50 text-red-950";
+      return "text-red-700";
     default:
-      return "border-zinc-200 bg-zinc-100 text-zinc-600";
+      return "text-zinc-500";
   }
 }
 
@@ -79,9 +80,6 @@ function challengeColumnOverlapShortLabel(band: ProgramMatrixRedundancyBand): st
   if (band === "ok") return "ok";
   return "starke Überlappung";
 }
-
-const hfObjGapCellClass =
-  "w-3 min-w-[12px] border-0 border-b-0 border-t border-zinc-200 bg-white p-0";
 
 type MatrixColHeaderProps = {
   title: string;
@@ -95,7 +93,9 @@ function MatrixColumnGroupHeaderTh(p: MatrixColHeaderProps) {
   const overlapShort = challengeColumnOverlapShortLabel(p.redundancyBand);
   const nDir = p.addressingDirectionsCount;
   const dirWord = nDir === 1 ? "Stossrichtung" : "Stossrichtungen";
-  const shell = `min-h-[8.5rem] min-w-[120px] max-w-[min(22rem,32vw)] border p-0 align-top text-left text-xs font-semibold ${challengeColumnHeaderClasses(p.redundancyBand)}`;
+  const metaTone = redundancyBandMetaTextClass(p.redundancyBand);
+  const shell =
+    "min-h-[8.5rem] min-w-[120px] max-w-[min(22rem,32vw)] border border-zinc-200 bg-zinc-50 p-0 align-top text-left text-xs font-semibold text-zinc-800";
   return (
     <th className={shell}>
       <div className="flex min-h-[8.5rem] flex-col justify-between gap-2 px-2 py-2">
@@ -106,7 +106,7 @@ function MatrixColumnGroupHeaderTh(p: MatrixColHeaderProps) {
           >
             {p.title}
           </div>
-          <p className="mt-1.5 text-[10px] font-medium leading-snug opacity-95">
+          <p className={`mt-1.5 text-[10px] font-semibold leading-snug ${metaTone}`}>
             {overlapShort ? <span className="break-words">{overlapShort} </span> : null}
             <span className="whitespace-nowrap">
               ({nDir} {dirWord})
@@ -133,13 +133,6 @@ function objectiveGroupRowStats(row: { objectiveCells: ProgramMatrixObjectiveCel
   const linkedCount = row.objectiveCells.filter((c) => c.isLinked).length;
   const total = row.objectiveCells.length;
   return { scoreSum, linkedCount, total };
-}
-
-/** Anzahl adressierter Spalten: unter 3 gruen, unter 5 gelb, sonst rot (Fokus vs. Ueberlappung). */
-function addressedCountToneClass(addressedCount: number): string {
-  if (addressedCount < 3) return "text-emerald-700";
-  if (addressedCount < 5) return "text-amber-700";
-  return "text-red-700";
 }
 
 type ProgramMappingMatrixProps = {
@@ -177,7 +170,6 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
 
   const nChallengeCols = model.challengeColumns.length;
   const nObjectiveCols = model.objectiveColumns.length;
-  const showHfObjGap = nChallengeCols > 0 && nObjectiveCols > 0;
 
   const insights = model.insights;
 
@@ -187,47 +179,31 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
 
   const headerHint = useMemo(
     () =>
-      "Zeilen: Stossrichtungen (nach Σ aller Zell-Scores). Zelle anklicken: Abdeckung 🌱/⚡/🔥 setzen oder Abwaehlen. Score passt sich nach Speichern an. Gruppenzeile oben: ± mit Strich ueber alle Spalten der Gruppe. Gruener Ring = formale Verknuepfung.",
+      "Zeilen: nur Stossrichtungen mit Status Genehmigt, Aktiv oder Pausiert (nach Σ aller Zell-Scores). Zelle anklicken: Abdeckung 🌱/⚡/🔥 setzen oder Abwaehlen. Score passt sich nach Speichern an. Gruppenzeile oben: ± mit Strich und Gruppenname. Unter dem Spaltentitel: Zeile (n Stossrichtungen) in gruen/gelb/rot je nach Ueberdeckung der Spalte.",
     []
   );
 
   return (
     <article className="brand-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col gap-2">
         <h3 className="text-base font-semibold text-zinc-900">Programm-Matrix</h3>
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <div
+          className="flex flex-wrap items-center gap-2 text-[11px] leading-snug text-zinc-800"
+          aria-label="Legende Matrix-Darstellung"
+        >
+          <span className="font-medium text-zinc-500">Legende:</span>
           <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-900">
-            Heat hoch
+            Zellen-Heat hoch
           </span>
-          <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">
-            mittel
-          </span>
+          <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">mittel</span>
           <span className="rounded border border-zinc-300 bg-zinc-100 px-2 py-1 text-zinc-800">niedrig</span>
-          <span className="rounded border-2 border-red-500 bg-red-50/50 px-2 py-1 text-red-900">Gap</span>
+          <span className="hidden h-4 w-px bg-zinc-200 sm:inline" aria-hidden />
           <span className="whitespace-nowrap rounded ring-2 ring-green-600 ring-offset-1 px-2 py-1 text-green-900">
-            gruener Ring = formale Verknuepfung (Challenge oder Objective)
-          </span>
-          <span className="whitespace-nowrap rounded ring-2 ring-sky-600 ring-offset-1 px-2 py-1 text-sky-950">
-            blauer Ring = Top-Score in der Zeile (kein formaler Link)
-          </span>
-          <span className="rounded border border-zinc-200 bg-zinc-100 px-2 py-1 text-zinc-600">
-            Spalte grau = Challenge nicht adressiert
-          </span>
-          <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-900">
-            Spalte hellgruen = 1–2 Richtungen
-          </span>
-          <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900">
-            Spalte gelb = 3–4 Richtungen
-          </span>
-          <span className="rounded border border-red-400 bg-red-50 px-2 py-1 text-red-950">
-            Spalte rot = 5+ Richtungen
-          </span>
-          <span className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-violet-950">
-            violett = Objective-Spalten (rechts, ÷3-Gewichtung)
+            gruener Ring: formal verknuepft
           </span>
         </div>
       </div>
-      <p className="mt-1 text-xs text-zinc-600">{headerHint}</p>
+      <p className="mt-2 text-xs text-zinc-600">{headerHint}</p>
 
       {!isEmpty ? (
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-zinc-600">
@@ -285,7 +261,6 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                     </div>
                   </th>
                 ) : null}
-                {showHfObjGap ? <th className={hfObjGapCellClass} aria-hidden /> : null}
                 {nObjectiveCols > 0 ? (
                   <th
                     colSpan={objectivesExpanded ? nObjectiveCols : 1}
@@ -345,7 +320,6 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                     </th>
                   )
                 ) : null}
-                {showHfObjGap ? <th className={hfObjGapCellClass} aria-hidden /> : null}
                 {nObjectiveCols > 0 ? (
                   objectivesExpanded ? (
                     model.objectiveColumns.map((col) => (
@@ -389,10 +363,16 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         <div className="line-clamp-3 max-w-[200px]" title={row.directionTitle}>
                           {row.directionTitle}
                         </div>
+                        <span
+                          className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium leading-none text-zinc-600"
+                          title="Status der Stossrichtung"
+                        >
+                          {STRATEGIC_DIRECTION_STATUS_LABELS_DE[row.directionStatus]}
+                        </span>
                         {(nChallengeCols > 0 || nObjectiveCols > 0) ? (
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[10px] font-semibold leading-tight">
                             {nChallengeCols > 0 ? (
-                              <span className={addressedCountToneClass(challengeStats.linkedCount)}>
+                              <span className={addressedLinkCountToneClass(challengeStats.linkedCount)}>
                                 HF {challengeStats.linkedCount}/{challengeStats.total}
                               </span>
                             ) : null}
@@ -402,7 +382,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                               </span>
                             ) : null}
                             {nObjectiveCols > 0 ? (
-                              <span className={addressedCountToneClass(objectiveStats.linkedCount)}>
+                              <span className={addressedLinkCountToneClass(objectiveStats.linkedCount)}>
                                 Obj {objectiveStats.linkedCount}/{objectiveStats.total}
                               </span>
                             ) : null}
@@ -453,7 +433,6 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         </td>
                       )
                     ) : null}
-                    {showHfObjGap ? <td className={hfObjGapCellClass} aria-hidden /> : null}
                     {nObjectiveCols > 0 ? (
                       objectivesExpanded ? (
                         row.objectiveCells.map((cell) => (
@@ -467,7 +446,12 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                               linkAction={linkDirectionToObjectiveInCycle}
                               unlinkAction={unlinkDirectionFromObjectiveInCycle}
                               canWrite={canWrite}
-                              title={`${cell.objectiveTitle} × ${cell.directionTitle}`}
+                              linkSelectionDisabled={!isObjectiveEligibleForDirectionLink(cell.objectiveStatus)}
+                              title={
+                                !isObjectiveEligibleForDirectionLink(cell.objectiveStatus)
+                                  ? `${cell.objectiveTitle} × ${cell.directionTitle} — Verknuepfen nur bei Status aktiv oder auffaellig`
+                                  : `${cell.objectiveTitle} × ${cell.directionTitle}`
+                              }
                               linkedClassName={`rounded px-2 py-1.5 text-left text-xs transition hover:opacity-95 ${objectiveCellSurfaceClasses(cell)}`}
                               unlinkedClassName={`rounded px-2 py-1.5 text-left text-xs transition hover:opacity-95 ${objectiveCellSurfaceClasses({ ...cell, isLinked: false })}`}
                               unlinkInPickerOnly

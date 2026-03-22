@@ -945,30 +945,65 @@ $$;
 --
 
 CREATE FUNCTION app.enforce_direction_activation_links() RETURNS trigger
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'pg_temp'
     AS $$
 declare
-  cluster_count integer;
-  objective_count integer;
+  challenge_count integer;
 begin
   if new.status = 'active' then
-    select count(*) into cluster_count
-    from app.strategic_direction_cluster_links
+    select count(*) into challenge_count
+    from app.challenge_direction_links
     where organization_id = new.organization_id
       and cycle_instance_id = new.cycle_instance_id
       and strategic_direction_id = new.id;
-    select count(*) into objective_count
-    from app.strategic_direction_objective_links
-    where organization_id = new.organization_id
-      and cycle_instance_id = new.cycle_instance_id
-      and strategic_direction_id = new.id;
-    if cluster_count < 1 or objective_count < 1 then
-      raise exception 'direction-needs-cluster-and-objective';
+    if challenge_count < 1 then
+      raise exception 'direction-needs-challenge-link';
     end if;
   end if;
   return new;
 end;
 $$;
+
+
+--
+-- Name: FUNCTION enforce_direction_activation_links(); Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON FUNCTION app.enforce_direction_activation_links() IS 'Vor status=active: mindestens eine challenge_direction_links-Zeile. SECURITY DEFINER um RLS zu umgehen.';
+
+
+--
+-- Name: enforce_program_activation_has_active_initiative(); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.enforce_program_activation_has_active_initiative() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'pg_temp'
+    AS $$
+declare
+  active_count integer;
+begin
+  if new.status = 'active' then
+    select count(*)::integer into active_count
+    from app.initiatives
+    where program_id = new.id
+      and status = 'active';
+    if active_count < 1 then
+      raise exception 'program-needs-active-initiative'
+        using errcode = 'P0001';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: FUNCTION enforce_program_activation_has_active_initiative(); Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON FUNCTION app.enforce_program_activation_has_active_initiative() IS 'Vor status=active: mindestens eine Initiative mit status=active. SECURITY DEFINER um RLS zu umgehen.';
 
 
 --
@@ -980,15 +1015,16 @@ CREATE FUNCTION app.ensure_key_result_context() RETURNS trigger
     AS $$
 declare
   v_cycle_id uuid;
+  v_cycle_instance_id uuid;
   v_org_id uuid;
   v_has_objective_links boolean;
 begin
-  select o.cycle_id, o.organization_id
-  into v_cycle_id, v_org_id
+  select o.cycle_id, o.cycle_instance_id, o.organization_id
+  into v_cycle_id, v_cycle_instance_id, v_org_id
   from app.objectives o
   where o.id = new.objective_id;
 
-  if v_cycle_id is null or v_org_id is null then
+  if v_org_id is null then
     raise exception 'Cannot create key result: objective context not found.';
   end if;
 
@@ -996,21 +1032,39 @@ begin
     raise exception 'Cannot create key result: objective organization mismatch.';
   end if;
 
-  select exists (
-    select 1
-    from app.objective_target_links l
-    where l.organization_id = new.organization_id
-      and l.planning_cycle_id = v_cycle_id
-      and l.objective_id = new.objective_id
-  ) into v_has_objective_links;
+  if v_cycle_id is null and v_cycle_instance_id is null then
+    raise exception 'Cannot create key result: objective has no cycle_id or cycle_instance_id.';
+  end if;
 
-  if not v_has_objective_links then
+  v_has_objective_links := false;
+
+  if v_cycle_id is not null then
     select exists (
       select 1
-      from app.objective_direction_links l
+      from app.objective_target_links l
       where l.organization_id = new.organization_id
         and l.planning_cycle_id = v_cycle_id
         and l.objective_id = new.objective_id
+    ) into v_has_objective_links;
+
+    if not v_has_objective_links then
+      select exists (
+        select 1
+        from app.objective_direction_links l
+        where l.organization_id = new.organization_id
+          and l.planning_cycle_id = v_cycle_id
+          and l.objective_id = new.objective_id
+      ) into v_has_objective_links;
+    end if;
+  end if;
+
+  if not v_has_objective_links and v_cycle_instance_id is not null then
+    select exists (
+      select 1
+      from app.strategic_direction_objective_links l
+      where l.organization_id = new.organization_id
+        and l.objective_id = new.objective_id
+        and l.cycle_instance_id = v_cycle_instance_id
     ) into v_has_objective_links;
   end if;
 
@@ -4606,6 +4660,13 @@ CREATE TABLE app.initiative_key_result_links (
 
 
 --
+-- Name: TABLE initiative_key_result_links; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON TABLE app.initiative_key_result_links IS 'Initiative–Key Result links: implementation drivers for outcomes; canonical for OKR workspace (not linked_okrs JSON).';
+
+
+--
 -- Name: initiative_operating_models; Type: TABLE; Schema: app; Owner: -
 --
 
@@ -4666,12 +4727,38 @@ CREATE TABLE app.initiatives (
     execution_health_override_by_membership_id uuid,
     execution_health_override_at timestamp with time zone,
     review_comment text,
+    weight integer DEFAULT 3 NOT NULL,
+    progress_percent integer DEFAULT 0 NOT NULL,
+    last_review_update_at timestamp with time zone,
     CONSTRAINT initiatives_check CHECK (((start_date IS NULL) OR (end_date IS NULL) OR (start_date <= end_date))),
     CONSTRAINT initiatives_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT initiatives_execution_health_override_check CHECK (((execution_health_override IS NULL) OR (execution_health_override = ANY (ARRAY['on_track'::text, 'at_risk'::text, 'off_track'::text])))),
     CONSTRAINT initiatives_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
-    CONSTRAINT initiatives_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'planned'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
+    CONSTRAINT initiatives_progress_check CHECK (((progress_percent >= 0) AND (progress_percent <= 100))),
+    CONSTRAINT initiatives_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'planned'::text, 'active'::text, 'at_risk'::text, 'on_hold'::text, 'completed'::text, 'archived'::text]))),
+    CONSTRAINT initiatives_weight_review_check CHECK ((weight = ANY (ARRAY[1, 2, 3, 5, 8])))
 );
+
+
+--
+-- Name: COLUMN initiatives.weight; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.initiatives.weight IS 'Relative Gewichtung fuer gewichteten Stossrichtungsfortschritt im Reviewzyklus.';
+
+
+--
+-- Name: COLUMN initiatives.progress_percent; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.initiatives.progress_percent IS 'Manuell gepflegter Umsetzungsfortschritt 0–100 im Reviewzyklus.';
+
+
+--
+-- Name: COLUMN initiatives.last_review_update_at; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.initiatives.last_review_update_at IS 'Letztes bewusstes Review-Update (nicht technisches updated_at).';
 
 
 --
@@ -4757,10 +4844,25 @@ CREATE TABLE app.key_results (
     measurement_unit text,
     created_by_membership_id uuid,
     created_by_source text DEFAULT 'user'::text NOT NULL,
+    owner_membership_id uuid,
     CONSTRAINT key_results_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT key_results_metric_type_check CHECK ((metric_type = ANY (ARRAY['numeric'::text, 'percent'::text, 'boolean'::text]))),
     CONSTRAINT key_results_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
 );
+
+
+--
+-- Name: TABLE key_results; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON TABLE app.key_results IS 'Key Result outcome metrics (baseline/target/current); not initiative implementation progress.';
+
+
+--
+-- Name: COLUMN key_results.owner_membership_id; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.key_results.owner_membership_id IS 'Optional KR owner; UI falls back to objectives.owner_membership_id when null.';
 
 
 --
@@ -4978,6 +5080,13 @@ CREATE TABLE app.objectives (
     CONSTRAINT objectives_progress_percent_check CHECK (((progress_percent >= (0)::numeric) AND (progress_percent <= (100)::numeric))),
     CONSTRAINT objectives_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'at_risk'::text, 'completed'::text, 'archived'::text])))
 );
+
+
+--
+-- Name: TABLE objectives; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON TABLE app.objectives IS 'Objectives row: strategic design and/or OKR-objectives (okr_cycle_id). Review progress lives on initiatives; OKR outcome metrics on key_results.';
 
 
 --
@@ -5516,7 +5625,7 @@ CREATE TABLE app.strategic_directions (
     title text NOT NULL,
     description text,
     owner_membership_id uuid,
-    priority smallint DEFAULT 3 NOT NULL,
+    priority numeric(6,2) DEFAULT 3.00 NOT NULL,
     status text DEFAULT 'draft'::text NOT NULL,
     "grouping" text,
     created_by_membership_id uuid,
@@ -5528,18 +5637,31 @@ CREATE TABLE app.strategic_directions (
     strategic_value_score smallint DEFAULT 3 NOT NULL,
     capability_fit_score smallint DEFAULT 3 NOT NULL,
     feasibility_score smallint DEFAULT 3 NOT NULL,
-    direction_score numeric(6,2) DEFAULT 3.00 NOT NULL,
     created_by_source text DEFAULT 'user'::text NOT NULL,
     review_comment text,
     CONSTRAINT strategic_directions_capability_fit_score_check CHECK (((capability_fit_score >= 1) AND (capability_fit_score <= 5))),
     CONSTRAINT strategic_directions_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT strategic_directions_feasibility_score_check CHECK (((feasibility_score >= 1) AND (feasibility_score <= 5))),
-    CONSTRAINT strategic_directions_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
+    CONSTRAINT strategic_directions_priority_check CHECK (((priority >= 1.00) AND (priority <= 5.00))),
     CONSTRAINT strategic_directions_relevance_level_check CHECK (((relevance_level >= 1) AND (relevance_level <= 5))),
     CONSTRAINT strategic_directions_risk_level_check CHECK (((risk_level >= 1) AND (risk_level <= 5))),
-    CONSTRAINT strategic_directions_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'on_hold'::text, 'completed'::text, 'archived'::text]))),
+    CONSTRAINT strategic_directions_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'approved'::text, 'active'::text, 'on_hold'::text, 'closed'::text]))),
     CONSTRAINT strategic_directions_strategic_value_score_check CHECK (((strategic_value_score >= 1) AND (strategic_value_score <= 5)))
 );
+
+
+--
+-- Name: COLUMN strategic_directions.priority; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategic_directions.priority IS 'Gewichteter Score aus strategischem Wert, Passung, Machbarkeit und Risiko (1–5, zwei Nachkommastellen).';
+
+
+--
+-- Name: COLUMN strategic_directions.status; Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON COLUMN app.strategic_directions.status IS 'Lifecycle: draft, approved, active, on_hold, closed.';
 
 
 --
@@ -5657,7 +5779,7 @@ CREATE TABLE app.strategy_programs (
     title text NOT NULL,
     description text,
     owner_membership_id uuid,
-    budget numeric(18,2),
+    budget_total numeric(18,2),
     timeline text,
     created_by_membership_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -5668,8 +5790,11 @@ CREATE TABLE app.strategy_programs (
     program_origin text DEFAULT 'manual'::text NOT NULL,
     matrix_cell_score numeric(10,2),
     supported_objective_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    start_date date,
+    end_date date,
+    CONSTRAINT strategy_programs_date_range_check CHECK (((start_date IS NULL) OR (end_date IS NULL) OR (start_date <= end_date))),
     CONSTRAINT strategy_programs_program_origin_check CHECK ((program_origin = ANY (ARRAY['manual'::text, 'matrix'::text]))),
-    CONSTRAINT strategy_programs_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'archived'::text])))
+    CONSTRAINT strategy_programs_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'on_hold'::text, 'closed'::text])))
 );
 
 
@@ -5741,6 +5866,25 @@ CREATE TABLE app.tenant_branding (
     CONSTRAINT tenant_branding_secondary_color_check CHECK ((secondary_color ~ '^#[0-9A-Fa-f]{6}$'::text)),
     CONSTRAINT tenant_branding_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text])))
 );
+
+
+--
+-- Name: v_program_overview; Type: VIEW; Schema: app; Owner: -
+--
+
+CREATE VIEW app.v_program_overview AS
+SELECT
+    NULL::uuid AS id,
+    NULL::text AS title,
+    NULL::text AS status,
+    NULL::uuid AS owner_membership_id,
+    NULL::date AS start_date,
+    NULL::date AS end_date,
+    NULL::numeric(18,2) AS budget_total,
+    NULL::bigint AS initiative_count,
+    NULL::bigint AS initiative_active_count,
+    NULL::bigint AS initiative_done_count,
+    NULL::numeric AS progress_percent;
 
 
 --
@@ -6412,6 +6556,43 @@ COMMENT ON TABLE auth.users IS 'Auth: Stores user login data within a secure sch
 --
 
 COMMENT ON COLUMN auth.users.is_sso_user IS 'Auth: Set this column to true when the account comes from SSO. These accounts can have duplicate emails.';
+
+
+--
+-- Name: webauthn_challenges; Type: TABLE; Schema: auth; Owner: -
+--
+
+CREATE TABLE auth.webauthn_challenges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    challenge_type text NOT NULL,
+    session_data jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    CONSTRAINT webauthn_challenges_challenge_type_check CHECK ((challenge_type = ANY (ARRAY['signup'::text, 'registration'::text, 'authentication'::text])))
+);
+
+
+--
+-- Name: webauthn_credentials; Type: TABLE; Schema: auth; Owner: -
+--
+
+CREATE TABLE auth.webauthn_credentials (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    credential_id bytea NOT NULL,
+    public_key bytea NOT NULL,
+    attestation_type text DEFAULT ''::text NOT NULL,
+    aaguid uuid,
+    sign_count bigint DEFAULT 0 NOT NULL,
+    transports jsonb DEFAULT '[]'::jsonb NOT NULL,
+    backup_eligible boolean DEFAULT false NOT NULL,
+    backed_up boolean DEFAULT false NOT NULL,
+    friendly_name text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone
+);
 
 
 --
@@ -8173,6 +8354,22 @@ ALTER TABLE ONLY auth.users
 
 
 --
+-- Name: webauthn_challenges webauthn_challenges_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+--
+
+ALTER TABLE ONLY auth.webauthn_challenges
+    ADD CONSTRAINT webauthn_challenges_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: webauthn_credentials webauthn_credentials_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+--
+
+ALTER TABLE ONLY auth.webauthn_credentials
+    ADD CONSTRAINT webauthn_credentials_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8830,6 +9027,13 @@ CREATE INDEX idx_key_results_org_objective ON app.key_results USING btree (organ
 
 
 --
+-- Name: idx_key_results_owner_membership; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_key_results_owner_membership ON app.key_results USING btree (organization_id, owner_membership_id) WHERE (owner_membership_id IS NOT NULL);
+
+
+--
 -- Name: idx_llm_model_health_status_org_checked; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -9355,6 +9559,13 @@ CREATE INDEX idx_target_metric_links_org_cycle_instance ON app.target_metric_lin
 
 
 --
+-- Name: okr_reviews_one_per_okr_session; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX okr_reviews_one_per_okr_session ON app.okr_reviews USING btree (organization_id, okr_cycle_id, cycle_instance_id, review_type) WHERE (okr_cycle_id IS NOT NULL);
+
+
+--
 -- Name: uq_analysis_item_link_cycle_instance_source_target_type; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -9852,6 +10063,34 @@ CREATE INDEX users_is_anonymous_idx ON auth.users USING btree (is_anonymous);
 
 
 --
+-- Name: webauthn_challenges_expires_at_idx; Type: INDEX; Schema: auth; Owner: -
+--
+
+CREATE INDEX webauthn_challenges_expires_at_idx ON auth.webauthn_challenges USING btree (expires_at);
+
+
+--
+-- Name: webauthn_challenges_user_id_idx; Type: INDEX; Schema: auth; Owner: -
+--
+
+CREATE INDEX webauthn_challenges_user_id_idx ON auth.webauthn_challenges USING btree (user_id);
+
+
+--
+-- Name: webauthn_credentials_credential_id_key; Type: INDEX; Schema: auth; Owner: -
+--
+
+CREATE UNIQUE INDEX webauthn_credentials_credential_id_key ON auth.webauthn_credentials USING btree (credential_id);
+
+
+--
+-- Name: webauthn_credentials_user_id_idx; Type: INDEX; Schema: auth; Owner: -
+--
+
+CREATE INDEX webauthn_credentials_user_id_idx ON auth.webauthn_credentials USING btree (user_id);
+
+
+--
 -- Name: idx_member_roles_role; Type: INDEX; Schema: rbac; Owner: -
 --
 
@@ -9940,6 +10179,27 @@ CREATE INDEX name_prefix_search ON storage.objects USING btree (name text_patter
 --
 
 CREATE UNIQUE INDEX vector_indexes_name_bucket_id_idx ON storage.vector_indexes USING btree (name, bucket_id);
+
+
+--
+-- Name: v_program_overview _RETURN; Type: RULE; Schema: app; Owner: -
+--
+
+CREATE OR REPLACE VIEW app.v_program_overview AS
+ SELECT p.id,
+    p.title,
+    p.status,
+    p.owner_membership_id,
+    p.start_date,
+    p.end_date,
+    p.budget_total,
+    count(i.id) AS initiative_count,
+    count(i.id) FILTER (WHERE (i.status = 'active'::text)) AS initiative_active_count,
+    count(i.id) FILTER (WHERE (i.status = ANY (ARRAY['completed'::text, 'archived'::text]))) AS initiative_done_count,
+    COALESCE(avg((i.progress_percent)::numeric), (0)::numeric) AS progress_percent
+   FROM (app.strategy_programs p
+     LEFT JOIN app.initiatives i ON ((i.program_id = p.id)))
+  GROUP BY p.id;
 
 
 --
@@ -10885,6 +11145,13 @@ CREATE TRIGGER trg_touch_cycle_schemes_updated_at BEFORE UPDATE ON app.cycle_sch
 --
 
 CREATE CONSTRAINT TRIGGER trg_validate_cycle_scheme_levels AFTER INSERT OR DELETE OR UPDATE ON app.cycle_scheme_levels DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION app.tg_validate_cycle_scheme_levels();
+
+
+--
+-- Name: strategy_programs trg_z_guard_program_activation; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_z_guard_program_activation BEFORE INSERT OR UPDATE ON app.strategy_programs FOR EACH ROW EXECUTE FUNCTION app.enforce_program_activation_has_active_initiative();
 
 
 --
@@ -12158,6 +12425,14 @@ ALTER TABLE ONLY app.key_results
 
 ALTER TABLE ONLY app.key_results
     ADD CONSTRAINT key_results_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: key_results key_results_owner_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.key_results
+    ADD CONSTRAINT key_results_owner_membership_id_fkey FOREIGN KEY (owner_membership_id) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
 
 
 --
@@ -13657,6 +13932,22 @@ ALTER TABLE ONLY auth.sso_domains
 
 
 --
+-- Name: webauthn_challenges webauthn_challenges_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+--
+
+ALTER TABLE ONLY auth.webauthn_challenges
+    ADD CONSTRAINT webauthn_challenges_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: webauthn_credentials webauthn_credentials_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+--
+
+ALTER TABLE ONLY auth.webauthn_credentials
+    ADD CONSTRAINT webauthn_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: member_roles member_roles_membership_id_fkey; Type: FK CONSTRAINT; Schema: rbac; Owner: -
 --
 
@@ -14026,14 +14317,14 @@ ALTER TABLE app.challenge_direction_links ENABLE ROW LEVEL SECURITY;
 -- Name: challenge_direction_links challenge_direction_links_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY challenge_direction_links_modify ON app.challenge_direction_links USING (app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)) WITH CHECK (app.has_permission(organization_id, 'nav.strategy-matrix.write'::text));
+CREATE POLICY challenge_direction_links_modify ON app.challenge_direction_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
 
 
 --
 -- Name: challenge_direction_links challenge_direction_links_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY challenge_direction_links_select ON app.challenge_direction_links FOR SELECT USING (app.has_permission(organization_id, 'nav.strategy-matrix.read'::text));
+CREATE POLICY challenge_direction_links_select ON app.challenge_direction_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
 
 
 --
@@ -14398,14 +14689,14 @@ ALTER TABLE app.initiative_key_result_links ENABLE ROW LEVEL SECURITY;
 -- Name: initiative_key_result_links initiative_key_result_links_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY initiative_key_result_links_modify ON app.initiative_key_result_links USING (app.has_permission(organization_id, 'traceability.write'::text)) WITH CHECK (app.has_permission(organization_id, 'traceability.write'::text));
+CREATE POLICY initiative_key_result_links_modify ON app.initiative_key_result_links USING ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'okr.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'traceability.write'::text) OR app.has_permission(organization_id, 'okr.write'::text)));
 
 
 --
 -- Name: initiative_key_result_links initiative_key_result_links_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY initiative_key_result_links_select ON app.initiative_key_result_links FOR SELECT USING (app.has_permission(organization_id, 'traceability.read'::text));
+CREATE POLICY initiative_key_result_links_select ON app.initiative_key_result_links FOR SELECT USING ((app.has_permission(organization_id, 'traceability.read'::text) OR app.has_permission(organization_id, 'okr.read'::text)));
 
 
 --
@@ -14817,10 +15108,24 @@ CREATE POLICY okr_reviews_modify ON app.okr_reviews USING (app.has_permission(or
 
 
 --
+-- Name: okr_reviews okr_reviews_modify_okr_write; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY okr_reviews_modify_okr_write ON app.okr_reviews USING (app.has_permission(organization_id, 'okr.write'::text)) WITH CHECK (app.has_permission(organization_id, 'okr.write'::text));
+
+
+--
 -- Name: okr_reviews okr_reviews_select; Type: POLICY; Schema: app; Owner: -
 --
 
 CREATE POLICY okr_reviews_select ON app.okr_reviews FOR SELECT USING (app.has_permission(organization_id, 'review.read'::text));
+
+
+--
+-- Name: okr_reviews okr_reviews_select_okr_read; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY okr_reviews_select_okr_read ON app.okr_reviews FOR SELECT USING (app.has_permission(organization_id, 'okr.read'::text));
 
 
 --
@@ -15306,14 +15611,14 @@ ALTER TABLE app.strategic_direction_objective_links ENABLE ROW LEVEL SECURITY;
 -- Name: strategic_direction_objective_links strategic_direction_objective_links_modify; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY strategic_direction_objective_links_modify ON app.strategic_direction_objective_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text)));
+CREATE POLICY strategic_direction_objective_links_modify ON app.strategic_direction_objective_links USING ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'okr.write'::text))) WITH CHECK ((app.has_permission(organization_id, 'nav.strategy-cycle.write'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.write'::text) OR app.has_permission(organization_id, 'okr.write'::text)));
 
 
 --
 -- Name: strategic_direction_objective_links strategic_direction_objective_links_select; Type: POLICY; Schema: app; Owner: -
 --
 
-CREATE POLICY strategic_direction_objective_links_select ON app.strategic_direction_objective_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'review.read'::text)));
+CREATE POLICY strategic_direction_objective_links_select ON app.strategic_direction_objective_links FOR SELECT USING ((app.has_permission(organization_id, 'nav.strategy-cycle.read'::text) OR app.has_permission(organization_id, 'nav.strategy-matrix.read'::text) OR app.has_permission(organization_id, 'review.read'::text) OR app.has_permission(organization_id, 'okr.read'::text)));
 
 
 --
@@ -16005,6 +16310,16 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0070'),
     ('0071'),
     ('0072'),
+    ('0073'),
+    ('0074'),
+    ('0075'),
+    ('0076'),
+    ('0077'),
+    ('0078'),
+    ('0079'),
     ('008'),
+    ('0080'),
+    ('0081'),
+    ('0082'),
     ('009'),
     ('010');

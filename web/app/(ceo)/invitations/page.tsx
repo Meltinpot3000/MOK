@@ -1,6 +1,5 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import Image from "next/image";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAppBaseUrl } from "@/lib/app-url";
@@ -12,6 +11,8 @@ import {
   sendInviteEmailViaSupabase,
   toQrDataUrl,
 } from "@/lib/invitations";
+import { InvitationsMembershipTable } from "@/components/invitations/InvitationsMembershipTable";
+import { InvitationsPendingTable } from "@/components/invitations/InvitationsPendingTable";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 
 type InvitationsPageProps = {
@@ -181,6 +182,9 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       })
     );
   }
+
+  const identityByUserIdRecord = Object.fromEntries(identityByUserId);
+  const roleCodesByMembershipRecord = Object.fromEntries(roleCodesByMembership);
 
   const invitationViews = await Promise.all(
     invitations.map(async (invite) => {
@@ -435,83 +439,16 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
           Pro Benutzer ist optional genau ein Verantwortlicher zuordenbar. Diese Zuordnung steuert kein RBAC.
         </p>
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 text-left text-zinc-500">
-                <th className="py-2 pr-3">Benutzer</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Rolle</th>
-                <th className="py-2 pr-3">Verantwortlicher</th>
-                <th className="py-2 pr-3">Aktion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {memberships.map((membership) => {
-                const roleCodes = roleCodesByMembership.get(membership.id) ?? [];
-                const responsible = Array.isArray(membership.responsible) ? membership.responsible[0] : membership.responsible;
-                const identity = identityByUserId.get(membership.user_id);
-                const displayEmail = identity?.email ?? responsible?.email ?? null;
-                const displayName =
-                  identity?.name ??
-                  responsible?.full_name ??
-                  (displayEmail ? displayEmail.split("@")[0] : "Unbekannter Benutzer");
-                return (
-                  <tr key={membership.id} className="border-b border-zinc-100 align-top">
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-zinc-900">{displayName}</div>
-                      <div className="text-xs text-zinc-500">{displayEmail ?? "E-Mail nicht verfuegbar"}</div>
-                    </td>
-                    <td className="py-3 pr-3">{membership.status}</td>
-                    <td className="py-3 pr-3">
-                      <form action={updateMembershipRole} className="flex items-center gap-2">
-                        <input type="hidden" name="membership_id" value={membership.id} />
-                        <select
-                          name="role_code"
-                          defaultValue={roleCodes[0] ?? ""}
-                          disabled={!canWrite}
-                          className="min-w-[200px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Rolle waehlen</option>
-                          {editableRoles.map((role) => (
-                            <option key={role.id} value={role.code}>
-                              {role.name} ({role.code})
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Speichern
-                        </button>
-                      </form>
-                    </td>
-                    <td className="py-3 pr-3">
-                      {responsible ? `${responsible.full_name}${responsible.role_title ? ` (${responsible.role_title})` : ""}` : "-"}
-                    </td>
-                    <td className="py-3 pr-3">
-                      <form action={assignResponsibleToMembership} className="flex items-center gap-2">
-                        <input type="hidden" name="membership_id" value={membership.id} />
-                        <select
-                          name="responsible_id"
-                          defaultValue={membership.responsible_id ?? ""}
-                          disabled={!canWrite}
-                          className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">Keine Zuordnung</option>
-                          {responsibles.map((entry) => (
-                            <option key={entry.id} value={entry.id}>
-                              {entry.full_name}{entry.role_title ? ` - ${entry.role_title}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                          Speichern
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <InvitationsMembershipTable
+            memberships={memberships}
+            identityByUserId={identityByUserIdRecord}
+            roleCodesByMembership={roleCodesByMembershipRecord}
+            responsibles={responsibles}
+            editableRoles={editableRoles}
+            canWrite={canWrite}
+            updateMembershipRole={updateMembershipRole}
+            assignResponsibleToMembership={assignResponsibleToMembership}
+          />
         </div>
         {memberships.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzer-Memberships vorhanden.</p>
@@ -558,72 +495,13 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Offene und versendete Benutzerzugaenge</h2>
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 text-left text-zinc-500">
-                <th className="py-2">E-Mail</th>
-                <th className="py-2">Rolle</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Anmeldelink</th>
-                <th className="py-2">QR</th>
-                <th className="py-2">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invitationViews.map((invite) => (
-                <tr key={invite.id} className="border-b border-zinc-100 align-top">
-                  <td className="py-3 pr-3">{invite.invited_email}</td>
-                  <td className="py-3 pr-3">{invite.role_code}</td>
-                  <td className="py-3 pr-3">
-                    <div>{invite.status}</div>
-                    <div className="text-xs text-zinc-500">
-                      Ablauf: {new Date(invite.expires_at).toLocaleDateString("de-DE")}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-3">
-                    <a href={invite.loginUrl} className="text-zinc-900 underline underline-offset-2">
-                      Anmeldelink
-                    </a>
-                    <div className="mt-1 break-all text-xs text-zinc-500">{invite.loginUrl}</div>
-                  </td>
-                  <td className="py-3 pr-3">
-                    <Image
-                      src={invite.qrDataUrl}
-                      alt={`QR fuer ${invite.invited_email}`}
-                      width={96}
-                      height={96}
-                      unoptimized
-                      className="h-24 w-24 rounded border border-zinc-200"
-                    />
-                  </td>
-                  <td className="py-3">
-                    <div className="flex flex-col gap-2">
-                      <form action={resendInvitation}>
-                        <input type="hidden" name="invite_id" value={invite.id} />
-                        <button
-                          type="submit"
-                          disabled={invite.status !== "pending" || !serviceRoleConfigured || !canWrite}
-                          className="brand-btn-secondary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Erneut senden
-                        </button>
-                      </form>
-                      <form action={revokeInvitation}>
-                        <input type="hidden" name="invite_id" value={invite.id} />
-                        <button
-                          type="submit"
-                          disabled={invite.status !== "pending" || !canWrite}
-                          className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Widerrufen
-                        </button>
-                      </form>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <InvitationsPendingTable
+            invitationViews={invitationViews}
+            canWrite={canWrite}
+            serviceRoleConfigured={serviceRoleConfigured}
+            resendInvitation={resendInvitation}
+            revokeInvitation={revokeInvitation}
+          />
         </div>
         {invitationViews.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzerzugaenge vorhanden.</p>

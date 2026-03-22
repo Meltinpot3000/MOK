@@ -43,10 +43,14 @@ import {
 import {
   clampScore1to5,
   computeChallengeScore,
-  computeDirectionScore,
   computeDirectionPriorityFromAssessment,
 } from "@/lib/strategy-cycle/scoring";
 import { normalizeContributionLevel } from "@/lib/strategy-cycle/coverage-level";
+import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
+import {
+  isStrategicDirectionActiveForPrograms,
+  normalizeStrategicDirectionStatus,
+} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 import {
   proposeMatrixProgramWithGemini,
   type MatrixProgramProposalResult,
@@ -3194,19 +3198,13 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
   const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
   const riskLevel = readSmallIntField(formData, "risk_score", 3);
   const relevanceLevel = strategicValueScore;
-  const directionScore = computeDirectionScore({
-    strategicValueScore,
-    capabilityFitScore,
-    feasibilityScore,
-    riskScore: riskLevel,
-  });
   const priority = computeDirectionPriorityFromAssessment({
     strategicValueScore,
     capabilityFitScore,
     feasibilityScore,
     riskScore: riskLevel,
   });
-  const status = String(formData.get("status") ?? "draft");
+  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
   const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("strategic_directions").insert({
@@ -3220,7 +3218,6 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     strategic_value_score: strategicValueScore,
     capability_fit_score: capabilityFitScore,
     feasibility_score: feasibilityScore,
-    direction_score: directionScore,
     status,
     created_by_membership_id: context.membershipId,
   });
@@ -3687,12 +3684,6 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
   const capabilityFitScore = readSmallIntField(formData, "capability_fit_score", 3);
   const feasibilityScore = readSmallIntField(formData, "feasibility_score", 3);
   const riskLevel = readSmallIntField(formData, "risk_score", 3);
-  const directionScore = computeDirectionScore({
-    strategicValueScore,
-    capabilityFitScore,
-    feasibilityScore,
-    riskScore: riskLevel,
-  });
   const priority = computeDirectionPriorityFromAssessment({
     strategicValueScore,
     capabilityFitScore,
@@ -3700,8 +3691,9 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     riskScore: riskLevel,
   });
   const description = String(formData.get("description") ?? "").trim() || null;
+  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
   const supabase = await createSupabaseServerClient();
-  await supabase
+  const { data: updatedRows, error } = await supabase
     .schema("app")
     .from("strategic_directions")
     .update({
@@ -3711,14 +3703,52 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
       strategic_value_score: strategicValueScore,
       capability_fit_score: capabilityFitScore,
       feasibility_score: feasibilityScore,
-      direction_score: directionScore,
       relevance_level: strategicValueScore,
       risk_level: riskLevel,
+      status,
     })
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
-    .eq("id", strategicDirectionId);
+    .eq("id", strategicDirectionId)
+    .select("id");
+
+  if (error) {
+    const msg = error.message ?? "";
+    console.error("[updateStrategicDirectionAssessment]", error.code, msg);
+    if (
+      msg.includes("direction-needs-challenge-link") ||
+      msg.includes("direction-needs-challenge-and-objective") ||
+      msg.includes("direction-needs-cluster-and-objective")
+    ) {
+      done(
+        "/strategy-cycle?l1=strategic-directions&l2=design&error=direction-active-requires-links"
+      );
+    }
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=direction-update-failed");
+  }
+  if (!updatedRows?.length) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=direction-not-found");
+  }
   done("/strategy-cycle?l1=strategic-directions&l2=design&success=assessment-updated");
+}
+
+/** Nur Lifecycle-Status; ohne Neuschreiben der Bewertungsfelder (fuer Tabellen-Dropdown). */
+export async function updateStrategicDirectionStatusInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const strategicDirectionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!strategicDirectionId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design");
+  }
+  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .update({ status })
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", strategicDirectionId);
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=direction-status");
 }
 
 export async function linkDirectionToChallengePredecessor(formData: FormData) {
@@ -3771,6 +3801,31 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
   }
   const supabase = await createSupabaseServerClient();
+  const { data: objective } = await supabase
+    .schema("app")
+    .from("objectives")
+    .select("id, status")
+    .eq("id", objectiveId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (!objective) {
+    finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&error=missing-link");
+    return;
+  }
+  const { data: existingLink } = await supabase
+    .schema("app")
+    .from("strategic_direction_objective_links")
+    .select("strategic_direction_id")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("strategic_direction_id", directionId)
+    .eq("objective_id", objectiveId)
+    .maybeSingle();
+  if (!isObjectiveEligibleForDirectionLink(objective.status) && !existingLink) {
+    finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&error=objective-not-linkable");
+    return;
+  }
   await supabase.schema("app").from("strategic_direction_objective_links").upsert(
     {
       organization_id: context.organizationId,
@@ -3885,7 +3940,7 @@ export async function generateMatrixProgramProposalAction(input: {
     supabase
       .schema("app")
       .from("strategic_directions")
-      .select("id,title,description")
+      .select("id,title,description,status")
       .eq("organization_id", context.organizationId)
       .eq("cycle_instance_id", context.cycleId)
       .eq("id", input.directionId)
@@ -3893,6 +3948,12 @@ export async function generateMatrixProgramProposalAction(input: {
   ]);
   if (chErr || !chRow) return { ok: false, error: "Herausforderung nicht gefunden." };
   if (dirErr || !dirRow) return { ok: false, error: "Stossrichtung nicht gefunden." };
+  if (!isStrategicDirectionActiveForPrograms(dirRow.status)) {
+    return {
+      ok: false,
+      error: "KI-Programmvorschlag nur fuer Stossrichtungen mit Status «Aktiv».",
+    };
+  }
 
   const { data: branding } = await supabase
     .schema("app")
@@ -3963,12 +4024,18 @@ export async function generateMatrixProgramProposalAction(input: {
   return { ok: true, proposal: result.proposal };
 }
 
+const STRATEGY_PROGRAM_STATUSES = ["draft", "active", "on_hold", "closed"] as const;
+
 export async function createStrategyProgramInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
   const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  const statusRaw = String(formData.get("status") ?? "draft").trim();
   if (!title || !directionId) {
     done("/strategy-cycle?l1=pips&l2=programme&error=missing-link");
+  }
+  if (!STRATEGY_PROGRAM_STATUSES.includes(statusRaw as (typeof STRATEGY_PROGRAM_STATUSES)[number])) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-update-invalid-status");
   }
   const strategicChallengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
   const programOriginRaw = String(formData.get("program_origin") ?? "manual").trim().toLowerCase();
@@ -3982,10 +4049,51 @@ export async function createStrategyProgramInCycle(formData: FormData) {
     .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const budgetRaw = Number(formData.get("budget") ?? 0);
-  const budget = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Number(budgetRaw.toFixed(2)) : null;
+  const budgetRaw = Number(formData.get("budget_total") ?? 0);
+  const budget_total =
+    Number.isFinite(budgetRaw) && budgetRaw > 0 ? Number(budgetRaw.toFixed(2)) : null;
+  const start_date = String(formData.get("start_date") ?? "").trim() || null;
+  const end_date = String(formData.get("end_date") ?? "").trim() || null;
+  if (start_date && end_date && start_date > end_date) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-dates");
+  }
+  const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
+  const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
+
   const supabase = createSupabaseAdminClient();
   if (!supabase) done("/strategy-cycle?l1=pips&l2=programme&error=program-insert-failed");
+
+  if (owner_membership_id) {
+    const { data: ownerRow } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", owner_membership_id)
+      .maybeSingle();
+    if (!ownerRow) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-owner");
+    }
+  }
+
+  const { data: directionRow, error: directionReadError } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .select("id, status")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", directionId)
+    .maybeSingle();
+
+  if (directionReadError || !directionRow) {
+    console.error("[createStrategyProgramInCycle] direction lookup", directionReadError?.message);
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-direction");
+  }
+
+  if (!isStrategicDirectionActiveForPrograms(directionRow.status)) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-direction-not-active");
+  }
+
   const { error } = await supabase.schema("app").from("strategy_programs").insert({
     organization_id: context.organizationId,
     cycle_instance_id: context.cycleId,
@@ -3997,11 +4105,19 @@ export async function createStrategyProgramInCycle(formData: FormData) {
     supported_objective_ids: supportedObjectiveIds.length > 0 ? supportedObjectiveIds : [],
     title,
     description: String(formData.get("description") ?? "").trim() || null,
-    timeline: String(formData.get("timeline") ?? "").trim() || null,
-    budget,
+    timeline: null,
+    start_date,
+    end_date,
+    budget_total,
+    status: statusRaw,
+    owner_membership_id,
     created_by_membership_id: context.membershipId,
   });
   if (error) {
+    const msg = `${error.message ?? ""} ${(error as { details?: string }).details ?? ""}`;
+    if (error.code === "P0001" || msg.includes("program-needs-active-initiative")) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-needs-active-initiative");
+    }
     if (error.code === "23505") {
       done("/strategy-cycle?l1=pips&l2=programme&error=program-duplicate-title");
     } else {
@@ -4010,6 +4126,97 @@ export async function createStrategyProgramInCycle(formData: FormData) {
     }
   }
   done("/strategy-cycle?l1=pips&l2=programme&success=program-created");
+}
+
+export async function updateStrategyProgramInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const programId = String(formData.get("program_id") ?? "").trim();
+  if (!programId) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-update-missing-id");
+  }
+  const title = String(formData.get("title") ?? "").trim();
+  const directionId = String(formData.get("strategic_direction_id") ?? "").trim();
+  if (!title || !directionId) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=missing-link");
+  }
+  const statusRaw = String(formData.get("status") ?? "").trim();
+  if (!STRATEGY_PROGRAM_STATUSES.includes(statusRaw as (typeof STRATEGY_PROGRAM_STATUSES)[number])) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-update-invalid-status");
+  }
+  const start_date = String(formData.get("start_date") ?? "").trim() || null;
+  const end_date = String(formData.get("end_date") ?? "").trim() || null;
+  if (start_date && end_date && start_date > end_date) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-dates");
+  }
+  const budgetRaw = Number(formData.get("budget_total") ?? 0);
+  const budget_total =
+    Number.isFinite(budgetRaw) && budgetRaw > 0 ? Number(budgetRaw.toFixed(2)) : null;
+  const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
+  const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
+  const description = String(formData.get("description") ?? "").trim() || null;
+
+  const supabase = await createSupabaseServerClient();
+
+  if (owner_membership_id) {
+    const { data: ownerRow } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", owner_membership_id)
+      .maybeSingle();
+    if (!ownerRow) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-owner");
+    }
+  }
+
+  const { data: directionRow, error: directionReadError } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .select("id, status")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", directionId)
+    .maybeSingle();
+
+  if (directionReadError || !directionRow) {
+    console.error("[updateStrategyProgramInCycle] direction lookup", directionReadError?.message);
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-direction");
+  }
+
+  if (!isStrategicDirectionActiveForPrograms(directionRow.status)) {
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-direction-not-active");
+  }
+
+  const { error } = await supabase
+    .schema("app")
+    .from("strategy_programs")
+    .update({
+      title,
+      description,
+      strategic_direction_id: directionId,
+      status: statusRaw,
+      start_date,
+      end_date,
+      budget_total,
+      owner_membership_id,
+    })
+    .eq("id", programId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId);
+
+  if (error) {
+    const msg = `${error.message ?? ""} ${(error as { details?: string }).details ?? ""}`;
+    if (error.code === "P0001" || msg.includes("program-needs-active-initiative")) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-needs-active-initiative");
+    }
+    if (error.code === "23505") {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-duplicate-title");
+    }
+    console.error("[updateStrategyProgramInCycle]", error.code, error.message);
+    done("/strategy-cycle?l1=pips&l2=programme&error=program-update-failed");
+  }
+  done("/strategy-cycle?l1=pips&l2=programme&success=program-updated");
 }
 
 export async function linkStrategicChallengeToIndustryInCycle(formData: FormData) {
@@ -4168,6 +4375,45 @@ export async function unlinkStrategicDirectionFromBusinessModelInCycle(formData:
   finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
+async function filterKeyResultIdsForCycleInstance(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  cycleInstanceId: string,
+  keyResultIds: string[]
+): Promise<Set<string>> {
+  if (keyResultIds.length === 0) return new Set();
+  const { data: krs } = await supabase
+    .schema("app")
+    .from("key_results")
+    .select("id, objective_id")
+    .eq("organization_id", organizationId)
+    .in("id", keyResultIds);
+  const objectiveIds = [...new Set((krs ?? []).map((k) => k.objective_id))];
+  if (objectiveIds.length === 0) return new Set();
+  const { data: objs } = await supabase
+    .schema("app")
+    .from("objectives")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .in("id", objectiveIds);
+  const validObjective = new Set((objs ?? []).map((o) => o.id));
+  return new Set(
+    (krs ?? []).filter((k) => validObjective.has(k.objective_id)).map((k) => k.id)
+  );
+}
+
+const PIP_INITIATIVE_CREATE_STATUSES = ["planned", "active", "on_hold", "completed"] as const;
+const INITIATIVE_DB_STATUSES = new Set([
+  "draft",
+  "planned",
+  "active",
+  "at_risk",
+  "on_hold",
+  "completed",
+  "archived",
+]);
+
 export async function createPipInitiativeInCycle(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect();
   const title = String(formData.get("title") ?? "").trim();
@@ -4180,28 +4426,268 @@ export async function createPipInitiativeInCycle(formData: FormData) {
   }
 
   const priority = readSmallIntField(formData, "priority", 3);
-  const status = String(formData.get("status") ?? "planned");
-  const linkedOkrs = String(formData.get("linked_okrs") ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const deliverables = String(formData.get("deliverables") ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const statusRaw = String(formData.get("status") ?? "planned").trim();
+  if (
+    !PIP_INITIATIVE_CREATE_STATUSES.includes(
+      statusRaw as (typeof PIP_INITIATIVE_CREATE_STATUSES)[number]
+    )
+  ) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-status");
+  }
+  const progressRaw = Number(formData.get("progress_percent") ?? 0);
+  const progress_percent = Math.min(
+    100,
+    Math.max(0, Math.round(Number.isFinite(progressRaw) ? progressRaw : 0))
+  );
+  const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
+  const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
+  const description = String(formData.get("description") ?? "").trim() || null;
+
   const supabase = await createSupabaseServerClient();
-  await supabase.schema("app").from("initiatives").insert({
-    organization_id: context.organizationId,
-    cycle_instance_id: context.cycleId,
-    program_id: programId,
-    title,
-    priority,
-    status,
-    linked_okrs: linkedOkrs,
-    deliverables,
-    created_by_membership_id: context.membershipId,
-  });
+
+  const { data: prog, error: progErr } = await supabase
+    .schema("app")
+    .from("strategy_programs")
+    .select("id, status")
+    .eq("id", programId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (progErr || !prog) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-program");
+  }
+  if (prog.status === "closed") {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-program-closed");
+  }
+
+  if (owner_membership_id) {
+    const { data: ownerRow } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", owner_membership_id)
+      .maybeSingle();
+    if (!ownerRow) {
+      done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-owner");
+    }
+  }
+
+  const { data: created, error: insErr } = await supabase
+    .schema("app")
+    .from("initiatives")
+    .insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      program_id: programId,
+      title,
+      description,
+      priority,
+      status: statusRaw,
+      progress_percent,
+      owner_membership_id,
+      linked_okrs: [],
+      deliverables: [],
+      created_by_membership_id: context.membershipId,
+    })
+    .select("id")
+    .single();
+
+  if (insErr || !created?.id) {
+    console.error("[createPipInitiativeInCycle]", insErr?.code, insErr?.message);
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-insert-failed");
+  }
+
+  const initiativeId = created.id;
+  const targetIds = [...new Set(formData.getAll("annual_target_id").map((v) => String(v).trim()).filter(Boolean))];
+  for (const annualTargetId of targetIds) {
+    await supabase.schema("app").from("initiative_target_links").upsert(
+      {
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        initiative_id: initiativeId,
+        annual_target_id: annualTargetId,
+        contribution_level: String(formData.get("contribution_level") ?? "medium"),
+        comment: null,
+      },
+      { onConflict: "cycle_instance_id,initiative_id,annual_target_id" }
+    );
+  }
+
+  const krIds = [...new Set(formData.getAll("key_result_id").map((v) => String(v).trim()).filter(Boolean))];
+  if (krIds.length > 0) {
+    const validKr = await filterKeyResultIdsForCycleInstance(
+      supabase,
+      context.organizationId,
+      context.cycleId,
+      krIds
+    );
+    const rows = krIds
+      .filter((id) => validKr.has(id))
+      .map((key_result_id) => ({
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        initiative_id: initiativeId,
+        key_result_id,
+        created_by_membership_id: context.membershipId,
+      }));
+    if (rows.length > 0) {
+      const { error: krErr } = await supabase.schema("app").from("initiative_key_result_links").insert(rows);
+      if (krErr) {
+        console.error("[createPipInitiativeInCycle] kr links", krErr.message);
+      }
+    }
+  }
+
   done("/strategy-cycle?l1=pips&l2=initiativen&success=initiative-created");
+}
+
+export async function updatePipInitiativeInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const initiativeId = String(formData.get("initiative_id") ?? "").trim();
+  if (!initiativeId) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-update-missing-id");
+  }
+  const title = String(formData.get("title") ?? "").trim();
+  const programId = String(formData.get("program_id") ?? "").trim();
+  if (!title || !programId) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=missing-link");
+  }
+  const statusRaw = String(formData.get("status") ?? "").trim();
+  if (!INITIATIVE_DB_STATUSES.has(statusRaw)) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-status");
+  }
+  const priority = readSmallIntField(formData, "priority", 3);
+  const progressRaw = Number(formData.get("progress_percent") ?? 0);
+  const progress_percent = Math.min(
+    100,
+    Math.max(0, Math.round(Number.isFinite(progressRaw) ? progressRaw : 0))
+  );
+  const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
+  const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
+  const description = String(formData.get("description") ?? "").trim() || null;
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("initiatives")
+    .select("id")
+    .eq("id", initiativeId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (!existing) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-not-found");
+  }
+
+  const { data: prog, error: progErr } = await supabase
+    .schema("app")
+    .from("strategy_programs")
+    .select("id, status")
+    .eq("id", programId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (progErr || !prog) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-program");
+  }
+  if (prog.status === "closed") {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-program-closed");
+  }
+
+  if (owner_membership_id) {
+    const { data: ownerRow } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", owner_membership_id)
+      .maybeSingle();
+    if (!ownerRow) {
+      done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-owner");
+    }
+  }
+
+  const { error: upErr } = await supabase
+    .schema("app")
+    .from("initiatives")
+    .update({
+      title,
+      program_id: programId,
+      status: statusRaw,
+      priority,
+      progress_percent,
+      owner_membership_id,
+      description,
+    })
+    .eq("id", initiativeId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId);
+
+  if (upErr) {
+    console.error("[updatePipInitiativeInCycle]", upErr.code, upErr.message);
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-update-failed");
+  }
+
+  await supabase
+    .schema("app")
+    .from("initiative_target_links")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("initiative_id", initiativeId);
+
+  const targetIds = [...new Set(formData.getAll("annual_target_id").map((v) => String(v).trim()).filter(Boolean))];
+  for (const annualTargetId of targetIds) {
+    await supabase.schema("app").from("initiative_target_links").upsert(
+      {
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        initiative_id: initiativeId,
+        annual_target_id: annualTargetId,
+        contribution_level: String(formData.get("contribution_level") ?? "medium"),
+        comment: null,
+      },
+      { onConflict: "cycle_instance_id,initiative_id,annual_target_id" }
+    );
+  }
+
+  await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("initiative_id", initiativeId);
+
+  const krIds = [...new Set(formData.getAll("key_result_id").map((v) => String(v).trim()).filter(Boolean))];
+  if (krIds.length > 0) {
+    const validKr = await filterKeyResultIdsForCycleInstance(
+      supabase,
+      context.organizationId,
+      context.cycleId,
+      krIds
+    );
+    const rows = krIds
+      .filter((id) => validKr.has(id))
+      .map((key_result_id) => ({
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        initiative_id: initiativeId,
+        key_result_id,
+        created_by_membership_id: context.membershipId,
+      }));
+    if (rows.length > 0) {
+      const { error: krErr } = await supabase.schema("app").from("initiative_key_result_links").insert(rows);
+      if (krErr) {
+        console.error("[updatePipInitiativeInCycle] kr links", krErr.message);
+        done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-update-failed");
+      }
+    }
+  }
+
+  done("/strategy-cycle?l1=pips&l2=initiativen&success=initiative-updated");
 }
 
 export async function linkInitiativeToTargetPredecessor(formData: FormData) {

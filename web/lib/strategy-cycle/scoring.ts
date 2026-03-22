@@ -38,8 +38,8 @@ export function computeDirectionScore(input: {
 }
 
 /**
- * Prioritaet 1–5 aus denselben vier Dimensionen wie der Richtungs-Score:
- * gewichteter Mittelwert, dann gerundet (Risiko wie im Score invertiert: hohes Risiko senkt die Prioritaet).
+ * Prioritaet = derselbe gewichtete Richtungs-Score wie zuvor in direction_score (1–5, zwei Nachkommastellen).
+ * Risiko invertiert wie in computeDirectionScore.
  */
 export function computeDirectionPriorityFromAssessment(input: {
   strategicValueScore: number;
@@ -47,8 +47,7 @@ export function computeDirectionPriorityFromAssessment(input: {
   feasibilityScore: number;
   riskScore: number;
 }): number {
-  const ds = computeDirectionScore(input);
-  return clampScore1to5(Math.round(ds));
+  return computeDirectionScore(input);
 }
 
 export function computeGapScore(input: {

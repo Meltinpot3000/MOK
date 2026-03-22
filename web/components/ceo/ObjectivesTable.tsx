@@ -95,6 +95,7 @@ export function ObjectivesTable({
     {
       id: "title",
       label: "Titel",
+      sortValue: (o: Objective) => o.title,
       render: (o: Objective) => (
         <span className="font-medium text-zinc-900">{o.title}</span>
       ),
@@ -103,6 +104,11 @@ export function ObjectivesTable({
       id: "creator",
       label: "Ersteller",
       defaultVisible: true,
+      sortValue: (o: Objective) =>
+        formatCreatorLabel(
+          o.created_by_source,
+          o.created_by_membership_id ? creatorDisplayNameByMembershipId?.[o.created_by_membership_id] : undefined
+        ),
       render: (o: Objective) =>
         formatCreatorLabel(
           o.created_by_source,
@@ -113,24 +119,28 @@ export function ObjectivesTable({
       id: "time_horizon",
       label: "Zeithorizont",
       defaultVisible: true,
+      sortValue: (o: Objective) => o.time_horizon ?? null,
       render: (o: Objective) => o.time_horizon ?? "-",
     },
     {
       id: "importance_score",
       label: "Importance",
       defaultVisible: true,
+      sortValue: (o: Objective) => o.importance_score ?? null,
       render: (o: Objective) => String(o.importance_score ?? "-"),
     },
     {
       id: "status",
       label: "Status",
       defaultVisible: true,
+      sortValue: (o: Objective) => o.status ?? null,
       render: (o: Objective) => o.status ?? "-",
     },
     {
       id: "ai_objective_score",
       label: "Sentinel✨ Score",
       defaultVisible: true,
+      sortValue: (o: Objective) => o.ai_objective_score ?? null,
       render: (o: Objective) =>
         o.ai_objective_score != null ? (o.ai_objective_score as number).toFixed(1) : "-",
     },
@@ -138,24 +148,37 @@ export function ObjectivesTable({
       id: "ai_tendency_internal_external",
       label: "Sentinel✨ Tendenz Intern/Extern",
       defaultVisible: true,
+      sortValue: (o: Objective) =>
+        formatInternalExternalTendency(o.ai_external_internal_classification),
       render: (o: Objective) => formatInternalExternalTendency(o.ai_external_internal_classification),
     },
     {
       id: "ai_tendency_exploit_explore",
       label: "Sentinel✨ Tendenz Exploit/Explore",
       defaultVisible: true,
+      sortValue: (o: Objective) =>
+        formatExploitExploreTendency(o.ai_exploit_explore_classification),
       render: (o: Objective) => formatExploitExploreTendency(o.ai_exploit_explore_classification),
     },
     {
       id: "ai_evaluation_status",
       label: "Sentinel✨ Status",
       defaultVisible: false,
+      sortValue: (o: Objective) => o.ai_evaluation_status ?? "not_run",
       render: (o: Objective) => o.ai_evaluation_status ?? "not_run",
     },
     {
       id: "industries",
       label: "Industrien",
       defaultVisible: true,
+      sortValue: (o: Objective) => {
+        const ids = industryIdsByObjective[o.id] ?? [];
+        const names = industries
+          .filter((i) => ids.includes(i.id))
+          .map((i) => i.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (o: Objective) => {
         const ids = industryIdsByObjective[o.id] ?? [];
         const linked = industries.filter((i) => ids.includes(i.id));
@@ -178,6 +201,14 @@ export function ObjectivesTable({
       id: "business_models",
       label: "Geschaeftsmodelle",
       defaultVisible: true,
+      sortValue: (o: Objective) => {
+        const ids = businessModelIdsByObjective[o.id] ?? [];
+        const names = businessModels
+          .filter((m) => ids.includes(m.id))
+          .map((m) => m.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (o: Objective) => {
         const ids = businessModelIdsByObjective[o.id] ?? [];
         const linked = businessModels.filter((m) => ids.includes(m.id));

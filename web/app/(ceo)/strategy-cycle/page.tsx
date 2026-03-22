@@ -6,7 +6,9 @@ import {
   createObjectiveInCycle,
   createStrategicChallengeInCycle,
   createPipInitiativeInCycle,
+  updatePipInitiativeInCycle,
   createStrategyProgramInCycle,
+  updateStrategyProgramInCycle,
   createAnalysisEntry,
   createStrategicDirectionInCycle,
   backfillEntryQuality,
@@ -19,7 +21,6 @@ import {
   generateLinkDrafts,
   linkDirectionToChallengePredecessor,
   linkDirectionToObjectiveInCycle,
-  linkInitiativeToTargetPredecessor,
   linkObjectiveToBusinessModelInCycle,
   linkObjectiveToIndustryInCycle,
   promoteChallengeCandidate,
@@ -44,7 +45,6 @@ import {
   unlinkStrategicDirectionFromIndustryInCycle,
   unlinkDirectionChallengePredecessor,
   unlinkDirectionFromObjectiveInCycle,
-  unlinkInitiativeTargetPredecessor,
   updateObjectiveInCycle,
   updateStrategicChallengeAssessment,
   updateStrategicDirectionAssessment,
@@ -56,23 +56,28 @@ import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
 import { LiveRangeInput } from "@/components/ceo/LiveRangeInput";
 import { ChallengeCreateForm } from "@/components/ceo/ChallengeCreateForm";
 import { ObjectiveCreateForm } from "@/components/ceo/ObjectiveCreateForm";
+import { StrategicDesignDashboard } from "@/components/ceo/StrategicDesignDashboard";
 import { StrategicDesignSummary } from "@/components/ceo/StrategicDesignSummary";
 import { StrategicDirectionsTable } from "@/components/ceo/StrategicDirectionsTable";
 import { ObjectivesTable } from "@/components/ceo/ObjectivesTable";
 import { ChallengesTable } from "@/components/ceo/ChallengesTable";
 import { AnalysisEntriesTable } from "@/components/ceo/AnalysisEntriesTable";
-import { ProgramCreateForm } from "@/components/ceo/ProgramCreateForm";
-import { InitiativeCreateForm } from "@/components/ceo/InitiativeCreateForm";
+import { ProgramPipWorkspace } from "@/components/ceo/ProgramPipWorkspace";
+import { InitiativePipWorkspace } from "@/components/ceo/InitiativePipWorkspace";
 import { RefreshOnSuccess } from "@/components/ceo/RefreshOnSuccess";
-import { ProgramsTable } from "@/components/ceo/ProgramsTable";
-import { InitiativesTable } from "@/components/ceo/InitiativesTable";
 import { ObjectiveAiPanel } from "@/components/ceo/ObjectiveAiPanel";
 import { ObjectiveBalanceScatterPlot } from "@/components/ceo/ObjectiveBalanceScatterPlot";
 import { PortfolioSummaryView } from "@/components/ceo/PortfolioSummaryView";
 import { getTenantBranding } from "@/lib/ceo/queries";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import {
+  STRATEGIC_DIRECTION_STATUSES,
+  STRATEGIC_DIRECTION_STATUS_LABELS_DE,
+  isStrategicDirectionActiveForPrograms,
+} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 import { computeStrategicDesignCorrelationSummary } from "@/lib/strategy-cycle/correlation";
+import { computeStrategicDesignInsights } from "@/lib/strategy-cycle/strategic-design-insights";
 import { readStrategyReferenceFieldsFromBrandingConfig } from "@/lib/strategy-cycle/strategy-reference";
 import {
   readCompanyKennzahlenFromBrandingConfig,
@@ -83,7 +88,11 @@ import {
   KERN_WERTSCHOEPFUNG_OPTIONS,
   TRANSFORMATION_STATUS_OPTIONS,
 } from "@/lib/strategy-cycle/company-info";
-import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
+import {
+  getStrategyCycleWorkspaceData,
+  type InitiativeKrLinkContext,
+  type ProgramOverviewViewRow,
+} from "@/lib/strategy-cycle/queries";
 import {
   readAnalysisNetworkLlmPolicy,
   isLlmFeatureEnabled,
@@ -134,7 +143,7 @@ const UNTERNEHMENSINFO_TABS = [
   "leadership",
   "sentinel-zusammenfassung",
 ] as const;
-const STRATEGIC_DESIGN_TABS = ["summary", "challenges", "design", "strategy-matrix"] as const;
+const STRATEGIC_DESIGN_TABS = ["dashboard", "summary", "challenges", "design", "strategy-matrix"] as const;
 const PIP_TABS = ["programme", "initiativen"] as const;
 
 const ANALYSIS_TYPES = [
@@ -297,10 +306,78 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "error", text: "Analyse-Eintrag wurde nicht gefunden oder ist nicht mehr verfuegbar." };
   if (error === "missing-link")
     return { type: "error", text: "Bitte gueltige Verknuepfung auswaehlen." };
+  if (error === "objective-not-linkable")
+    return {
+      type: "error",
+      text: "Nur Objectives mit Status «aktiv» oder «auffaellig» (at_risk) koennen mit einer Stossrichtung verknuepft werden.",
+    };
+  if (error === "direction-active-requires-links")
+    return {
+      type: "error",
+      text: "Status «Aktiv» ist nur moeglich, wenn diese Stossrichtung mindestens eine strategische Herausforderung als Vorgaenger verknuepft hat (Datenbankregel).",
+    };
+  if (error === "direction-update-failed")
+    return {
+      type: "error",
+      text: "Stossrichtung konnte nicht gespeichert werden (z. B. Berechtigung oder Validierung). Details siehe Server-Log.",
+    };
+  if (error === "direction-not-found")
+    return {
+      type: "error",
+      text: "Stossrichtung wurde nicht gefunden oder gehoert nicht zum aktiven Planungszyklus — Speichern hatte keine Wirkung.",
+    };
   if (error === "program-insert-failed")
     return { type: "error", text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
   if (error === "program-duplicate-title")
     return { type: "error", text: "Ein Programm mit diesem Titel existiert bereits in diesem Zyklus." };
+  if (error === "program-needs-active-initiative")
+    return {
+      type: "error",
+      text: "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugehoerige Initiative aktiv ist.",
+    };
+  if (error === "program-invalid-dates")
+    return {
+      type: "error",
+      text: "Das Enddatum darf nicht vor dem Startdatum liegen.",
+    };
+  if (error === "program-invalid-owner")
+    return { type: "error", text: "Der gewaehlte Owner gehoert nicht zu dieser Organisation." };
+  if (error === "program-invalid-direction")
+    return {
+      type: "error",
+      text: "Die strategische Stossrichtung wurde nicht gefunden oder gehoert nicht zu diesem Zyklus.",
+    };
+  if (error === "program-direction-not-active")
+    return {
+      type: "error",
+      text: "Nur Stossrichtungen mit Status «Aktiv» koennen fuer Programme verwendet werden.",
+    };
+  if (error === "program-update-failed")
+    return {
+      type: "error",
+      text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen und Eingaben pruefen.",
+    };
+  if (error === "program-update-invalid-status")
+    return { type: "error", text: "Ungueltiger Programm-Status." };
+  if (error === "initiative-invalid-status")
+    return { type: "error", text: "Ungueltiger Initiative-Status." };
+  if (error === "initiative-program-closed")
+    return {
+      type: "error",
+      text: "Geschlossene Programme koennen fuer neue oder geaenderte Initiativen nicht gewaehlt werden.",
+    };
+  if (error === "initiative-invalid-program")
+    return { type: "error", text: "Programm wurde nicht gefunden oder gehoert nicht zu diesem Zyklus." };
+  if (error === "initiative-invalid-owner")
+    return { type: "error", text: "Der gewaehlte Owner gehoert nicht zu dieser Organisation." };
+  if (error === "initiative-insert-failed")
+    return { type: "error", text: "Initiative konnte nicht erstellt werden." };
+  if (error === "initiative-update-failed")
+    return { type: "error", text: "Initiative konnte nicht gespeichert werden." };
+  if (error === "initiative-update-missing-id")
+    return { type: "error", text: "Initiative-ID fehlt — bitte erneut auswaehlen." };
+  if (error === "initiative-not-found")
+    return { type: "error", text: "Initiative wurde nicht gefunden." };
   if (error === "objective-insert-failed")
     return { type: "error", text: "Objective konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
   if (error === "ai-evaluation-disabled")
@@ -370,11 +447,18 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "direction-deleted")
     return { type: "success", text: "Strategische Stossrichtung wurde geloescht." };
   if (success === "initiative-created")
-    return { type: "success", text: "PIP wurde erstellt." };
+    return { type: "success", text: "Initiative wurde erstellt." };
+  if (success === "initiative-updated")
+    return { type: "success", text: "Initiative wurde aktualisiert." };
   if (success === "program-created")
     return { type: "success", text: "Programm wurde erstellt." };
+  if (success === "program-updated")
+    return { type: "success", text: "Programm wurde aktualisiert." };
   if (success === "assessment-updated")
-    return { type: "success", text: "Relevanz- und Risiko-Bewertung wurde gespeichert." };
+    return {
+      type: "success",
+      text: "Stossrichtung wurde gespeichert (Bewertungen, Status, Text).",
+    };
   if (success === "linked")
     return { type: "success", text: "Predecessor-Verknuepfung wurde gespeichert." };
   if (success === "unlinked")
@@ -419,12 +503,18 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const legacyTab = resolvedSearchParams.tab;
   let requestedL1 = String(resolvedSearchParams.l1 ?? "").trim();
   if (requestedL1 === "mission-vision-culture-values") requestedL1 = "unternehmensinfo";
-  const requestedL2 = String(resolvedSearchParams.l2 ?? legacyTab ?? "summary").trim();
+  const rawL2Param = resolvedSearchParams.l2 ?? legacyTab;
   const activeL1 = L1_TABS.includes(requestedL1 as (typeof L1_TABS)[number])
     ? requestedL1
     : legacyTab
       ? "corporate-strategy"
       : "unternehmensinfo";
+  const requestedL2 =
+    rawL2Param != null && String(rawL2Param).trim() !== ""
+      ? String(rawL2Param).trim()
+      : activeL1 === "strategic-directions"
+        ? "dashboard"
+        : "summary";
   const activeUnternehmensinfoTab =
     activeL1 === "unternehmensinfo" &&
     UNTERNEHMENSINFO_TABS.includes(requestedL2 as (typeof UNTERNEHMENSINFO_TABS)[number])
@@ -436,9 +526,10 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ? requestedL2
       : "summary";
   const activeStrategicTab =
-    activeL1 === "strategic-directions" &&
-    STRATEGIC_DESIGN_TABS.includes(requestedL2 as (typeof STRATEGIC_DESIGN_TABS)[number])
-      ? requestedL2
+    activeL1 === "strategic-directions"
+      ? STRATEGIC_DESIGN_TABS.includes(requestedL2 as (typeof STRATEGIC_DESIGN_TABS)[number])
+        ? (requestedL2 as (typeof STRATEGIC_DESIGN_TABS)[number])
+        : "dashboard"
       : "summary";
   const activePipTab =
     activeL1 === "pips" && PIP_TABS.includes(requestedL2 as (typeof PIP_TABS)[number])
@@ -580,6 +671,38 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     directionIdsByChallengeId.set(link.strategic_challenge_id, current);
   }
   const programById = new Map((workspace.programs ?? []).map((p) => [p.id, p] as const));
+  const programOverviewById = new Map<string, ProgramOverviewViewRow>(
+    ((workspace.programOverviews ?? []) as ProgramOverviewViewRow[]).map((row) => [row.id, row])
+  );
+  const initiativesByProgramId: Record<
+    string,
+    Array<{
+      id: string;
+      title: string;
+      status: string | null;
+      priority: number | null;
+      progress_percent: number | null;
+    }>
+  > = {};
+  for (const initiative of workspace.initiatives ?? []) {
+    const pid = initiative.program_id;
+    if (!pid) continue;
+    const cur = initiativesByProgramId[pid] ?? [];
+    cur.push({
+      id: initiative.id,
+      title: initiative.title,
+      status: initiative.status ?? null,
+      priority: initiative.priority ?? null,
+      progress_percent:
+        (initiative as { progress_percent?: number | null }).progress_percent ?? null,
+    });
+    initiativesByProgramId[pid] = cur;
+  }
+  for (const key of Object.keys(initiativesByProgramId)) {
+    initiativesByProgramId[key].sort(
+      (a, b) => (a.priority ?? 999) - (b.priority ?? 999)
+    );
+  }
   const directionIdsWithInitiatives = new Set<string>();
   for (const initiative of workspace.initiatives ?? []) {
     const program = initiative.program_id ? programById.get(initiative.program_id) : null;
@@ -627,6 +750,46 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     current.push(link.annual_target_id);
     targetIdsByInitiative.set(link.initiative_id, current);
   }
+  const annualTargetTitleById = Object.fromEntries(
+    (workspace.annualTargets ?? []).map((t) => [t.id, t.title] as const)
+  );
+  const initiativePipRows = (workspace.initiatives ?? []).map((raw) => {
+    const i = raw as typeof raw & {
+      description?: string | null;
+      owner_membership_id?: string | null;
+      progress_percent?: number | null;
+      kr_link_contexts?: InitiativeKrLinkContext[];
+      linked_okrs?: unknown;
+      deliverables?: unknown;
+    };
+    const atIds = [...new Set(targetIdsByInitiative.get(i.id) ?? [])];
+    const krContexts = i.kr_link_contexts ?? [];
+    const krIds = krContexts.map((c) => c.key_result_id);
+    const okrLegacy = Array.isArray(i.linked_okrs) ? (i.linked_okrs as string[]) : null;
+    const delLegacy = Array.isArray(i.deliverables) ? (i.deliverables as string[]) : null;
+    return {
+      id: i.id,
+      title: i.title,
+      status: i.status,
+      priority: i.priority,
+      program_id: i.program_id,
+      progress_percent: i.progress_percent ?? 0,
+      owner_membership_id: i.owner_membership_id ?? null,
+      description: i.description ?? null,
+      kr_link_contexts: krContexts,
+      annual_target_ids: atIds,
+      key_result_ids: krIds,
+      annual_target_titles: atIds.map((tid) => annualTargetTitleById[tid] ?? tid),
+      legacy_linked_okrs: okrLegacy,
+      legacy_deliverables: delLegacy,
+    };
+  });
+  const programsOpenForInitiatives = (workspace.programs ?? [])
+    .filter((p) => String((p as { status?: string }).status ?? "") !== "closed")
+    .map((p) => ({ id: p.id, title: p.title }));
+  const ownerLabelByPipMembershipId = Object.fromEntries(
+    (workspace.programOwnerOptions ?? []).map((o) => [o.id, o.label] as const)
+  );
   const programsByDirectionId = new Map<string, Array<{ id: string; title: string }>>();
   for (const program of workspace.programs ?? []) {
     const directionId = String(program.strategic_direction_id ?? "");
@@ -642,7 +805,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
     .slice(0, 5);
   const topDirections = [...(workspace.strategicDirections ?? [])]
-    .sort((a, b) => Number(b.direction_score ?? 0) - Number(a.direction_score ?? 0))
+    .sort((a, b) => Number(b.priority ?? 0) - Number(a.priority ?? 0))
     .slice(0, 5);
   const uncoveredChallenges = (workspace.challenges ?? []).filter(
     (challenge) => (directionCountByChallengeId.get(challenge.id) ?? 0) === 0
@@ -703,8 +866,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     directions: (workspace.strategicDirections ?? []).map((d) => ({
       id: d.id,
       title: d.title,
-      direction_score: d.direction_score,
-      priority: (d as { priority?: number | string | null }).priority ?? null,
+      priority: d.priority ?? null,
+      status: d.status ?? null,
     })),
     challengeDirectionLinks: (workspace.challengeDirectionLinks ?? []).map((link) => ({
       strategic_challenge_id: link.strategic_challenge_id,
@@ -717,6 +880,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       title: o.title,
       importance_score: (o as { importance_score?: number | null }).importance_score ?? null,
       ai_objective_score: (o as { ai_objective_score?: number | string | null }).ai_objective_score ?? null,
+      status: (o as { status?: string | null }).status ?? null,
     })),
   });
   const strategicDesignSummary = computeStrategicDesignCorrelationSummary({
@@ -728,6 +892,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     challengeDirectionLinks: workspace.challengeDirectionLinks ?? [],
     directionObjectiveLinks: workspace.directionObjectiveLinks ?? [],
     overrides: workspace.correlationStatusOverrides ?? [],
+  });
+  const strategicDesignInsights = computeStrategicDesignInsights({
+    challenges: workspace.challenges ?? [],
+    objectives: workspace.objectives ?? [],
+    strategicDirections: workspace.strategicDirections ?? [],
+    challengeDirectionLinks: workspace.challengeDirectionLinks ?? [],
+    directionObjectiveLinks: workspace.directionObjectiveLinks ?? [],
+    correlationSummary: strategicDesignSummary,
   });
 
   return (
@@ -824,13 +996,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           <div className="flex flex-wrap gap-2">
             {STRATEGIC_DESIGN_TABS.map((tab) => {
               const label =
-                tab === "summary"
-                  ? "Zusammenfassung"
-                  : tab === "challenges"
-                    ? "Strategische Herausforderungen"
-                    : tab === "strategy-matrix"
-                      ? "Strategie-Matrix"
-                      : "Strategische Stossrichtungen";
+                tab === "dashboard"
+                  ? "Übersicht"
+                  : tab === "summary"
+                    ? "Korrelationsanalyse"
+                    : tab === "challenges"
+                      ? "Strategische Herausforderungen"
+                      : tab === "strategy-matrix"
+                        ? "Strategie-Matrix"
+                        : "Strategische Stossrichtungen";
               return (
                 <a
                   key={tab}
@@ -1239,6 +1413,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
       {activeL1 === "strategic-directions" ? (
         <section className="space-y-4">
+          {activeStrategicTab === "dashboard" ? (
+            <StrategicDesignDashboard insights={strategicDesignInsights} />
+          ) : null}
           {activeStrategicTab === "summary" ? (
             <StrategicDesignSummary
               canWrite={canWrite}
@@ -1444,6 +1621,20 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                   />
                 </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-700">Lifecycle-Status</label>
+                  <select
+                    name="status"
+                    defaultValue="draft"
+                    className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    {STRATEGIC_DIRECTION_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button type="submit" disabled={!canWrite} className="brand-btn w-full px-4 py-2 text-sm">
                   Stossrichtung speichern
                 </button>
@@ -1454,8 +1645,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               <div className="mt-4">
                 <StrategicDirectionsTable
                 directions={workspace.strategicDirections ?? []}
-                challenges={challengeOptions}
-                objectives={workspace.objectives ?? []}
+                challenges={(workspace.challenges ?? []).map((c) => ({
+                  id: c.id,
+                  title: c.title,
+                }))}
+                objectives={(workspace.objectives ?? []).map((o) => ({
+                  id: o.id,
+                  title: o.title,
+                  status: (o as { status?: string | null }).status ?? null,
+                }))}
                 industries={workspace.availableDimensions.industries ?? []}
                 businessModels={workspace.availableDimensions.businessModels ?? []}
                 programsByDirectionId={Object.fromEntries(programsByDirectionId)}
@@ -1494,74 +1692,77 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       {activeL1 === "pips" ? (
         <section className="space-y-4">
           {activePipTab === "programme" ? (
-            <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-              <article className="brand-card p-6">
-                <h2 className="text-lg font-semibold text-zinc-900">Programm erfassen</h2>
-                <ProgramCreateForm
-                  canWrite={canWrite}
-                  action={createStrategyProgramInCycle}
-                  strategicDirections={workspace.strategicDirections ?? []}
-                />
-              </article>
-              <article className="brand-card p-6">
-                <h3 className="text-base font-semibold text-zinc-900">Programme</h3>
-                <div className="mt-4">
-                  <ProgramsTable
-                    programs={(workspace.programs ?? []).map((p) => ({
-                      id: p.id,
-                      title: p.title,
-                      description: p.description,
-                      strategic_direction_id: p.strategic_direction_id,
-                      budget: p.budget,
-                      timeline: p.timeline,
-                    }))}
-                    directionTitleById={Object.fromEntries(
-                      (workspace.strategicDirections ?? []).map((d) => [d.id, d.title])
-                    )}
-                  />
-                </div>
-              </article>
-            </section>
+            <ProgramPipWorkspace
+              canWrite={canWrite}
+              createProgramAction={createStrategyProgramInCycle}
+              updateProgramAction={updateStrategyProgramInCycle}
+              strategicDirectionsForPrograms={(workspace.strategicDirections ?? []).filter((d) =>
+                isStrategicDirectionActiveForPrograms(d.status)
+              )}
+              strategicDirectionsAll={(workspace.strategicDirections ?? []).map((d) => ({
+                id: d.id,
+                title: d.title,
+              }))}
+              ownerOptions={workspace.programOwnerOptions ?? []}
+              programRows={(workspace.programs ?? []).map((p) => {
+                const o = programOverviewById.get(p.id);
+                const pr = p as {
+                  id: string;
+                  title: string;
+                  description?: string | null;
+                  strategic_direction_id?: string | null;
+                  owner_membership_id?: string | null;
+                  budget_total?: number | null;
+                  status?: string | null;
+                  start_date?: string | null;
+                  end_date?: string | null;
+                };
+                return {
+                  id: pr.id,
+                  title: pr.title,
+                  description: pr.description ?? null,
+                  strategic_direction_id: pr.strategic_direction_id ?? null,
+                  owner_membership_id: pr.owner_membership_id ?? null,
+                  budget_total: pr.budget_total ?? null,
+                  status: pr.status ?? "draft",
+                  start_date: pr.start_date ?? null,
+                  end_date: pr.end_date ?? null,
+                  initiative_count: Number(o?.initiative_count ?? 0),
+                  initiative_active_count: Number(o?.initiative_active_count ?? 0),
+                  initiative_done_count: Number(o?.initiative_done_count ?? 0),
+                  progress_percent_from_initiatives: Number(o?.progress_percent ?? 0),
+                };
+              })}
+              directionTitleById={Object.fromEntries(
+                (workspace.strategicDirections ?? []).map((d) => [d.id, d.title])
+              )}
+              initiativesByProgramId={initiativesByProgramId}
+            />
           ) : null}
 
           {activePipTab === "initiativen" ? (
-            <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-              <article className="brand-card p-6">
-                <h2 className="text-lg font-semibold text-zinc-900">Initiative erfassen</h2>
-                <InitiativeCreateForm
-                  canWrite={canWrite}
-                  action={createPipInitiativeInCycle}
-                  programs={(workspace.programs ?? []).map((p) => ({ id: p.id, title: p.title }))}
-                />
-              </article>
-              <article className="brand-card p-6">
-                <h3 className="text-base font-semibold text-zinc-900">Initiativen</h3>
-                <div className="mt-4">
-                  <InitiativesTable
-                    initiatives={(workspace.initiatives ?? []).map((i) => ({
-                      id: i.id,
-                      title: i.title,
-                      status: i.status,
-                      priority: i.priority,
-                      program_id: i.program_id,
-                      linked_okrs: i.linked_okrs,
-                      deliverables: i.deliverables,
-                    }))}
-                    programTitleById={Object.fromEntries(
-                      (workspace.programs ?? []).map((p) => [p.id, p.title])
-                    )}
-                    annualTargets={(workspace.annualTargets ?? []).map((t) => ({
-                      id: t.id,
-                      title: t.title,
-                    }))}
-                    targetIdsByInitiative={Object.fromEntries(targetIdsByInitiative)}
-                    canWrite={canWrite}
-                    linkInitiativeToTargetPredecessor={linkInitiativeToTargetPredecessor}
-                    unlinkInitiativeTargetPredecessor={unlinkInitiativeTargetPredecessor}
-                  />
-                </div>
-              </article>
-            </section>
+            <InitiativePipWorkspace
+              canWrite={canWrite}
+              createInitiativeAction={createPipInitiativeInCycle}
+              updateInitiativeAction={updatePipInitiativeInCycle}
+              programsOpenForInitiatives={programsOpenForInitiatives}
+              programsAll={(workspace.programs ?? []).map((p) => ({
+                id: p.id,
+                title: p.title,
+                status: String((p as { status?: string }).status ?? "draft"),
+              }))}
+              ownerOptions={workspace.programOwnerOptions ?? []}
+              annualTargets={(workspace.annualTargets ?? []).map((t) => ({
+                id: t.id,
+                title: t.title,
+              }))}
+              keyResultOptions={workspace.pipKeyResultOptions ?? []}
+              initiativeRows={initiativePipRows}
+              programTitleById={Object.fromEntries(
+                (workspace.programs ?? []).map((p) => [p.id, p.title])
+              )}
+              ownerLabelByMembershipId={ownerLabelByPipMembershipId}
+            />
           ) : null}
         </section>
       ) : null}
@@ -1639,7 +1840,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 topDirections.map((direction) => (
                   <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
                     <p className="font-medium text-zinc-900">{direction.title}</p>
-                    <p className="text-zinc-600">Score {Number(direction.direction_score ?? 0).toFixed(2)}</p>
+                    <p className="text-zinc-600">Prioritaet {Number(direction.priority ?? 0).toFixed(2)}</p>
                   </div>
                 ))
               )}

@@ -192,14 +192,18 @@ export async function getReviewDashboardData(
     supabase
       .schema("app")
       .from("initiatives")
-      .select("id, title, status, program_id, start_date, end_date")
+      .select(
+        "id, title, status, program_id, start_date, end_date, execution_health_override, review_comment"
+      )
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIdsForReview),
     programs.length > 0
       ? supabase
           .schema("app")
           .from("initiatives")
-          .select("id, title, status, program_id, start_date, end_date")
+          .select(
+            "id, title, status, program_id, start_date, end_date, execution_health_override, review_comment"
+          )
           .eq("organization_id", organizationId)
           .in("program_id", programs.map((p) => p.id))
       : Promise.resolve({ data: [] }),
@@ -248,6 +252,8 @@ export async function getReviewDashboardData(
     program_id: string | null;
     start_date: string | null;
     end_date: string | null;
+    execution_health_override: string | null;
+    review_comment: string | null;
   }>;
   const initiativesByProgram = (initiativesByProgramResult.data ?? []) as Array<{
     id: string;
@@ -256,6 +262,8 @@ export async function getReviewDashboardData(
     program_id: string | null;
     start_date: string | null;
     end_date: string | null;
+    execution_health_override: string | null;
+    review_comment: string | null;
   }>;
   const initiativesById = new Map(initiativesByCycle.map((i) => [i.id, i]));
   for (const i of initiativesByProgram) {
@@ -333,7 +341,7 @@ export async function getReviewDashboardData(
     status: i.status,
     program_id: i.program_id,
     healthStatus: deriveInitiativeHealth(i),
-    reviewComment: null,
+    reviewComment: i.review_comment,
   }));
 
   const reviewPrograms: ReviewProgram[] = programs.map((p) => {
@@ -388,6 +396,12 @@ export async function getReviewDashboardData(
     summary,
   };
 }
+
+export {
+  getReviewCycleData,
+  type ReviewCycleData,
+  type ReviewCycleAnnualTargetBrief,
+} from "./review-cycle-data";
 
 export async function getReviewSnapshots(
   organizationId: string,

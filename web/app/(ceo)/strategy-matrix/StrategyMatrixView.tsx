@@ -20,6 +20,12 @@ import {
   upsertCell,
 } from "@/app/(ceo)/strategy-matrix/actions";
 import { getMatrixWorkspaceData } from "@/lib/strategy-matrix/queries";
+import {
+  STRATEGIC_DIRECTION_STATUSES,
+  STRATEGIC_DIRECTION_STATUS_LABELS_DE,
+  isStrategicDirectionVisibleInProgramMatrix,
+  normalizeStrategicDirectionStatus,
+} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 
 type StrategyMatrixViewProps = {
   drawerDirectionId?: string | null;
@@ -76,6 +82,10 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
   const drawerDirection =
     drawerDirectionId && data.directions.find((direction) => direction.id === drawerDirectionId);
   const drawerTargets = drawerDirection ? targetsByDirection.get(drawerDirection.id) ?? [] : [];
+
+  const visibleDirections = data.directions.filter((direction) =>
+    isStrategicDirectionVisibleInProgramMatrix(direction.status)
+  );
 
   return (
     <div className="space-y-6">
@@ -167,13 +177,16 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   </select>
                   <input name="grouping" placeholder="Gruppierung" className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input name="priority" type="number" min={1} max={5} defaultValue={3} className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
+                <p className="text-[11px] text-zinc-500">
+                  Prioritaet (Score) wird aus den vier Bewertungen im Strategiezyklus berechnet; bei Neuanlage hier zunaechst 3,00 (Default-Bewertungen).
+                </p>
+                <div className="grid grid-cols-2 gap-2">
                   <select name="status" defaultValue="draft" className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm">
-                    <option value="draft">Entwurf</option>
-                    <option value="active">Aktiv</option>
-                    <option value="on_hold">Pausiert</option>
-                    <option value="completed">Abgeschlossen</option>
+                    {STRATEGIC_DIRECTION_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
+                      </option>
+                    ))}
                   </select>
                   <input name="display_order" type="number" defaultValue={data.directions.length + 1} className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
                 </div>
@@ -201,7 +214,12 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-200 align-top text-left">
-                <th className="py-2 pr-3 min-w-[280px]">Strategische Stossrichtung (Zeilen)</th>
+                <th className="py-2 pr-3 min-w-[280px]">
+                  Strategische Stossrichtung (Zeilen)
+                  <p className="mt-1 max-w-[280px] text-[11px] font-normal text-zinc-500">
+                    Nur Genehmigt, Aktiv oder Pausiert. Entwuerfe und Abgeschlossene sind ausgeblendet.
+                  </p>
+                </th>
                 {data.challenges.map((challenge) => (
                   <th key={challenge.id} className="py-2 pr-3 min-w-[240px]">
                     <form action={updateChallenge} className="brand-surface p-2 space-y-2">
@@ -230,7 +248,19 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
               </tr>
             </thead>
             <tbody>
-              {data.directions.map((direction) => {
+              {visibleDirections.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={2 + data.challenges.length}
+                    className="py-6 text-sm text-zinc-600"
+                  >
+                    {data.directions.length === 0
+                      ? "Keine strategischen Stossrichtungen im Dashboard."
+                      : "Keine Stossrichtung mit Status Genehmigt, Aktiv oder Pausiert — diese Matrix zeigt nur diese Status."}
+                  </td>
+                </tr>
+              ) : null}
+              {visibleDirections.map((direction) => {
                 const targets = targetsByDirection.get(direction.id) ?? [];
                 const primaryTarget =
                   targets.find((target) => target.is_primary) ??
@@ -239,10 +269,19 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                 const additionalTargets = primaryTarget
                   ? targets.filter((target) => target.id !== primaryTarget.id)
                   : targets;
+                const dirStatus = normalizeStrategicDirectionStatus(direction.status);
 
                 return (
                   <tr key={direction.id} className="border-b border-zinc-100 align-top">
                     <td className="py-3 pr-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span
+                          className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium leading-none text-zinc-600"
+                          title="Status der Stossrichtung"
+                        >
+                          {STRATEGIC_DIRECTION_STATUS_LABELS_DE[dirStatus]}
+                        </span>
+                      </div>
                       <form action={updateDirection} className="brand-surface p-2 space-y-2">
                         <input type="hidden" name="direction_id" value={direction.id} />
                         <input name="title" defaultValue={direction.title} className="w-full rounded border border-zinc-300 px-2 py-1 text-xs" />
@@ -257,16 +296,23 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                           </select>
                           <input name="grouping" defaultValue={direction.grouping ?? ""} placeholder="Gruppierung" className="rounded border border-zinc-300 px-1 py-1 text-xs" />
                         </div>
-                        <div className="grid grid-cols-3 gap-1">
-                          <input name="priority" type="number" min={1} max={5} defaultValue={direction.priority} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                          <select name="status" defaultValue={direction.status} className="rounded border border-zinc-300 px-1 py-1 text-xs">
-                            <option value="draft">Entwurf</option>
-                            <option value="active">Aktiv</option>
-                            <option value="on_hold">Pausiert</option>
-                            <option value="completed">Abgeschlossen</option>
+                        <div className="grid grid-cols-2 gap-1">
+                          <select
+                            name="status"
+                            defaultValue={normalizeStrategicDirectionStatus(direction.status)}
+                            className="rounded border border-zinc-300 px-1 py-1 text-xs"
+                          >
+                            {STRATEGIC_DIRECTION_STATUSES.map((s) => (
+                              <option key={s} value={s}>
+                                {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
+                              </option>
+                            ))}
                           </select>
-                          <input name="display_order" type="number" defaultValue={data.directions.findIndex((item) => item.id === direction.id) + 1} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
+                          <input name="display_order" type="number" defaultValue={visibleDirections.findIndex((item) => item.id === direction.id) + 1} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
                         </div>
+                        <p className="text-[11px] text-zinc-500">
+                          Prioritaet (Score): {Number(direction.priority ?? 0).toFixed(2)} — wird aus Bewertungen im Strategiezyklus neu berechnet, wenn du die Zeile speicherst.
+                        </p>
                         <div className="text-xs text-zinc-500">
                           Verantwortlich: {direction.owner_membership_id ? ownerNameByMembership.get(direction.owner_membership_id) ?? "-" : "nicht gesetzt"}
                         </div>

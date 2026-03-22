@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getMatrixCycleContextOrRedirect } from "@/lib/strategy-matrix/cycle-context";
+import { normalizeStrategicDirectionStatus } from "@/lib/strategy-cycle/strategic-direction-lifecycle";
+import { computeDirectionPriorityFromAssessment } from "@/lib/strategy-cycle/scoring";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type MatrixContext = {
@@ -209,6 +211,12 @@ export async function createDirection(formData: FormData) {
 
   const ownerMembershipId = String(formData.get("owner_membership_id") ?? "").trim();
   const supabase = await createSupabaseServerClient();
+  const defaultPriority = computeDirectionPriorityFromAssessment({
+    strategicValueScore: 3,
+    capabilityFitScore: 3,
+    feasibilityScore: 3,
+    riskScore: 3,
+  });
   const { data: direction } = await supabase
     .schema("app")
     .from("strategic_directions")
@@ -217,8 +225,8 @@ export async function createDirection(formData: FormData) {
       planning_cycle_id: cycle.id,
       title,
       owner_membership_id: ownerMembershipId || null,
-      priority: Number(formData.get("priority") ?? 3),
-      status: String(formData.get("status") ?? "draft"),
+      priority: defaultPriority,
+      status: normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft")),
       grouping: String(formData.get("grouping") ?? "").trim() || null,
       created_by_membership_id: localContext.membershipId,
     })
@@ -265,14 +273,34 @@ export async function updateDirection(formData: FormData) {
   const ownerMembershipId = String(formData.get("owner_membership_id") ?? "").trim();
 
   const supabase = await createSupabaseServerClient();
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .select("strategic_value_score, capability_fit_score, feasibility_score, risk_level")
+    .eq("id", directionId)
+    .eq("organization_id", localContext.organizationId)
+    .eq("planning_cycle_id", cycle.id)
+    .maybeSingle();
+
+  const sv = Number(existing?.strategic_value_score ?? 3);
+  const cf = Number(existing?.capability_fit_score ?? 3);
+  const fe = Number(existing?.feasibility_score ?? 3);
+  const rk = Number(existing?.risk_level ?? 3);
+  const priority = computeDirectionPriorityFromAssessment({
+    strategicValueScore: sv,
+    capabilityFitScore: cf,
+    feasibilityScore: fe,
+    riskScore: rk,
+  });
+
   await supabase
     .schema("app")
     .from("strategic_directions")
     .update({
       title: String(formData.get("title") ?? "").trim(),
       owner_membership_id: ownerMembershipId || null,
-      priority: Number(formData.get("priority") ?? 3),
-      status: String(formData.get("status") ?? "draft"),
+      priority,
+      status: normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft")),
       grouping: String(formData.get("grouping") ?? "").trim() || null,
     })
     .eq("id", directionId)

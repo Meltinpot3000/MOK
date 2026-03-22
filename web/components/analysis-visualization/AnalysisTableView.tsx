@@ -1,11 +1,25 @@
 "use client";
 
+import { SortableTableHeader } from "@/components/table/SortableTableHeader";
 import type { VisualizationNode } from "@/components/analysis-visualization/types";
+import { compareSortKeys } from "@/lib/table/compare-sort-keys";
+import { useMemo, useState } from "react";
 
 type AnalysisTableViewProps = {
   nodes: VisualizationNode[];
   onSelectNode: (id: string) => void;
 };
+
+type SortCol =
+  | "analysisType"
+  | "subType"
+  | "label"
+  | "impact"
+  | "uncertainty"
+  | "qualityScore"
+  | "zone"
+  | "challengeMapped"
+  | "directionCount";
 
 function getAnalysisTypeLabel(type: string) {
   switch (type) {
@@ -30,21 +44,76 @@ function getPriorityZone(impact: number, uncertainty: number) {
   return "Rueckstand";
 }
 
+function sortValueFor(node: VisualizationNode, col: SortCol) {
+  switch (col) {
+    case "analysisType":
+      return getAnalysisTypeLabel(node.analysisType);
+    case "subType":
+      return node.subType ?? null;
+    case "label":
+      return node.label;
+    case "impact":
+      return node.impact;
+    case "uncertainty":
+      return node.uncertainty;
+    case "qualityScore":
+      return node.qualityScore;
+    case "zone":
+      return getPriorityZone(node.impact, node.uncertainty);
+    case "challengeMapped":
+      return node.challengeMapped ? 1 : 0;
+    case "directionCount":
+      return node.directionCount ?? 0;
+    default:
+      return null;
+  }
+}
+
 export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProps) {
+  const [sortCol, setSortCol] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const requestSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedNodes = useMemo(() => {
+    if (!sortCol) return nodes;
+    const mul = sortDir === "asc" ? 1 : -1;
+    return [...nodes].sort(
+      (a, b) => compareSortKeys(sortValueFor(a, sortCol), sortValueFor(b, sortCol)) * mul
+    );
+  }, [nodes, sortCol, sortDir]);
+
+  const th = (col: SortCol, label: string, className = "px-2 py-2") => (
+    <SortableTableHeader
+      label={label}
+      sortDirection={sortCol === col ? sortDir : null}
+      onRequestSort={() => requestSort(col)}
+      className={`${className} text-zinc-700`}
+      buttonClassName="font-medium text-zinc-700 hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
+    />
+  );
+
   return (
     <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
       <table className="min-w-full text-xs">
         <thead className="bg-zinc-50 text-zinc-700">
           <tr className="border-b border-zinc-200 text-left">
-            <th className="px-2 py-2">Analyse-Typ</th>
-            <th className="px-2 py-2">Sub-Typ</th>
-            <th className="px-2 py-2">Titel</th>
-            <th className="px-2 py-2">Wirkung</th>
-            <th className="px-2 py-2">Unsicherheit</th>
-            <th className="px-2 py-2">Qualitaet</th>
-            <th className="px-2 py-2">Prioritaetszone</th>
-            <th className="px-2 py-2">Herausforderung</th>
-            <th className="px-2 py-2">Stossrichtungen</th>
+            {th("analysisType", "Analyse-Typ")}
+            {th("subType", "Sub-Typ")}
+            {th("label", "Titel")}
+            {th("impact", "Wirkung")}
+            {th("uncertainty", "Unsicherheit")}
+            {th("qualityScore", "Qualitaet")}
+            {th("zone", "Prioritaetszone")}
+            {th("challengeMapped", "Herausforderung")}
+            {th("directionCount", "Stossrichtungen")}
           </tr>
         </thead>
         <tbody>
@@ -55,7 +124,7 @@ export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProp
               </td>
             </tr>
           ) : (
-            nodes.map((node) => (
+            sortedNodes.map((node) => (
               <tr
                 key={node.id}
                 className="cursor-pointer border-b border-zinc-100 align-top hover:bg-zinc-50"

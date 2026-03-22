@@ -69,6 +69,7 @@ export function ChallengesTable({
     {
       id: "title",
       label: "Titel",
+      sortValue: (c: Challenge) => c.title,
       render: (c: Challenge) => (
         <span className="font-medium text-zinc-900">{c.title}</span>
       ),
@@ -77,6 +78,8 @@ export function ChallengesTable({
       id: "challenge_score",
       label: "Challenge-Score",
       defaultVisible: true,
+      sortValue: (c: Challenge) =>
+        c.challenge_score != null ? Number(c.challenge_score) : null,
       render: (c: Challenge) =>
         c.challenge_score != null
           ? Number(c.challenge_score).toFixed(2)
@@ -86,6 +89,7 @@ export function ChallengesTable({
       id: "directions",
       label: "Verknüpfte Stossrichtungen",
       defaultVisible: true,
+      sortValue: (c: Challenge) => directionCountByChallengeId[c.id] ?? 0,
       render: (c: Challenge) =>
         directionCountByChallengeId[c.id] ?? 0,
     },
@@ -93,18 +97,28 @@ export function ChallengesTable({
       id: "impact",
       label: "Auswirkung",
       defaultVisible: false,
+      sortValue: (c: Challenge) => c.impact_score ?? null,
       render: (c: Challenge) => String(c.impact_score ?? "-"),
     },
     {
       id: "urgency",
       label: "Dringlichkeit",
       defaultVisible: false,
+      sortValue: (c: Challenge) => c.urgency_score ?? null,
       render: (c: Challenge) => String(c.urgency_score ?? "-"),
     },
     {
       id: "industries",
       label: "Industrien",
       defaultVisible: true,
+      sortValue: (c: Challenge) => {
+        const ids = industryIdsByChallenge[c.id] ?? [];
+        const names = industries
+          .filter((i) => ids.includes(i.id))
+          .map((i) => i.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (c: Challenge) => {
         const ids = industryIdsByChallenge[c.id] ?? [];
         const linked = industries.filter((i) => ids.includes(i.id));
@@ -127,6 +141,14 @@ export function ChallengesTable({
       id: "business_models",
       label: "Geschaeftsmodelle",
       defaultVisible: true,
+      sortValue: (c: Challenge) => {
+        const ids = businessModelIdsByChallenge[c.id] ?? [];
+        const names = businessModels
+          .filter((m) => ids.includes(m.id))
+          .map((m) => m.name)
+          .sort((a, b) => a.localeCompare(b, "de"));
+        return names.join(", ") || null;
+      },
       render: (c: Challenge) => {
         const ids = businessModelIdsByChallenge[c.id] ?? [];
         const linked = businessModels.filter((m) => ids.includes(m.id));

@@ -35,7 +35,7 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "key-figures", href: "/key-figures", label: "Kennzahlen", section: "phase1" },
   { id: "strategy-cycle", href: "/strategy-cycle", label: "Strategiezyklus", section: "phase1" },
   { id: "reviews", href: "/reviews", label: "Reviewzyklus", section: "phase1" },
-  { id: "okr-workspace", href: "/okr-workspace", label: "OKR Zyklus", section: "phase1" },
+  { id: "okr-workspace", href: "/okr/dashboard", label: "OKR Zyklus", section: "phase1" },
   {
     id: "strategic-directions",
     href: "/strategic-directions",
@@ -89,6 +89,10 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
 
   if (pathname === "/strategy-matrix") {
     return "strategy-cycle";
+  }
+
+  if (pathname.startsWith("/okr")) {
+    return "okr-workspace";
   }
 
   if (

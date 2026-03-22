@@ -29,6 +29,8 @@ export function CoverageStrengthPillButton({
   detachPicker = false,
   /** Volle Breite der Zelle (Matrix). */
   fullWidth = false,
+  /** Kein Oeffnen des Link-Pickers (z. B. Objective nicht active/at_risk); Abwahl bleibt moeglich. */
+  linkSelectionDisabled = false,
 }: {
   entityKey: string;
   entityValue: string;
@@ -45,6 +47,7 @@ export function CoverageStrengthPillButton({
   unlinkInPickerOnly?: boolean;
   detachPicker?: boolean;
   fullWidth?: boolean;
+  linkSelectionDisabled?: boolean;
 }) {
   const router = useRouter();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -108,8 +111,10 @@ export function CoverageStrengthPillButton({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [pickerOpen, detachPicker]);
 
+  const unlinkOnlyMode = linkSelectionDisabled && displayLinked && unlinkInPickerOnly;
+
   const runLink = async (level: ContributionLevel) => {
-    if (!canWrite || isPending) return;
+    if (!canWrite || isPending || linkSelectionDisabled) return;
     const fd = new FormData();
     fd.set(entityKey, entityValue);
     fd.set("contribution_level", level);
@@ -146,7 +151,7 @@ export function CoverageStrengthPillButton({
   };
 
   const openPicker = () => {
-    if (!canWrite || isPending) return;
+    if (!canWrite || isPending || linkSelectionDisabled) return;
     setPickerOpen((v) => {
       const next = !v;
       if (next && detachPicker) {
@@ -158,26 +163,28 @@ export function CoverageStrengthPillButton({
 
   const pillRowClass = `${displayLinked ? linkedClassName : unlinkedClassName} ${
     isPending ? "opacity-70" : ""
-  } flex max-w-full min-w-0 items-end gap-0.5`;
+  } ${linkSelectionDisabled && !displayLinked ? "opacity-55" : ""} flex max-w-full min-w-0 items-end gap-0.5`;
 
   const levelMeta = displayLevel ? COVERAGE_LEVEL_META[displayLevel] : null;
 
   const pickerInner = (
     <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" role="listbox" aria-label="Abdeckungsstaerke">
-      {COVERAGE_LEVEL_ORDER.map((key) => {
-        const m = COVERAGE_LEVEL_META[key];
-        return (
-          <button
-            key={key}
-            type="button"
-            title={m.labelDe}
-            className="rounded-md px-2 py-1 text-lg leading-none hover:bg-zinc-100"
-            onClick={() => runLink(key)}
-          >
-            {m.emoji}
-          </button>
-        );
-      })}
+      {!(linkSelectionDisabled && displayLinked)
+        ? COVERAGE_LEVEL_ORDER.map((key) => {
+            const m = COVERAGE_LEVEL_META[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                title={m.labelDe}
+                className="rounded-md px-2 py-1 text-lg leading-none hover:bg-zinc-100"
+                onClick={() => runLink(key)}
+              >
+                {m.emoji}
+              </button>
+            );
+          })
+        : null}
       {unlinkInPickerOnly && displayLinked ? (
         <button
           type="button"
@@ -201,7 +208,12 @@ export function CoverageStrengthPillButton({
         <button
           ref={pillBtnRef}
           type="button"
-          disabled={!canWrite || isPending}
+          disabled={
+            !canWrite ||
+            isPending ||
+            (linkSelectionDisabled && !displayLinked) ||
+            (linkSelectionDisabled && displayLinked && !unlinkInPickerOnly)
+          }
           onClick={openPicker}
           className="min-w-0 flex-1 cursor-pointer py-0.5 text-left leading-snug disabled:cursor-not-allowed"
           title={title}
@@ -232,7 +244,7 @@ export function CoverageStrengthPillButton({
         ) : null}
       </div>
 
-      {pickerOpen && canWrite
+      {pickerOpen && canWrite && (!linkSelectionDisabled || unlinkOnlyMode)
         ? detachPicker && typeof document !== "undefined"
           ? createPortal(
               <div

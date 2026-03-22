@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "tenant:isolation": "node ./scripts/tenant-isolation-check.mjs",
-    "strategy:rollout": "node ./scripts/strategy-rollout-smoke.mjs"
+    "strategy:rollout": "node ./scripts/strategy-rollout-smoke.mjs",
+    "db:ensure-review-rollup": "node ./scripts/ensure-initiative-review-rollup.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
@@ -28,6 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }

@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { SortableColumnHeaderButton } from "@/components/table/SortableTableHeader";
 import type { CorrelationCell, CorrelationStatus, CorrelationSummaryResult } from "@/lib/strategy-cycle/correlation";
+import { compareSortKeys } from "@/lib/table/compare-sort-keys";
+import { useMemo, useState } from "react";
+
+type MatrixSort =
+  | { kind: "challenge_title"; dir: "asc" | "desc" }
+  | { kind: "objective_score"; objectiveId: string; dir: "asc" | "desc" };
 
 type StrategicDesignSummaryProps = {
   canWrite: boolean;
@@ -45,6 +51,7 @@ export function StrategicDesignSummary({
   onSaveOverride,
   onClearOverride,
 }: StrategicDesignSummaryProps) {
+  const [matrixSort, setMatrixSort] = useState<MatrixSort | null>(null);
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(summary.cells[0]?.key ?? null);
   const selectedCell = useMemo(
     () => summary.cells.find((cell) => cell.key === selectedCellKey) ?? summary.cells[0] ?? null,
@@ -58,6 +65,30 @@ export function StrategicDesignSummary({
     }
     return map;
   }, [summary.cells]);
+
+  const sortedChallenges = useMemo(() => {
+    if (!matrixSort) return summary.challenges;
+    if (matrixSort.kind === "challenge_title") {
+      const mul = matrixSort.dir === "asc" ? 1 : -1;
+      return [...summary.challenges].sort(
+        (a, b) => a.title.localeCompare(b.title, "de") * mul
+      );
+    }
+    const oid = matrixSort.objectiveId;
+    const mul = matrixSort.dir === "asc" ? 1 : -1;
+    return [...summary.challenges].sort((a, b) => {
+      const sa = cellByPair.get(`${a.id}:${oid}`)?.score ?? null;
+      const sb = cellByPair.get(`${b.id}:${oid}`)?.score ?? null;
+      return compareSortKeys(sa, sb) * mul;
+    });
+  }, [summary.challenges, matrixSort, cellByPair]);
+
+  const challengeTitleAriaSort =
+    matrixSort?.kind === "challenge_title"
+      ? matrixSort.dir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
 
   return (
     <div className="space-y-4">
@@ -118,24 +149,82 @@ export function StrategicDesignSummary({
             <table className="min-w-full border-collapse">
               <thead>
                 <tr>
-                  <th className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700">
-                    Herausforderung
+                  <th
+                    aria-sort={challengeTitleAriaSort}
+                    className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700"
+                  >
+                    <SortableColumnHeaderButton
+                      label="Herausforderung"
+                      sortDirection={
+                        matrixSort?.kind === "challenge_title" ? matrixSort.dir : null
+                      }
+                      onRequestSort={() => {
+                        setMatrixSort((prev) => {
+                          if (prev?.kind === "challenge_title") {
+                            return {
+                              kind: "challenge_title",
+                              dir: prev.dir === "asc" ? "desc" : "asc",
+                            };
+                          }
+                          return { kind: "challenge_title", dir: "asc" };
+                        });
+                      }}
+                      buttonClassName="font-semibold text-zinc-700 hover:bg-zinc-200/50 rounded px-0.5 -mx-0.5"
+                    />
                   </th>
-                  {summary.objectives.map((objective) => (
-                    <th
-                      key={objective.id}
-                      className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700"
-                    >
-                      <div>{objective.title}</div>
-                      <div className="text-[11px] font-normal text-zinc-500">
-                        Status: {getObjectiveStatusLabel(objective.status)}
-                      </div>
-                    </th>
-                  ))}
+                  {summary.objectives.map((objective) => {
+                    const objAriaSort =
+                      matrixSort?.kind === "objective_score" &&
+                      matrixSort.objectiveId === objective.id
+                        ? matrixSort.dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none";
+                    return (
+                      <th
+                        key={objective.id}
+                        aria-sort={objAriaSort}
+                        className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left text-xs font-semibold text-zinc-700"
+                      >
+                        <SortableColumnHeaderButton
+                          label={objective.title}
+                          sortDirection={
+                            matrixSort?.kind === "objective_score" &&
+                            matrixSort.objectiveId === objective.id
+                              ? matrixSort.dir
+                              : null
+                          }
+                          onRequestSort={() => {
+                            setMatrixSort((prev) => {
+                              if (
+                                prev?.kind === "objective_score" &&
+                                prev.objectiveId === objective.id
+                              ) {
+                                return {
+                                  kind: "objective_score",
+                                  objectiveId: objective.id,
+                                  dir: prev.dir === "asc" ? "desc" : "asc",
+                                };
+                              }
+                              return {
+                                kind: "objective_score",
+                                objectiveId: objective.id,
+                                dir: "asc",
+                              };
+                            });
+                          }}
+                          buttonClassName="font-semibold text-zinc-700 hover:bg-zinc-200/50 rounded px-0.5 -mx-0.5"
+                        />
+                        <div className="mt-1 text-[11px] font-normal text-zinc-500">
+                          Status: {getObjectiveStatusLabel(objective.status)}
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {summary.challenges.map((challenge) => (
+                {sortedChallenges.map((challenge) => (
                   <tr key={challenge.id}>
                     <td className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-xs font-medium text-zinc-700">
                       {challenge.title}

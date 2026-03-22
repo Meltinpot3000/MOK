@@ -1,0 +1,61 @@
+import { redirect } from "next/navigation";
+import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { getOkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
+import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace";
+
+type PageProps = {
+  searchParams: Promise<{ okrCycle?: string }>;
+};
+
+export default async function OkrPlanningPage({ searchParams }: PageProps) {
+  const pageAccess = await getSidebarAccessContext("okr-workspace");
+  if (pageAccess.state === "unauthenticated") redirect("/login");
+  if (pageAccess.state === "forbidden") redirect("/no-access");
+
+  const context = await getPhase0Context();
+  if (!context) redirect("/no-access");
+  const cycle = await getActivePlanningCycle(context.organizationId);
+  if (!cycle) {
+    return (
+      <section className="brand-card p-6">
+        <h1 className="text-xl font-semibold text-zinc-900">OKR Planning</h1>
+        <p className="mt-2 text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
+      </section>
+    );
+  }
+
+  const params = await searchParams;
+  const preferredOkrCycle = params.okrCycle?.trim() || null;
+
+  const workspace = await getOkrPlanningWorkspaceData(
+    context.organizationId,
+    cycle.id,
+    preferredOkrCycle
+  );
+
+  return (
+    <section className="space-y-4">
+      <article className="brand-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Planning</h1>
+        <p className="mt-1 text-sm text-zinc-600">
+          Execution-Kontext und OKR-Builder mit Stoßrichtung, Initiative–Key-Result-Links und Ownern.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">Strategie-/Review-Zyklus: {cycle.name}</p>
+      </article>
+
+      {!pageAccess.canWrite ? (
+        <p className="brand-surface p-3 text-sm text-zinc-600">
+          Leserechte: Bearbeitung ist deaktiviert.
+        </p>
+      ) : null}
+
+      <OkrPlanningWorkspace
+        data={workspace}
+        cycleInstanceId={cycle.id}
+        canWrite={pageAccess.canWrite}
+      />
+    </section>
+  );
+}

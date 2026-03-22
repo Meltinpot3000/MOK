@@ -6,6 +6,7 @@ import {
   saveRoleAccessMatrix,
 } from "@/lib/rbac/sidebar-access";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { RoleAccessMatrixTable } from "@/components/access-control/RoleAccessMatrixTable";
 import { SIDEBAR_ITEMS } from "@/lib/sidebar-access";
 
 export default async function AccessControlPage() {
@@ -24,6 +25,10 @@ export default async function AccessControlPage() {
 
   const { roles, matrix } = await getRoleAccessMatrix(access.organizationId);
   const matrixMap = new Map(matrix.map((row) => [`${row.role_id}__${row.item_id}`, row.level]));
+  const matrixMapRecord = Object.fromEntries(matrixMap) as Record<
+    string,
+    "none" | "read" | "write"
+  >;
   const canWrite = pageAccess.canWrite;
 
   async function saveAccessMatrix(formData: FormData) {
@@ -73,48 +78,11 @@ export default async function AccessControlPage() {
       <section className="brand-card p-6">
         <form action={saveAccessMatrix}>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-200 text-left text-zinc-500">
-                  <th className="py-2 pr-3">Sidebar-Item</th>
-                  {roles.map((role) => (
-                    <th key={role.id} className="py-2 pr-3">
-                      <div className="font-semibold text-zinc-700">{role.name}</div>
-                      <div className="text-xs text-zinc-500">{role.code}</div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {SIDEBAR_ITEMS.map((item) => (
-                  <tr key={item.id} className="border-b border-zinc-100 align-top">
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-zinc-900">{item.label}</div>
-                      <div className="text-xs text-zinc-500">{item.href}</div>
-                    </td>
-                    {roles.map((role) => {
-                      const key = `${role.id}__${item.id}`;
-                      const level = matrixMap.get(key) ?? "none";
-
-                      return (
-                        <td key={key} className="py-3 pr-3">
-                          <select
-                            name={key}
-                            defaultValue={level}
-                            disabled={!canWrite}
-                            className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="none">Kein Zugriff</option>
-                            <option value="read">Lesen</option>
-                            <option value="write">Schreiben</option>
-                          </select>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <RoleAccessMatrixTable
+              roles={roles}
+              matrixMap={matrixMapRecord}
+              canWrite={canWrite}
+            />
           </div>
 
           <div className="mt-4 flex items-center justify-between">

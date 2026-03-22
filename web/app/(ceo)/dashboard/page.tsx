@@ -60,7 +60,7 @@ export default async function CeoDashboardPage() {
     .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
     .slice(0, 5);
   const topDirections = [...(strategyWorkspace.strategicDirections ?? [])]
-    .sort((a, b) => Number(b.direction_score ?? 0) - Number(a.direction_score ?? 0))
+    .sort((a, b) => Number(b.priority ?? 0) - Number(a.priority ?? 0))
     .slice(0, 5);
   const linkedChallengeIds = new Set((strategyWorkspace.challengeDirectionLinks ?? []).map((link) => link.strategic_challenge_id));
   const uncoveredChallenges = (strategyWorkspace.challenges ?? []).filter((challenge) => !linkedChallengeIds.has(challenge.id));
@@ -144,7 +144,7 @@ export default async function CeoDashboardPage() {
             {topDirections.map((direction) => (
               <li key={direction.id} className="brand-surface p-2">
                 <p className="text-sm font-medium text-zinc-900">{direction.title}</p>
-                <p className="text-xs text-zinc-600">Score {Number(direction.direction_score ?? 0).toFixed(2)}</p>
+                <p className="text-xs text-zinc-600">Prioritaet {Number(direction.priority ?? 0).toFixed(2)}</p>
               </li>
             ))}
           </ul>

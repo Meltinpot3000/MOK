@@ -96,6 +96,7 @@ export function AnalysisEntriesTable({
     {
       id: "title",
       label: "Titel",
+      sortValue: (e: AnalysisEntryRow) => e.title,
       render: (e: AnalysisEntryRow) => (
         <span className="font-medium text-zinc-900">{e.title}</span>
       ),
@@ -104,30 +105,36 @@ export function AnalysisEntriesTable({
       id: "sub_type",
       label: "Sub-Typ",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => e.sub_type ?? null,
       render: (e: AnalysisEntryRow) => e.sub_type ?? "-",
     },
     {
       id: "impact",
       label: "Wirkung",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => e.impact_level ?? null,
       render: (e: AnalysisEntryRow) => `${e.impact_level ?? "-"}/5`,
     },
     {
       id: "uncertainty",
       label: "Unsicherheit",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => e.uncertainty_level ?? null,
       render: (e: AnalysisEntryRow) => `${e.uncertainty_level ?? "-"}/5`,
     },
     {
       id: "quality",
       label: "Qualitaet",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => e.quality_score ?? null,
       render: (e: AnalysisEntryRow) => String(e.quality_score ?? "-"),
     },
     {
       id: "zone",
       label: "Prioritaetszone",
       defaultVisible: false,
+      sortValue: (e: AnalysisEntryRow) =>
+        getPriorityZone(e.impact_level, e.uncertainty_level),
       render: (e: AnalysisEntryRow) =>
         getPriorityZone(e.impact_level, e.uncertainty_level),
     },
@@ -135,6 +142,7 @@ export function AnalysisEntriesTable({
       id: "challenge",
       label: "Herausforderung",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => (promotedBySourceId.has(e.id) ? 1 : 0),
       render: (e: AnalysisEntryRow) =>
         promotedBySourceId.has(e.id) ? "ja" : "offen",
     },
@@ -142,6 +150,7 @@ export function AnalysisEntriesTable({
       id: "directions",
       label: "Stossrichtungen",
       defaultVisible: true,
+      sortValue: (e: AnalysisEntryRow) => directionCountByEntryId[e.id] ?? 0,
       render: (e: AnalysisEntryRow) => directionCountByEntryId[e.id] ?? 0,
     },
   ];

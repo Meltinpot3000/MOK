@@ -16,6 +16,7 @@ export type KeyResultRow = {
 export type OkrUpdateRow = {
   progress_value: number | null;
   created_at: string;
+  confidence_level?: number | null;
 };
 
 export type ReviewStatus = "on_track" | "at_risk" | "off_track";

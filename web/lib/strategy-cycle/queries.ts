@@ -1,5 +1,38 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+/** Key-Result-Verknuepfung einer Initiative mit OKR-Kontext (PIP-UI). */
+export type InitiativeKrLinkContext = {
+  key_result_id: string;
+  key_result_title: string;
+  objective_id: string;
+  objective_title: string;
+  okr_cycle_label: string | null;
+};
+
+/** Auswahloption KR + Objective fuer Initiative-Formular. */
+export type PipKeyResultOption = {
+  id: string;
+  title: string;
+  objective_id: string;
+  objective_title: string;
+  okr_cycle_label: string | null;
+};
+
+/** Zeile aus app.v_program_overview (Aggregat je Programm). */
+export type ProgramOverviewViewRow = {
+  id: string;
+  title: string;
+  status: string;
+  owner_membership_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  budget_total: number | null;
+  initiative_count: number;
+  initiative_active_count: number;
+  initiative_done_count: number;
+  progress_percent: number | string;
+};
+
 export type AnalysisEntry = {
   id: string;
   analysis_type: "environment" | "company" | "competitor" | "swot" | "pestel" | "workshop" | "other";
@@ -210,10 +243,12 @@ export async function getStrategyCycleWorkspaceData(
       .schema("app")
       .from("strategic_directions")
       .select(
-        "id, title, description, priority, status, grouping, relevance_level, risk_level, strategic_value_score, capability_fit_score, feasibility_score, direction_score, created_at, updated_at"
+        "id, title, description, priority, status, grouping, relevance_level, risk_level, strategic_value_score, capability_fit_score, feasibility_score, created_at, updated_at"
       )
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
+      .eq("cycle_instance_id", cycleInstanceId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true }),
     (legacyPlanningCycleId
       ? supabase
           .schema("app")
@@ -247,7 +282,9 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("strategy_programs")
-      .select("id, title, description, strategic_direction_id, owner_membership_id, budget, timeline")
+      .select(
+        "id, title, description, strategic_direction_id, owner_membership_id, budget_total, timeline, status, start_date, end_date, strategic_challenge_id, program_origin, matrix_cell_score, supported_objective_ids"
+      )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -259,7 +296,9 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("initiatives")
-      .select("id, title, status, priority, program_id, linked_okrs, deliverables")
+      .select(
+        "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent"
+      )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("priority", { ascending: true })
@@ -477,8 +516,127 @@ export async function getStrategyCycleWorkspaceData(
   const clusterObjectiveRelations = clusterObjectiveRelationsResult.data ?? [];
   const correlationStatusOverrides = correlationOverridesResult.data ?? [];
   const programs = programsResult.data ?? [];
+  let programOverviews: ProgramOverviewViewRow[] = [];
+  if (programs.length > 0) {
+    const { data: overviewRows, error: overviewError } = await supabase
+      .schema("app")
+      .from("v_program_overview")
+      .select("*")
+      .in(
+        "id",
+        programs.map((p) => (p as { id: string }).id)
+      );
+    if (overviewError) {
+      console.error("[getStrategyCycleWorkspaceData] v_program_overview", overviewError.message);
+    } else {
+      programOverviews = (overviewRows ?? []) as ProgramOverviewViewRow[];
+    }
+  }
   const annualTargets = annualTargetsResult.data ?? [];
-  const initiatives = initiativesResult.data ?? [];
+  type WorkspaceInitiative = {
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: number;
+    program_id: string | null;
+    owner_membership_id: string | null;
+    linked_okrs: string[] | null;
+    deliverables: string[] | null;
+    progress_percent?: number | null;
+    linked_key_result_titles?: string[];
+    kr_link_contexts?: InitiativeKrLinkContext[];
+  };
+
+  let initiatives: WorkspaceInitiative[] = (initiativesResult.data ?? []) as WorkspaceInitiative[];
+  const initiativeKrContextsByInitiativeId: Record<string, InitiativeKrLinkContext[]> = {};
+  const initiativeIdsForKr = initiatives.map((i) => i.id);
+  if (initiativeIdsForKr.length > 0) {
+    const { data: ikrLinks } = await supabase
+      .schema("app")
+      .from("initiative_key_result_links")
+      .select("initiative_id, key_result_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .in("initiative_id", initiativeIdsForKr);
+    const krIds = [...new Set((ikrLinks ?? []).map((l) => l.key_result_id))];
+    const krById = new Map<string, { id: string; title: string; objective_id: string }>();
+    if (krIds.length > 0) {
+      const { data: krs } = await supabase
+        .schema("app")
+        .from("key_results")
+        .select("id, title, objective_id")
+        .eq("organization_id", organizationId)
+        .in("id", krIds);
+      for (const k of krs ?? []) {
+        krById.set(k.id, k as { id: string; title: string; objective_id: string });
+      }
+    }
+    const objectiveIdsForKr = [...new Set([...krById.values()].map((k) => k.objective_id))];
+    const objectiveTitleById = new Map<string, string>();
+    const objectiveOkrCycleById = new Map<string, string | null>();
+    if (objectiveIdsForKr.length > 0) {
+      const { data: objRows } = await supabase
+        .schema("app")
+        .from("objectives")
+        .select("id, title, okr_cycle_id")
+        .eq("organization_id", organizationId)
+        .in("id", objectiveIdsForKr);
+      for (const o of objRows ?? []) {
+        objectiveTitleById.set(o.id, o.title);
+        objectiveOkrCycleById.set(o.id, o.okr_cycle_id ?? null);
+      }
+    }
+    const okrCycleIds = [
+      ...new Set(
+        [...objectiveOkrCycleById.values()].filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const okrCycleLabelById = new Map<string, string>();
+    if (okrCycleIds.length > 0) {
+      const { data: cycles } = await supabase
+        .schema("app")
+        .from("okr_cycles")
+        .select("id, name, start_date, end_date")
+        .eq("organization_id", organizationId)
+        .in("id", okrCycleIds);
+      for (const c of cycles ?? []) {
+        const sd = c.start_date ? String(c.start_date).slice(0, 10) : "";
+        const ed = c.end_date ? String(c.end_date).slice(0, 10) : "";
+        okrCycleLabelById.set(c.id, sd && ed ? `${c.name} (${sd} – ${ed})` : c.name);
+      }
+    }
+    function krContextForLink(krId: string): InitiativeKrLinkContext | null {
+      const kr = krById.get(krId);
+      if (!kr) return null;
+      const objId = kr.objective_id;
+      const okrId = objectiveOkrCycleById.get(objId) ?? null;
+      return {
+        key_result_id: kr.id,
+        key_result_title: kr.title,
+        objective_id: objId,
+        objective_title: objectiveTitleById.get(objId) ?? "Objective",
+        okr_cycle_label: okrId ? okrCycleLabelById.get(okrId) ?? null : null,
+      };
+    }
+    const titlesByInitiative = new Map<string, string[]>();
+    for (const l of ikrLinks ?? []) {
+      const ctx = krContextForLink(l.key_result_id);
+      if (!ctx) continue;
+      const cur = initiativeKrContextsByInitiativeId[l.initiative_id] ?? [];
+      cur.push(ctx);
+      initiativeKrContextsByInitiativeId[l.initiative_id] = cur;
+      const t = ctx.key_result_title;
+      const titleCur = titlesByInitiative.get(l.initiative_id) ?? [];
+      titleCur.push(t);
+      titlesByInitiative.set(l.initiative_id, titleCur);
+    }
+    initiatives = initiatives.map((i) => ({
+      ...i,
+      linked_key_result_titles: titlesByInitiative.get(i.id) ?? [],
+      kr_link_contexts: initiativeKrContextsByInitiativeId[i.id] ?? [],
+    }));
+  }
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
   let directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
   if (directionObjectiveLinksResult.error && directionObjectiveLinks.length === 0) {
@@ -531,6 +689,75 @@ export async function getStrategyCycleWorkspaceData(
     (c) => !promotedClusterIds.has(c.id)
   );
 
+  const { data: ownerMembershipRows, error: ownerMembershipError } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("id, responsibles!organization_memberships_responsible_id_fkey(full_name, email)")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .order("id", { ascending: true });
+  if (ownerMembershipError) {
+    console.error("[getStrategyCycleWorkspaceData] organization_memberships", ownerMembershipError.message);
+  }
+  const programOwnerOptions = (ownerMembershipRows ?? []).map((row) => {
+    const resp = (row as { responsibles?: { full_name?: string; email?: string } | null }).responsibles;
+    const label = resp?.full_name?.trim() || resp?.email?.trim() || "Mitglied";
+    return { id: row.id, label };
+  });
+
+  let pipKeyResultOptions: PipKeyResultOption[] = [];
+  const objectiveRowsForPip = objectives as Array<{
+    id: string;
+    title: string;
+    okr_cycle_id?: string | null;
+  }>;
+  const objectiveIdsForPipKr = objectiveRowsForPip.map((o) => o.id);
+  if (objectiveIdsForPipKr.length > 0) {
+    const { data: krPickerRows } = await supabase
+      .schema("app")
+      .from("key_results")
+      .select("id, title, objective_id")
+      .eq("organization_id", organizationId)
+      .in("objective_id", objectiveIdsForPipKr);
+    const objByIdForPip = new Map(objectiveRowsForPip.map((o) => [o.id, o]));
+    const pipOkrCycleIds = [
+      ...new Set(
+        objectiveRowsForPip.map((o) => o.okr_cycle_id).filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const pipOkrCycleLabelById = new Map<string, string>();
+    if (pipOkrCycleIds.length > 0) {
+      const { data: pipCycles } = await supabase
+        .schema("app")
+        .from("okr_cycles")
+        .select("id, name, start_date, end_date")
+        .eq("organization_id", organizationId)
+        .in("id", pipOkrCycleIds);
+      for (const c of pipCycles ?? []) {
+        const sd = c.start_date ? String(c.start_date).slice(0, 10) : "";
+        const ed = c.end_date ? String(c.end_date).slice(0, 10) : "";
+        pipOkrCycleLabelById.set(c.id, sd && ed ? `${c.name} (${sd} – ${ed})` : c.name);
+      }
+    }
+    for (const kr of krPickerRows ?? []) {
+      const obj = objByIdForPip.get(kr.objective_id);
+      if (!obj) continue;
+      const oc = obj.okr_cycle_id ? pipOkrCycleLabelById.get(obj.okr_cycle_id) ?? null : null;
+      pipKeyResultOptions.push({
+        id: kr.id,
+        title: kr.title,
+        objective_id: kr.objective_id,
+        objective_title: obj.title,
+        okr_cycle_label: oc,
+      });
+    }
+    pipKeyResultOptions.sort((a, b) => {
+      const ot = a.objective_title.localeCompare(b.objective_title, "de");
+      if (ot !== 0) return ot;
+      return a.title.localeCompare(b.title, "de");
+    });
+  }
+
   return {
     entries,
     grouped,
@@ -549,6 +776,9 @@ export async function getStrategyCycleWorkspaceData(
     clusterObjectiveRelations,
     correlationStatusOverrides,
     programs,
+    programOverviews,
+    programOwnerOptions,
+    pipKeyResultOptions,
     challenges,
     annualTargets,
     initiatives,

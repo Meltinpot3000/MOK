@@ -17,7 +17,7 @@ type ObjectiveInput = {
 type DirectionInput = {
   id: string;
   title: string;
-  direction_score: number | null;
+  priority: number | string | null;
 };
 
 type ClusterMemberInput = {
@@ -202,7 +202,12 @@ export function computeStrategicDesignCorrelationSummary(input: {
       for (const directionId of candidateDirectionIds) {
         const direction = directionsById.get(directionId);
         if (!direction) continue;
-        const directionNorm = normalizeScore1to5(direction.direction_score);
+        const priorityRaw = direction.priority;
+        const priorityNum =
+          priorityRaw != null && priorityRaw !== ""
+            ? Number(priorityRaw)
+            : null;
+        const directionNorm = normalizeScore1to5(priorityNum);
         const autoScore = Math.round((gapNorm * 45 + directionNorm * 30 + objectiveNorm * 15 + challengeNorm * 10) * 100);
         const autoStatus = scoreToStatus(autoScore);
         const override = overridesByTripletKey.get(`${objective.id}:${challenge.id}:${directionId}`);
