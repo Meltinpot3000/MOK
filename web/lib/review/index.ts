@@ -26,18 +26,11 @@ export {
 } from "./aggregation";
 
 export {
-  getReviewDashboardData,
   getReviewCycleData,
   getReviewSnapshots,
   getReviewFeedback,
-  type ReviewDashboardData,
   type ReviewCycleData,
   type ReviewCycleAnnualTargetBrief,
-  type ReviewObjective,
-  type ReviewKeyResult,
-  type ReviewInitiative,
-  type ReviewProgram,
-  type ReviewDirection,
 } from "./queries";
 
 export { REVIEW_ATTENTION_RULES, buildAttentionItems, type ReviewAttentionItem } from "./review-attention-rules";

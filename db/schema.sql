@@ -357,6 +357,503 @@ CREATE TYPE storage.buckettype AS ENUM (
 
 
 --
+-- Name: _remap_uuid_array_from_map(uuid[], jsonb); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app._remap_uuid_array_from_map(p_arr uuid[], p_map jsonb) RETURNS uuid[]
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  select coalesce(
+    array_agg((p_map ->> x::text)::uuid) filter (where p_map ? x::text),
+    array[]::uuid[]
+  )
+  from unnest(coalesce(p_arr, array[]::uuid[])) as x;
+$$;
+
+
+--
+-- Name: _strategy_review_current_membership(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app._strategy_review_current_membership(p_organization_id uuid) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'app', 'rbac', 'auth'
+    AS $$
+  select m.id
+  from app.organization_memberships m
+  where m.organization_id = p_organization_id
+    and m.user_id = auth.uid()
+    and m.status = 'active'
+  limit 1;
+$$;
+
+
+--
+-- Name: apply_strategy_review_decisions(uuid, uuid, uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.apply_strategy_review_decisions(p_review_id uuid, p_from_cycle_instance_id uuid, p_to_cycle_instance_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_planning_to uuid;
+  v_dec jsonb;
+  v_challenge_map jsonb := '{}'::jsonb;
+  v_direction_map jsonb := '{}'::jsonb;
+  v_objective_map jsonb := '{}'::jsonb;
+  v_kr_map jsonb := '{}'::jsonb;
+  v_program_map jsonb := '{}'::jsonb;
+  v_elem jsonb;
+  v_old uuid;
+  v_new_obj uuid;
+  v_new_kr uuid;
+  v_decision text;
+  v_rec record;
+  v_summary jsonb := '{}'::jsonb;
+  v_programs_skipped jsonb := '[]'::jsonb;
+  v_inits_skipped jsonb := '[]'::jsonb;
+  v_kr record;
+  v_prog record;
+  v_init record;
+  v_new_prog uuid;
+  v_new_init uuid;
+  v_supported uuid[];
+  v_mapped uuid[];
+  v_dir_ok boolean;
+  v_ch_ok boolean;
+begin
+  select organization_id, decision_payload
+  into v_org, v_dec
+  from app.okr_reviews
+  where id = p_review_id;
+
+  if v_org is null or v_dec is null or v_dec = '{}'::jsonb then
+    raise exception 'apply_strategy_review_decisions: missing review or decisions';
+  end if;
+
+  select legacy_planning_cycle_id into v_planning_to
+  from app.cycle_instances
+  where id = p_to_cycle_instance_id and organization_id = v_org;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(v_dec -> 'challenges', '[]'::jsonb))
+  loop
+    v_old := (v_elem ->> 'id')::uuid;
+    v_decision := v_elem ->> 'decision';
+    if v_decision in ('keep', 'adjust') then
+      select * into v_rec from app.strategic_challenges where id = v_old and organization_id = v_org;
+      if not found then
+        raise exception 'challenge % not found', v_old;
+      end if;
+      insert into app.strategic_challenges (
+        organization_id, planning_cycle_id, title, priority, visibility,
+        created_by_membership_id, source_analysis_entry_id, cycle_instance_id,
+        relevance_level, risk_level, description, impact_score, urgency_score,
+        scope_score, root_cause_score, challenge_score, created_by_source, source_cluster_id,
+        strategy_carry_source_id, strategy_carry_metadata
+      )
+      values (
+        v_rec.organization_id,
+        v_planning_to,
+        case when v_decision = 'adjust' then coalesce(v_elem #>> '{proposed_changes,title}', v_rec.title) else v_rec.title end,
+        v_rec.priority,
+        v_rec.visibility,
+        v_rec.created_by_membership_id,
+        v_rec.source_analysis_entry_id,
+        p_to_cycle_instance_id,
+        v_rec.relevance_level,
+        v_rec.risk_level,
+        case when v_decision = 'adjust' then coalesce(v_elem #>> '{proposed_changes,description}', v_rec.description) else v_rec.description end,
+        v_rec.impact_score,
+        v_rec.urgency_score,
+        v_rec.scope_score,
+        v_rec.root_cause_score,
+        v_rec.challenge_score,
+        v_rec.created_by_source,
+        v_rec.source_cluster_id,
+        v_old,
+        coalesce(v_rec.strategy_carry_metadata, '{}'::jsonb) || jsonb_build_object('strategy_review_carry', true, 'decision', v_decision)
+      )
+      returning id into v_new_obj;
+      v_challenge_map := v_challenge_map || jsonb_build_object(v_old::text, v_new_obj);
+    elsif v_decision = 'replace' then
+      insert into app.strategic_challenges (
+        organization_id, planning_cycle_id, title, priority, visibility,
+        cycle_instance_id, relevance_level, risk_level, description,
+        impact_score, urgency_score, scope_score, root_cause_score, challenge_score,
+        created_by_source, strategy_carry_metadata
+      )
+      values (
+        v_org,
+        v_planning_to,
+        coalesce(v_elem #>> '{replacement,title}', 'Challenge'),
+        3,
+        'internal',
+        p_to_cycle_instance_id,
+        3, 3,
+        v_elem #>> '{replacement,description}',
+        3, 3, 3, 3, 3,
+        'user',
+        jsonb_build_object('strategy_review_replace_of', v_old::text)
+      )
+      returning id into v_new_obj;
+      v_challenge_map := v_challenge_map || jsonb_build_object(v_old::text, v_new_obj);
+    end if;
+  end loop;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(v_dec -> 'focus_areas', '[]'::jsonb))
+  loop
+    v_old := (v_elem ->> 'id')::uuid;
+    v_decision := v_elem ->> 'decision';
+    if v_decision in ('double_down', 'adjust') then
+      select * into v_rec from app.strategic_directions where id = v_old and organization_id = v_org;
+      if not found then
+        raise exception 'direction % not found', v_old;
+      end if;
+      insert into app.strategic_directions (
+        organization_id, planning_cycle_id, title, description, owner_membership_id,
+        priority, status, grouping, created_by_membership_id, cycle_instance_id,
+        relevance_level, risk_level, strategic_value_score, capability_fit_score,
+        feasibility_score, created_by_source, review_comment,
+        strategy_carry_source_id, strategy_carry_metadata
+      )
+      values (
+        v_rec.organization_id,
+        v_planning_to,
+        case when v_decision = 'adjust' then coalesce(v_elem #>> '{proposed_changes,title}', v_rec.title) else v_rec.title end,
+        case when v_decision = 'adjust' then coalesce(v_elem #>> '{proposed_changes,description}', v_rec.description) else v_rec.description end,
+        v_rec.owner_membership_id,
+        v_rec.priority,
+        v_rec.status,
+        v_rec.grouping,
+        v_rec.created_by_membership_id,
+        p_to_cycle_instance_id,
+        v_rec.relevance_level,
+        v_rec.risk_level,
+        v_rec.strategic_value_score,
+        v_rec.capability_fit_score,
+        v_rec.feasibility_score,
+        v_rec.created_by_source,
+        v_rec.review_comment,
+        v_old,
+        coalesce(v_rec.strategy_carry_metadata, '{}'::jsonb) || jsonb_build_object('strategy_review_carry', true, 'decision', v_decision)
+      )
+      returning id into v_new_obj;
+      v_direction_map := v_direction_map || jsonb_build_object(v_old::text, v_new_obj);
+    end if;
+  end loop;
+
+  select decision_payload into v_dec from app.okr_reviews where id = p_review_id;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(v_dec -> 'objectives', '[]'::jsonb))
+  loop
+    v_old := (v_elem ->> 'id')::uuid;
+    v_decision := v_elem ->> 'decision';
+    if v_decision in ('keep', 'change') then
+      select * into v_rec from app.objectives where id = v_old and organization_id = v_org;
+      if not found then
+        raise exception 'objective % not found', v_old;
+      end if;
+      insert into app.objectives (
+        organization_id, cycle_id, title, description, status, owner_membership_id,
+        progress_percent, okr_cycle_id, confidence_level, cycle_instance_id,
+        time_horizon, importance_score,
+        ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score,
+        ai_fit_to_company_score, ai_confidence_score,
+        ai_external_internal_classification, ai_short_long_term_classification,
+        ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion,
+        ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at,
+        ai_evaluation_version, ai_manual_override, ai_manual_comment,
+        created_by_membership_id, created_by_source,
+        objective_health_override, objective_health_override_by_membership_id,
+        objective_health_override_at, objective_review_comment,
+        strategy_carry_source_id, strategy_carry_metadata
+      )
+      values (
+        v_rec.organization_id,
+        v_planning_to,
+        case when v_decision = 'change' then coalesce(v_elem #>> '{proposed_changes,title}', v_rec.title) else v_rec.title end,
+        case when v_decision = 'change' then coalesce(v_elem #>> '{proposed_changes,description}', v_rec.description) else v_rec.description end,
+        v_rec.status,
+        v_rec.owner_membership_id,
+        v_rec.progress_percent,
+        v_rec.okr_cycle_id,
+        v_rec.confidence_level,
+        p_to_cycle_instance_id,
+        case when v_decision = 'change' then coalesce(v_elem #>> '{proposed_changes,time_horizon}', v_rec.time_horizon) else v_rec.time_horizon end,
+        v_rec.importance_score,
+        v_rec.ai_clarity_score, v_rec.ai_strategic_relevance_score, v_rec.ai_feasibility_score,
+        v_rec.ai_fit_to_company_score, v_rec.ai_confidence_score,
+        v_rec.ai_external_internal_classification, v_rec.ai_short_long_term_classification,
+        v_rec.ai_exploit_explore_classification, v_rec.ai_issues_json, v_rec.ai_improvement_suggestion,
+        v_rec.ai_summary, v_rec.ai_objective_score, v_rec.ai_evaluation_status, v_rec.ai_evaluated_at,
+        v_rec.ai_evaluation_version, v_rec.ai_manual_override, v_rec.ai_manual_comment,
+        v_rec.created_by_membership_id, v_rec.created_by_source,
+        v_rec.objective_health_override, v_rec.objective_health_override_by_membership_id,
+        v_rec.objective_health_override_at, v_rec.objective_review_comment,
+        v_old,
+        coalesce(v_rec.strategy_carry_metadata, '{}'::jsonb) || jsonb_build_object('strategy_review_carry', true, 'decision', v_decision)
+      )
+      returning id into v_new_obj;
+      v_objective_map := v_objective_map || jsonb_build_object(v_old::text, v_new_obj);
+
+      for v_kr in select * from app.key_results where objective_id = v_old
+      loop
+        insert into app.key_results (
+          organization_id, objective_id, title, metric_type, start_value, target_value,
+          current_value, status, due_date, measurement_unit, created_by_membership_id,
+          created_by_source, owner_membership_id
+        )
+        values (
+          v_kr.organization_id,
+          v_new_obj,
+          v_kr.title,
+          v_kr.metric_type,
+          v_kr.start_value,
+          v_kr.target_value,
+          v_kr.current_value,
+          v_kr.status,
+          v_kr.due_date,
+          v_kr.measurement_unit,
+          v_kr.created_by_membership_id,
+          v_kr.created_by_source,
+          v_kr.owner_membership_id
+        )
+        returning id into v_new_kr;
+        v_kr_map := v_kr_map || jsonb_build_object(v_kr.id::text, v_new_kr);
+      end loop;
+    end if;
+  end loop;
+
+  insert into app.objective_direction_links (
+    organization_id, planning_cycle_id, objective_id, strategic_direction_id,
+    contribution_level, comment, cycle_instance_id
+  )
+  select
+    l.organization_id,
+    v_planning_to,
+    (v_objective_map ->> l.objective_id::text)::uuid,
+    (v_direction_map ->> l.strategic_direction_id::text)::uuid,
+    l.contribution_level,
+    l.comment,
+    p_to_cycle_instance_id
+  from app.objective_direction_links l
+  where l.cycle_instance_id = p_from_cycle_instance_id
+    and v_objective_map ? l.objective_id::text
+    and v_direction_map ? l.strategic_direction_id::text;
+
+  insert into app.strategic_direction_objective_links (
+    organization_id, planning_cycle_id, cycle_instance_id, strategic_direction_id,
+    objective_id, created_by_membership_id, contribution_level
+  )
+  select
+    l.organization_id,
+    v_planning_to,
+    p_to_cycle_instance_id,
+    (v_direction_map ->> l.strategic_direction_id::text)::uuid,
+    (v_objective_map ->> l.objective_id::text)::uuid,
+    l.created_by_membership_id,
+    l.contribution_level
+  from app.strategic_direction_objective_links l
+  where l.cycle_instance_id = p_from_cycle_instance_id
+    and v_objective_map ? l.objective_id::text
+    and v_direction_map ? l.strategic_direction_id::text;
+
+  insert into app.challenge_direction_links (
+    organization_id, planning_cycle_id, strategic_direction_id, strategic_challenge_id,
+    contribution_level, note, created_by_membership_id, cycle_instance_id
+  )
+  select
+    l.organization_id,
+    v_planning_to,
+    (v_direction_map ->> l.strategic_direction_id::text)::uuid,
+    (v_challenge_map ->> l.strategic_challenge_id::text)::uuid,
+    l.contribution_level,
+    l.note,
+    l.created_by_membership_id,
+    p_to_cycle_instance_id
+  from app.challenge_direction_links l
+  where l.cycle_instance_id = p_from_cycle_instance_id
+    and v_direction_map ? l.strategic_direction_id::text
+    and v_challenge_map ? l.strategic_challenge_id::text;
+
+  for v_prog in
+    select * from app.strategy_programs
+    where organization_id = v_org and cycle_instance_id = p_from_cycle_instance_id
+  loop
+    v_ch_ok := v_prog.strategic_challenge_id is null
+      or v_challenge_map ? v_prog.strategic_challenge_id::text;
+    v_dir_ok := v_prog.strategic_direction_id is null
+      or v_direction_map ? v_prog.strategic_direction_id::text;
+    v_supported := v_prog.supported_objective_ids;
+    v_mapped := app._remap_uuid_array_from_map(v_supported, v_objective_map);
+    if v_ch_ok and v_dir_ok
+       and (cardinality(v_supported) = 0 or cardinality(v_mapped) > 0) then
+      insert into app.strategy_programs (
+        organization_id, planning_cycle_id, cycle_instance_id, strategic_direction_id,
+        title, description, owner_membership_id, budget_total, timeline,
+        created_by_membership_id, status, review_comment, strategic_challenge_id,
+        program_origin, matrix_cell_score, supported_objective_ids, start_date, end_date
+      )
+      values (
+        v_prog.organization_id,
+        v_planning_to,
+        p_to_cycle_instance_id,
+        case when v_prog.strategic_direction_id is not null
+          then (v_direction_map ->> v_prog.strategic_direction_id::text)::uuid end,
+        v_prog.title,
+        v_prog.description,
+        v_prog.owner_membership_id,
+        v_prog.budget_total,
+        v_prog.timeline,
+        v_prog.created_by_membership_id,
+        v_prog.status,
+        v_prog.review_comment,
+        case when v_prog.strategic_challenge_id is not null
+          then (v_challenge_map ->> v_prog.strategic_challenge_id::text)::uuid end,
+        v_prog.program_origin,
+        v_prog.matrix_cell_score,
+        case when cardinality(v_supported) = 0 then v_supported else v_mapped end,
+        v_prog.start_date,
+        v_prog.end_date
+      )
+      returning id into v_new_prog;
+      v_program_map := v_program_map || jsonb_build_object(v_prog.id::text, v_new_prog);
+    else
+      v_programs_skipped := v_programs_skipped || jsonb_build_object(
+        'program_id', v_prog.id,
+        'reason', 'references_not_carried'
+      );
+    end if;
+  end loop;
+
+  for v_init in
+    select * from app.initiatives
+    where organization_id = v_org and cycle_instance_id = p_from_cycle_instance_id
+  loop
+    if not (v_program_map ? v_init.program_id::text) then
+      v_inits_skipped := v_inits_skipped || jsonb_build_object('initiative_id', v_init.id, 'reason', 'program_not_carried');
+      continue;
+    end if;
+    if not exists (
+      select 1 from app.initiative_key_result_links l
+      where l.initiative_id = v_init.id
+        and l.cycle_instance_id = p_from_cycle_instance_id
+        and v_kr_map ? l.key_result_id::text
+    ) then
+      v_inits_skipped := v_inits_skipped || jsonb_build_object('initiative_id', v_init.id, 'reason', 'no_carried_kr_link');
+      continue;
+    end if;
+
+    insert into app.initiatives (
+      organization_id, planning_cycle_id, title, description, owner_membership_id,
+      start_date, end_date, status, priority, budget, created_by_membership_id,
+      cycle_instance_id, program_id, linked_okrs, deliverables, created_by_source,
+      execution_health_override, execution_health_override_by_membership_id,
+      execution_health_override_at, review_comment,
+      weight, progress_percent, last_review_update_at
+    )
+    values (
+      v_init.organization_id,
+      v_planning_to,
+      v_init.title,
+      v_init.description,
+      v_init.owner_membership_id,
+      v_init.start_date,
+      v_init.end_date,
+      v_init.status,
+      v_init.priority,
+      v_init.budget,
+      v_init.created_by_membership_id,
+      p_to_cycle_instance_id,
+      (v_program_map ->> v_init.program_id::text)::uuid,
+      v_init.linked_okrs,
+      v_init.deliverables,
+      v_init.created_by_source,
+      v_init.execution_health_override,
+      v_init.execution_health_override_by_membership_id,
+      v_init.execution_health_override_at,
+      v_init.review_comment,
+      v_init.weight,
+      v_init.progress_percent,
+      v_init.last_review_update_at
+    )
+    returning id into v_new_init;
+
+    insert into app.initiative_key_result_links (
+      organization_id, cycle_instance_id, initiative_id, key_result_id
+    )
+    select
+      v_init.organization_id,
+      p_to_cycle_instance_id,
+      v_new_init,
+      (v_kr_map ->> l.key_result_id::text)::uuid
+    from app.initiative_key_result_links l
+    where l.initiative_id = v_init.id
+      and l.cycle_instance_id = p_from_cycle_instance_id
+      and v_kr_map ? l.key_result_id::text;
+  end loop;
+
+  v_summary := jsonb_build_object(
+    'challenge_map', v_challenge_map,
+    'direction_map', v_direction_map,
+    'objective_map', v_objective_map,
+    'key_result_map', v_kr_map,
+    'program_map', v_program_map,
+    'programs_skipped', v_programs_skipped,
+    'initiatives_skipped', v_inits_skipped
+  );
+
+  return v_summary;
+end;
+$$;
+
+
+--
+-- Name: capture_strategy_review_decisions(uuid, jsonb); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.capture_strategy_review_decisions(p_review_id uuid, p_decisions jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_pre jsonb;
+  v_val jsonb;
+begin
+  select organization_id, pre_read_payload into v_org, v_pre
+  from app.okr_reviews
+  where id = p_review_id and review_mode = 'strategy_review';
+
+  if v_org is null then
+    raise exception 'capture_strategy_review_decisions: not found';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.moderate') then
+    raise exception 'capture_strategy_review_decisions: forbidden';
+  end if;
+
+  v_val := app.validate_strategy_decision_payload(p_decisions, v_pre);
+  if coalesce((v_val ->> 'valid')::boolean, false) is not true then
+    raise exception 'capture_strategy_review_decisions: validation failed %', v_val -> 'errors';
+  end if;
+
+  update app.okr_reviews
+  set decision_payload = p_decisions,
+      procedure_status = 'decision_captured'
+  where id = p_review_id
+    and procedure_status = 'review_in_progress';
+
+  if not found then
+    raise exception 'capture_strategy_review_decisions: expected review_in_progress';
+  end if;
+end;
+$$;
+
+
+--
 -- Name: carry_forward_analysis_cycle_data(uuid, uuid, uuid, uuid, uuid); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -929,6 +1426,89 @@ $$;
 
 
 --
+-- Name: compute_review_readiness(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.compute_review_readiness(p_review_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_pre jsonb;
+  v_org uuid;
+  v_ci uuid;
+  v_ids uuid[] := array[]::uuid[];
+  v_total int;
+  v_with_feedback int;
+  v_proc text;
+begin
+  select pre_read_payload, organization_id, cycle_instance_id, procedure_status
+  into v_pre, v_org, v_ci, v_proc
+  from app.okr_reviews
+  where id = p_review_id;
+
+  if v_pre is null then
+    return;
+  end if;
+
+  select coalesce(array_agg(distinct u), array[]::uuid[])
+  into v_ids
+  from (
+    select (x->>'id')::uuid as u
+    from jsonb_array_elements(coalesce(v_pre -> 'challenges', '[]'::jsonb)) x
+    where x ? 'id'
+    union
+    select (x->>'id')::uuid
+    from jsonb_array_elements(coalesce(v_pre -> 'focus_areas', '[]'::jsonb)) x
+    where x ? 'id'
+    union
+    select (x->>'id')::uuid
+    from jsonb_array_elements(coalesce(v_pre -> 'objectives', '[]'::jsonb)) x
+    where x ? 'id'
+  ) s
+  where u is not null;
+
+  v_total := cardinality(v_ids);
+
+  if v_total = 0 then
+    update app.okr_reviews
+    set readiness_status = 'not_ready',
+        procedure_status = case when procedure_status = 'ready_for_review' then 'pre_read_open' else procedure_status end
+    where id = p_review_id;
+    return;
+  end if;
+
+  select count(distinct f.subject_id)
+  into v_with_feedback
+  from app.strategy_review_feedback_entries f
+  where f.review_id = p_review_id
+    and f.subject_id = any (v_ids)
+    and f.rating is not null;
+
+  if v_with_feedback = 0 then
+    update app.okr_reviews
+    set readiness_status = 'not_ready',
+        procedure_status = case when procedure_status = 'ready_for_review' then 'pre_read_open' else procedure_status end
+    where id = p_review_id;
+  elsif v_with_feedback < v_total then
+    update app.okr_reviews
+    set readiness_status = 'partially_ready',
+        procedure_status = case when procedure_status = 'ready_for_review' then 'pre_read_open' else procedure_status end
+    where id = p_review_id;
+  else
+    update app.okr_reviews
+    set readiness_status = 'ready',
+        procedure_status = case
+          when procedure_status = 'pre_read_open' then 'ready_for_review'
+          else procedure_status
+        end
+    where id = p_review_id;
+  end if;
+end;
+$$;
+
+
+--
 -- Name: current_user_id(); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -1127,6 +1707,66 @@ $$;
 
 
 --
+-- Name: ensure_strategy_review(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.ensure_strategy_review(p_cycle_instance_id uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_existing uuid;
+  v_new uuid;
+begin
+  select organization_id into v_org
+  from app.cycle_instances
+  where id = p_cycle_instance_id;
+
+  if v_org is null then
+    raise exception 'ensure_strategy_review: invalid cycle_instance_id';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.moderate')
+     and not app.has_permission(v_org, 'review.write') then
+    raise exception 'ensure_strategy_review: forbidden';
+  end if;
+
+  select id into v_existing
+  from app.okr_reviews
+  where organization_id = v_org
+    and cycle_instance_id = p_cycle_instance_id
+    and review_mode = 'strategy_review'
+  limit 1;
+
+  if v_existing is not null then
+    return v_existing;
+  end if;
+
+  insert into app.okr_reviews (
+    organization_id,
+    cycle_instance_id,
+    review_type,
+    review_mode,
+    procedure_status,
+    summary
+  )
+  values (
+    v_org,
+    p_cycle_instance_id,
+    'annual_review',
+    'strategy_review',
+    'not_started',
+    'Strategy Review'
+  )
+  returning id into v_new;
+
+  return v_new;
+end;
+$$;
+
+
+--
 -- Name: execute_due_cycle_cutovers(); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -1220,6 +1860,153 @@ $$;
 
 
 --
+-- Name: execute_strategy_review_release(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.execute_strategy_review_release(p_review_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_rev record;
+  v_to uuid;
+  v_actor uuid;
+  v_cf jsonb;
+  v_apply jsonb;
+  v_final jsonb;
+begin
+  select * into v_rev
+  from app.okr_reviews
+  where id = p_review_id
+  for update;
+
+  if v_rev.id is null then
+    raise exception 'execute_strategy_review_release: not found';
+  end if;
+
+  if v_rev.review_mode <> 'strategy_review' then
+    raise exception 'execute_strategy_review_release: not strategy review';
+  end if;
+
+  if v_rev.procedure_status <> 'decision_captured' then
+    raise exception 'execute_strategy_review_release: expected decision_captured';
+  end if;
+
+  if v_rev.released_at is not null then
+    raise exception 'execute_strategy_review_release: already released';
+  end if;
+
+  if not app.has_permission(v_rev.organization_id, 'strategy_review.release') then
+    raise exception 'execute_strategy_review_release: forbidden';
+  end if;
+
+  v_actor := app._strategy_review_current_membership(v_rev.organization_id);
+
+  v_to := app.resolve_successor_cycle_instance(v_rev.cycle_instance_id);
+  if v_to is null then
+    raise exception 'execute_strategy_review_release: no successor cycle_instance (materialize calendar first)';
+  end if;
+
+  v_cf := app.carry_forward_analysis_cycle_data(
+    v_rev.organization_id,
+    v_rev.cycle_instance_id,
+    v_to,
+    null,
+    v_actor
+  );
+
+  v_apply := app.apply_strategy_review_decisions(
+    p_review_id,
+    v_rev.cycle_instance_id,
+    v_to
+  );
+
+  v_final := jsonb_build_object(
+    'analysis_carry_forward', v_cf,
+    'apply', v_apply,
+    'from_cycle_instance_id', v_rev.cycle_instance_id,
+    'to_cycle_instance_id', v_to,
+    'override_forced', v_rev.override_forced,
+    'released_at', to_jsonb(now())
+  );
+
+  update app.okr_reviews
+  set release_summary = v_final,
+      released_to_cycle_instance_id = v_to,
+      released_at = now(),
+      procedure_status = 'released'
+  where id = p_review_id;
+
+  insert into app.cycle_cutover_snapshots (
+    organization_id,
+    cutover_id,
+    from_cycle_instance_id,
+    to_cycle_instance_id,
+    snapshot_type,
+    summary,
+    created_by_membership_id,
+    review_id
+  )
+  values (
+    v_rev.organization_id,
+    null,
+    v_rev.cycle_instance_id,
+    v_to,
+    'strategy_review_release',
+    v_final,
+    v_actor,
+    p_review_id
+  );
+
+  return v_final;
+end;
+$$;
+
+
+--
+-- Name: force_review_ready(uuid, text); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.force_review_ready(p_review_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_mid uuid;
+begin
+  if p_reason is null or length(trim(p_reason)) = 0 then
+    raise exception 'force_review_ready: reason required';
+  end if;
+
+  select organization_id into v_org
+  from app.okr_reviews
+  where id = p_review_id;
+
+  if v_org is null then
+    raise exception 'force_review_ready: review not found';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.force_ready') then
+    raise exception 'force_review_ready: forbidden';
+  end if;
+
+  v_mid := app._strategy_review_current_membership(v_org);
+  if v_mid is null then
+    raise exception 'force_review_ready: no active membership';
+  end if;
+
+  update app.okr_reviews
+  set override_forced = true,
+      override_reason = p_reason,
+      override_forced_by = v_mid,
+      override_forced_at = now()
+  where id = p_review_id;
+end;
+$$;
+
+
+--
 -- Name: generate_cycle_instances_for_scheme(uuid, integer, uuid); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -1228,6 +2015,105 @@ CREATE FUNCTION app.generate_cycle_instances_for_scheme(p_cycle_scheme_id uuid, 
     SET search_path TO 'app', 'public'
     AS $$
   select app.regenerate_cycle_instances(p_cycle_scheme_id, p_horizon_months, p_actor_membership_id);
+$$;
+
+
+--
+-- Name: get_review_trigger_state(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.get_review_trigger_state(p_cycle_instance_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_ci record;
+  v_rev record;
+  v_days int;
+  v_lead int;
+  v_visible boolean := false;
+  v_state text := 'hidden';
+  v_label text := '';
+  v_override boolean := false;
+begin
+  select * into v_ci
+  from app.cycle_instances
+  where id = p_cycle_instance_id;
+
+  if v_ci.id is null then
+    return jsonb_build_object(
+      'visible', false,
+      'state', 'invalid_instance',
+      'label', '',
+      'days_to_end', null,
+      'is_override', false
+    );
+  end if;
+
+  select * into v_rev
+  from app.okr_reviews
+  where cycle_instance_id = p_cycle_instance_id
+    and review_mode = 'strategy_review'
+  limit 1;
+
+  v_days := (v_ci.ends_on - current_date);
+
+  if v_rev.id is null then
+    return jsonb_build_object(
+      'visible', false,
+      'state', 'no_review',
+      'label', 'Strategy Review anlegen',
+      'days_to_end', v_days,
+      'is_override', false
+    );
+  end if;
+
+  v_lead := v_rev.review_lead_time_days;
+  v_override := coalesce(v_rev.override_forced, false);
+
+  if v_days > v_lead then
+    return jsonb_build_object(
+      'visible', false,
+      'state', 'outside_lead_time',
+      'label', '',
+      'days_to_end', v_days,
+      'is_override', v_override
+    );
+  end if;
+
+  v_visible := true;
+
+  if v_rev.procedure_status in ('released', 'cancelled') then
+    v_state := 'completed';
+    v_label := case when v_rev.procedure_status = 'released' then 'Review abgeschlossen' else 'Review abgebrochen' end;
+  elsif v_rev.procedure_status = 'review_in_progress' then
+    v_state := 'in_progress';
+    v_label := 'Review läuft';
+  elsif v_rev.procedure_status = 'decision_captured' then
+    v_state := 'decision_captured';
+    v_label := 'Entscheidungen erfasst – Release möglich';
+  elsif v_rev.procedure_status = 'ready_for_review' or (v_rev.readiness_status = 'ready' and v_rev.procedure_status = 'pre_read_open') then
+    v_state := 'ready_for_review';
+    v_label := case when v_override then 'Review abhalten (Override)' else 'Review abhalten' end;
+  elsif v_rev.procedure_status in ('not_started', 'announcement_sent', 'pre_read_open') then
+    v_state := 'preparation';
+    v_label := format('Review vorbereiten (noch %s Tage)', v_days);
+  else
+    v_state := 'preparation';
+    v_label := 'Review vorbereiten';
+  end if;
+
+  return jsonb_build_object(
+    'visible', v_visible,
+    'state', v_state,
+    'label', v_label,
+    'days_to_end', v_days,
+    'is_override', v_override,
+    'procedure_status', v_rev.procedure_status,
+    'readiness_status', v_rev.readiness_status,
+    'review_id', v_rev.id
+  );
+end;
 $$;
 
 
@@ -1268,6 +2154,161 @@ CREATE FUNCTION app.is_member_of_org(p_organization_id uuid) RETURNS boolean
       and m.user_id = auth.uid()
       and m.status = 'active'
   );
+$$;
+
+
+--
+-- Name: prepare_strategy_review(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.prepare_strategy_review(p_review_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_ci uuid;
+  v_payload jsonb;
+  v_challenge_ids uuid[];
+  v_focus_ids uuid[];
+  v_obj_ids uuid[];
+begin
+  select organization_id, cycle_instance_id into v_org, v_ci
+  from app.okr_reviews
+  where id = p_review_id and review_mode = 'strategy_review';
+
+  if v_ci is null then
+    raise exception 'prepare_strategy_review: not found';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.moderate') then
+    raise exception 'prepare_strategy_review: forbidden';
+  end if;
+
+  select coalesce(array_agg(id order by title), array[]::uuid[])
+  into v_challenge_ids
+  from app.strategic_challenges
+  where organization_id = v_org and cycle_instance_id = v_ci;
+
+  select coalesce(array_agg(id order by title), array[]::uuid[])
+  into v_focus_ids
+  from app.strategic_directions
+  where organization_id = v_org and cycle_instance_id = v_ci;
+
+  select coalesce(array_agg(id order by title), array[]::uuid[])
+  into v_obj_ids
+  from app.objectives
+  where organization_id = v_org and cycle_instance_id = v_ci;
+
+  v_payload := jsonb_build_object(
+    'generated_at', to_jsonb(now()),
+    'scope', jsonb_build_object(
+      'challenge_ids', coalesce(to_jsonb(v_challenge_ids), '[]'::jsonb),
+      'focus_area_ids', coalesce(to_jsonb(v_focus_ids), '[]'::jsonb),
+      'objective_ids', coalesce(to_jsonb(v_obj_ids), '[]'::jsonb)
+    ),
+    'challenges', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', c.id,
+          'title', c.title,
+          'description', c.description,
+          'priority', c.priority,
+          'visibility', c.visibility
+        ) order by c.title
+      )
+      from app.strategic_challenges c
+      where c.organization_id = v_org and c.cycle_instance_id = v_ci
+    ), '[]'::jsonb),
+    'focus_areas', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', d.id,
+          'title', d.title,
+          'description', d.description,
+          'status', d.status,
+          'priority', d.priority
+        ) order by d.title
+      )
+      from app.strategic_directions d
+      where d.organization_id = v_org and d.cycle_instance_id = v_ci
+    ), '[]'::jsonb),
+    'objectives', coalesce((
+      select jsonb_agg(x.obj order by x.sort_title)
+      from (
+        select o.title as sort_title,
+          jsonb_build_object(
+            'id', o.id,
+            'title', o.title,
+            'description', o.description,
+            'status', o.status,
+            'progress_percent', o.progress_percent,
+            'key_results', coalesce((
+              select jsonb_agg(
+                jsonb_build_object(
+                  'id', kr.id,
+                  'title', kr.title,
+                  'metric_type', kr.metric_type,
+                  'target_value', kr.target_value,
+                  'current_value', kr.current_value
+                ) order by kr.title
+              )
+              from app.key_results kr
+              where kr.objective_id = o.id
+            ), '[]'::jsonb)
+          ) as obj
+        from app.objectives o
+        where o.organization_id = v_org and o.cycle_instance_id = v_ci
+      ) x
+    ), '[]'::jsonb)
+  );
+
+  update app.okr_reviews
+  set pre_read_payload = v_payload,
+      procedure_status = 'pre_read_open'
+  where id = p_review_id
+    and procedure_status = 'announcement_sent';
+
+  if not found then
+    raise exception 'prepare_strategy_review: expected procedure_status announcement_sent';
+  end if;
+
+  perform app.compute_review_readiness(p_review_id);
+end;
+$$;
+
+
+--
+-- Name: record_strategy_review_announcement(uuid, jsonb); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.record_strategy_review_announcement(p_review_id uuid, p_payload jsonb DEFAULT '{}'::jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+begin
+  select organization_id into v_org from app.okr_reviews where id = p_review_id;
+  if v_org is null then
+    raise exception 'record_strategy_review_announcement: not found';
+  end if;
+  if not app.has_permission(v_org, 'strategy_review.moderate') then
+    raise exception 'record_strategy_review_announcement: forbidden';
+  end if;
+
+  update app.okr_reviews
+  set announcement_payload = coalesce(p_payload, '{}'::jsonb),
+      announcement_sent_at = now(),
+      procedure_status = 'announcement_sent'
+  where id = p_review_id
+    and review_mode = 'strategy_review'
+    and procedure_status = 'not_started';
+
+  if not found then
+    raise exception 'record_strategy_review_announcement: invalid state or not strategy review';
+  end if;
+end;
 $$;
 
 
@@ -1440,6 +2481,82 @@ $$;
 
 
 --
+-- Name: resolve_successor_cycle_instance(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.resolve_successor_cycle_instance(p_from_instance_id uuid) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+  select c2.id
+  from app.cycle_instances c1
+  join app.cycle_instances c2
+    on c2.organization_id = c1.organization_id
+   and c2.cycle_scheme_id = c1.cycle_scheme_id
+   and c2.level_no = c1.level_no
+   and c2.parent_instance_id is not distinct from c1.parent_instance_id
+   and c2.starts_on = c1.ends_on + 1
+  where c1.id = p_from_instance_id
+  limit 1;
+$$;
+
+
+--
+-- Name: save_strategy_review_feedback(uuid, uuid, jsonb); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.save_strategy_review_feedback(p_review_id uuid, p_actor_membership_id uuid, p_feedback jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_elem jsonb;
+  v_subject_type text;
+  v_subject_id uuid;
+  v_rating text;
+  v_comment text;
+begin
+  select organization_id into v_org from app.okr_reviews where id = p_review_id;
+  if v_org is null then
+    raise exception 'save_strategy_review_feedback: review not found';
+  end if;
+
+  if p_actor_membership_id is distinct from app._strategy_review_current_membership(v_org) then
+    raise exception 'save_strategy_review_feedback: actor must be current user membership';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.feedback') then
+    raise exception 'save_strategy_review_feedback: forbidden';
+  end if;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(p_feedback -> 'entries', '[]'::jsonb))
+  loop
+    v_subject_type := v_elem ->> 'subject_type';
+    v_subject_id := nullif(v_elem ->> 'subject_id', '')::uuid;
+    v_rating := v_elem ->> 'rating';
+    v_comment := v_elem ->> 'comment';
+
+    insert into app.strategy_review_feedback_entries (
+      review_id, subject_type, subject_id, actor_id, rating, comment
+    ) values (
+      p_review_id, v_subject_type, v_subject_id, p_actor_membership_id, v_rating, v_comment
+    );
+  end loop;
+
+  update app.okr_reviews r
+  set stakeholder_feedback_payload = jsonb_build_object(
+    'updated_at', to_jsonb(now()),
+    'entry_count', (select count(*)::int from app.strategy_review_feedback_entries f where f.review_id = p_review_id)
+  )
+  where r.id = p_review_id;
+
+  perform app.compute_review_readiness(p_review_id);
+end;
+$$;
+
+
+--
 -- Name: set_updated_at(); Type: FUNCTION; Schema: app; Owner: -
 --
 
@@ -1467,6 +2584,47 @@ CREATE FUNCTION app.stable_md5_uuid(p_input text) RETURNS uuid
     substr(md5(p_input), 17, 4) || '-' ||
     substr(md5(p_input), 21, 12)
   )::uuid;
+$$;
+
+
+--
+-- Name: start_strategy_review_meeting(uuid); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.start_strategy_review_meeting(p_review_id uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_org uuid;
+  v_ready text;
+  v_proc text;
+  v_override boolean;
+begin
+  select organization_id, readiness_status, procedure_status, override_forced
+  into v_org, v_ready, v_proc, v_override
+  from app.okr_reviews
+  where id = p_review_id and review_mode = 'strategy_review';
+
+  if v_org is null then
+    raise exception 'start_strategy_review_meeting: not found';
+  end if;
+
+  if not app.has_permission(v_org, 'strategy_review.moderate') then
+    raise exception 'start_strategy_review_meeting: forbidden';
+  end if;
+
+  if not (
+    (v_ready = 'ready' and v_proc = 'ready_for_review')
+    or (v_override and v_proc in ('pre_read_open', 'ready_for_review'))
+  ) then
+    raise exception 'start_strategy_review_meeting: readiness / state guard failed';
+  end if;
+
+  update app.okr_reviews
+  set procedure_status = 'review_in_progress'
+  where id = p_review_id;
+end;
 $$;
 
 
@@ -1536,6 +2694,33 @@ begin
     new := jsonb_populate_record(new, jsonb_build_object('cycle_instance_id', v_cycle_instance_id));
   end if;
 
+  return new;
+end;
+$$;
+
+
+--
+-- Name: tg_strategy_review_feedback_sync(); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.tg_strategy_review_feedback_sync() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  v_org uuid;
+  v_ci uuid;
+begin
+  select r.organization_id, r.cycle_instance_id
+  into v_org, v_ci
+  from app.okr_reviews r
+  where r.id = new.review_id;
+
+  if v_org is null then
+    raise exception 'strategy_review_feedback: invalid review_id';
+  end if;
+
+  new.organization_id := v_org;
+  new.cycle_instance_id := v_ci;
   return new;
 end;
 $$;
@@ -1831,6 +3016,158 @@ begin
   end if;
 
   return new;
+end;
+$$;
+
+
+--
+-- Name: validate_strategy_decision_payload(jsonb, jsonb); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.validate_strategy_decision_payload(p_decisions jsonb, p_pre_read jsonb) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'app', 'public'
+    AS $$
+declare
+  v_scope_challenges uuid[] := array[]::uuid[];
+  v_scope_focus uuid[] := array[]::uuid[];
+  v_scope_objectives uuid[] := array[]::uuid[];
+  v_errors text[] := array[]::text[];
+  v_elem jsonb;
+  v_id uuid;
+  v_dec text;
+  v_n int;
+begin
+  if p_pre_read is null or p_pre_read = '{}'::jsonb then
+    return jsonb_build_object('valid', false, 'errors', jsonb_build_array('pre_read_payload missing'));
+  end if;
+
+  select coalesce(array_agg(x::uuid), array[]::uuid[])
+  into v_scope_challenges
+  from jsonb_array_elements_text(coalesce(p_pre_read #> '{scope,challenge_ids}', '[]'::jsonb)) x;
+
+  if cardinality(v_scope_challenges) = 0 then
+    select coalesce(array_agg((x->>'id')::uuid), array[]::uuid[])
+    into v_scope_challenges
+    from jsonb_array_elements(coalesce(p_pre_read -> 'challenges', '[]'::jsonb)) x
+    where x ? 'id';
+  end if;
+
+  select coalesce(array_agg(x::uuid), array[]::uuid[])
+  into v_scope_focus
+  from jsonb_array_elements_text(coalesce(p_pre_read #> '{scope,focus_area_ids}', '[]'::jsonb)) x;
+
+  if cardinality(v_scope_focus) = 0 then
+    select coalesce(array_agg((x->>'id')::uuid), array[]::uuid[])
+    into v_scope_focus
+    from jsonb_array_elements(coalesce(p_pre_read -> 'focus_areas', '[]'::jsonb)) x
+    where x ? 'id';
+  end if;
+
+  select coalesce(array_agg(x::uuid), array[]::uuid[])
+  into v_scope_objectives
+  from jsonb_array_elements_text(coalesce(p_pre_read #> '{scope,objective_ids}', '[]'::jsonb)) x;
+
+  if cardinality(v_scope_objectives) = 0 then
+    select coalesce(array_agg((x->>'id')::uuid), array[]::uuid[])
+    into v_scope_objectives
+    from jsonb_array_elements(coalesce(p_pre_read -> 'objectives', '[]'::jsonb)) x
+    where x ? 'id';
+  end if;
+
+  if cardinality(v_scope_challenges) + cardinality(v_scope_focus) + cardinality(v_scope_objectives) = 0 then
+    v_errors := array_append(v_errors, 'pre_read scope empty');
+  end if;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(p_decisions -> 'challenges', '[]'::jsonb))
+  loop
+    v_id := nullif(v_elem ->> 'id', '')::uuid;
+    v_dec := v_elem ->> 'decision';
+    if v_id is null then
+      v_errors := array_append(v_errors, 'challenge entry missing id');
+      continue;
+    end if;
+    if not (v_id = any (v_scope_challenges)) then
+      v_errors := array_append(v_errors, format('challenge %s not in scope', v_id));
+    end if;
+    if v_dec is null or v_dec not in ('keep', 'adjust', 'replace') then
+      v_errors := array_append(v_errors, format('challenge %s invalid decision', v_id));
+    end if;
+    if v_dec in ('adjust', 'replace') and (v_elem ->> 'comment') is null then
+      v_errors := array_append(v_errors, format('challenge %s requires comment', v_id));
+    end if;
+    if v_dec = 'adjust' and not (v_elem ? 'proposed_changes') then
+      v_errors := array_append(v_errors, format('challenge %s adjust needs proposed_changes', v_id));
+    end if;
+    if v_dec = 'replace' and not (v_elem ? 'replacement') then
+      v_errors := array_append(v_errors, format('challenge %s replace needs replacement', v_id));
+    end if;
+  end loop;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(p_decisions -> 'focus_areas', '[]'::jsonb))
+  loop
+    v_id := nullif(v_elem ->> 'id', '')::uuid;
+    v_dec := v_elem ->> 'decision';
+    if v_id is null then
+      v_errors := array_append(v_errors, 'focus_area entry missing id');
+      continue;
+    end if;
+    if not (v_id = any (v_scope_focus)) then
+      v_errors := array_append(v_errors, format('focus_area %s not in scope', v_id));
+    end if;
+    if v_dec is null or v_dec not in ('double_down', 'adjust', 'stop') then
+      v_errors := array_append(v_errors, format('focus_area %s invalid decision', v_id));
+    end if;
+    if v_dec in ('adjust', 'stop') and (v_elem ->> 'comment') is null then
+      v_errors := array_append(v_errors, format('focus_area %s requires comment', v_id));
+    end if;
+    if v_dec = 'adjust' and not (v_elem ? 'proposed_changes') then
+      v_errors := array_append(v_errors, format('focus_area %s adjust needs proposed_changes', v_id));
+    end if;
+  end loop;
+
+  for v_elem in select * from jsonb_array_elements(coalesce(p_decisions -> 'objectives', '[]'::jsonb))
+  loop
+    v_id := nullif(v_elem ->> 'id', '')::uuid;
+    v_dec := v_elem ->> 'decision';
+    if v_id is null then
+      v_errors := array_append(v_errors, 'objective entry missing id');
+      continue;
+    end if;
+    if not (v_id = any (v_scope_objectives)) then
+      v_errors := array_append(v_errors, format('objective %s not in scope', v_id));
+    end if;
+    if v_dec is null or v_dec not in ('keep', 'change', 'remove') then
+      v_errors := array_append(v_errors, format('objective %s invalid decision', v_id));
+    end if;
+    if v_dec in ('change', 'remove') and (v_elem ->> 'comment') is null then
+      v_errors := array_append(v_errors, format('objective %s requires comment', v_id));
+    end if;
+    if v_dec = 'change' and not (v_elem ? 'proposed_changes') then
+      v_errors := array_append(v_errors, format('objective %s change needs proposed_changes', v_id));
+    end if;
+  end loop;
+
+  if cardinality(v_errors) = 0 then
+    select count(*) into v_n from jsonb_array_elements(coalesce(p_decisions -> 'challenges', '[]'::jsonb));
+    if v_n <> coalesce(cardinality(v_scope_challenges), 0) then
+      v_errors := array_append(v_errors, 'challenges: decision count must match scope');
+    end if;
+    select count(*) into v_n from jsonb_array_elements(coalesce(p_decisions -> 'focus_areas', '[]'::jsonb));
+    if v_n <> coalesce(cardinality(v_scope_focus), 0) then
+      v_errors := array_append(v_errors, 'focus_areas: decision count must match scope');
+    end if;
+    select count(*) into v_n from jsonb_array_elements(coalesce(p_decisions -> 'objectives', '[]'::jsonb));
+    if v_n <> coalesce(cardinality(v_scope_objectives), 0) then
+      v_errors := array_append(v_errors, 'objectives: decision count must match scope');
+    end if;
+  end if;
+
+  if cardinality(v_errors) > 0 then
+    return jsonb_build_object('valid', false, 'errors', to_jsonb(v_errors));
+  end if;
+
+  return jsonb_build_object('valid', true, 'errors', '[]'::jsonb);
 end;
 $$;
 
@@ -4361,7 +5698,8 @@ CREATE TABLE app.cycle_cutover_snapshots (
     summary jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_by_membership_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT cycle_cutover_snapshots_snapshot_type_check CHECK ((snapshot_type = 'analysis_carry_forward'::text))
+    review_id uuid,
+    CONSTRAINT cycle_cutover_snapshots_snapshot_type_check CHECK ((snapshot_type = ANY (ARRAY['analysis_carry_forward'::text, 'strategy_review_release'::text])))
 );
 
 
@@ -5064,6 +6402,8 @@ CREATE TABLE app.objectives (
     objective_health_override_by_membership_id uuid,
     objective_health_override_at timestamp with time zone,
     objective_review_comment text,
+    strategy_carry_source_id uuid,
+    strategy_carry_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT objectives_ai_clarity_score_check CHECK (((ai_clarity_score IS NULL) OR ((ai_clarity_score >= 1) AND (ai_clarity_score <= 5)))),
     CONSTRAINT objectives_ai_confidence_score_check CHECK (((ai_confidence_score IS NULL) OR ((ai_confidence_score >= 1) AND (ai_confidence_score <= 5)))),
     CONSTRAINT objectives_ai_evaluation_status_check CHECK ((ai_evaluation_status = ANY (ARRAY['not_run'::text, 'valid'::text, 'outdated'::text, 'failed'::text]))),
@@ -5130,6 +6470,26 @@ CREATE TABLE app.okr_reviews (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_instance_id uuid NOT NULL,
+    review_mode text DEFAULT 'okr_execution'::text NOT NULL,
+    procedure_status text DEFAULT 'not_started'::text NOT NULL,
+    review_lead_time_days integer DEFAULT 90 NOT NULL,
+    pre_read_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    stakeholder_feedback_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    decision_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    release_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    readiness_status text DEFAULT 'not_ready'::text NOT NULL,
+    override_forced boolean DEFAULT false NOT NULL,
+    override_reason text,
+    override_forced_by uuid,
+    override_forced_at timestamp with time zone,
+    released_to_cycle_instance_id uuid,
+    released_at timestamp with time zone,
+    announcement_sent_at timestamp with time zone,
+    announcement_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT okr_reviews_procedure_status_check CHECK ((procedure_status = ANY (ARRAY['not_started'::text, 'announcement_sent'::text, 'pre_read_open'::text, 'ready_for_review'::text, 'review_in_progress'::text, 'decision_captured'::text, 'released'::text, 'cancelled'::text]))),
+    CONSTRAINT okr_reviews_readiness_status_check CHECK ((readiness_status = ANY (ARRAY['not_ready'::text, 'partially_ready'::text, 'ready'::text]))),
+    CONSTRAINT okr_reviews_review_lead_time_days_check CHECK (((review_lead_time_days >= 1) AND (review_lead_time_days <= 730))),
+    CONSTRAINT okr_reviews_review_mode_check CHECK ((review_mode = ANY (ARRAY['okr_execution'::text, 'strategy_review'::text]))),
     CONSTRAINT okr_reviews_review_type_check CHECK ((review_type = ANY (ARRAY['quarterly_review'::text, 'retrospective'::text, 'annual_review'::text])))
 );
 
@@ -5491,6 +6851,8 @@ CREATE TABLE app.strategic_challenges (
     challenge_score numeric(6,2) DEFAULT 3.00 NOT NULL,
     created_by_source text DEFAULT 'user'::text NOT NULL,
     source_cluster_id uuid,
+    strategy_carry_source_id uuid,
+    strategy_carry_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT strategic_challenges_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT strategic_challenges_impact_score_check CHECK (((impact_score >= 1) AND (impact_score <= 5))),
     CONSTRAINT strategic_challenges_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
@@ -5639,6 +7001,8 @@ CREATE TABLE app.strategic_directions (
     feasibility_score smallint DEFAULT 3 NOT NULL,
     created_by_source text DEFAULT 'user'::text NOT NULL,
     review_comment text,
+    strategy_carry_source_id uuid,
+    strategy_carry_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT strategic_directions_capability_fit_score_check CHECK (((capability_fit_score >= 1) AND (capability_fit_score <= 5))),
     CONSTRAINT strategic_directions_created_by_source_check CHECK ((created_by_source = ANY (ARRAY['user'::text, 'sentinel'::text]))),
     CONSTRAINT strategic_directions_feasibility_score_check CHECK (((feasibility_score >= 1) AND (feasibility_score <= 5))),
@@ -5824,6 +7188,30 @@ COMMENT ON COLUMN app.strategy_programs.matrix_cell_score IS 'Snapshot des Matri
 --
 
 COMMENT ON COLUMN app.strategy_programs.supported_objective_ids IS 'Objectives, die das Programm laut Matrix-Kontext unterstuetzt.';
+
+
+--
+-- Name: strategy_review_feedback_entries; Type: TABLE; Schema: app; Owner: -
+--
+
+CREATE TABLE app.strategy_review_feedback_entries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    review_id uuid NOT NULL,
+    organization_id uuid NOT NULL,
+    cycle_instance_id uuid NOT NULL,
+    subject_type text NOT NULL,
+    subject_id uuid NOT NULL,
+    actor_id uuid NOT NULL,
+    rating text,
+    comment text,
+    is_required_role boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT strategy_review_feedback_entries_subject_type_check CHECK ((subject_type = ANY (ARRAY['challenge'::text, 'focus_area'::text, 'objective'::text]))),
+    CONSTRAINT strategy_review_feedback_rating_challenge CHECK (((subject_type <> 'challenge'::text) OR (rating IS NULL) OR (rating = ANY (ARRAY['improved'::text, 'unchanged'::text, 'worsened'::text])))),
+    CONSTRAINT strategy_review_feedback_rating_focus CHECK (((subject_type <> 'focus_area'::text) OR (rating IS NULL) OR (rating = ANY (ARRAY['high_impact'::text, 'medium_impact'::text, 'low_impact'::text, 'negative_impact'::text])))),
+    CONSTRAINT strategy_review_feedback_rating_objective CHECK (((subject_type <> 'objective'::text) OR (rating IS NULL) OR (rating = ANY (ARRAY['keep'::text, 'sharpen'::text, 'questionable'::text]))))
+);
 
 
 --
@@ -8058,6 +9446,14 @@ ALTER TABLE ONLY app.strategy_programs
 
 
 --
+-- Name: strategy_review_feedback_entries strategy_review_feedback_entries_pkey; Type: CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_review_feedback_entries
+    ADD CONSTRAINT strategy_review_feedback_entries_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: target_metric_links target_metric_links_pkey; Type: CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -8744,6 +10140,13 @@ CREATE INDEX idx_challenge_direction_links_org_cycle_instance ON app.challenge_d
 --
 
 CREATE INDEX idx_cycle_cutover_snapshots_org_created ON app.cycle_cutover_snapshots USING btree (organization_id, created_at DESC);
+
+
+--
+-- Name: idx_cycle_cutover_snapshots_review; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_cycle_cutover_snapshots_review ON app.cycle_cutover_snapshots USING btree (review_id) WHERE (review_id IS NOT NULL);
 
 
 --
@@ -9545,6 +10948,20 @@ CREATE INDEX idx_strategy_programs_challenge ON app.strategy_programs USING btre
 
 
 --
+-- Name: idx_strategy_review_feedback_review; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategy_review_feedback_review ON app.strategy_review_feedback_entries USING btree (review_id, created_at DESC);
+
+
+--
+-- Name: idx_strategy_review_feedback_subject; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE INDEX idx_strategy_review_feedback_subject ON app.strategy_review_feedback_entries USING btree (subject_type, subject_id);
+
+
+--
 -- Name: idx_target_metric_links_org_cycle; Type: INDEX; Schema: app; Owner: -
 --
 
@@ -9563,6 +10980,13 @@ CREATE INDEX idx_target_metric_links_org_cycle_instance ON app.target_metric_lin
 --
 
 CREATE UNIQUE INDEX okr_reviews_one_per_okr_session ON app.okr_reviews USING btree (organization_id, okr_cycle_id, cycle_instance_id, review_type) WHERE (okr_cycle_id IS NOT NULL);
+
+
+--
+-- Name: okr_reviews_one_strategy_per_instance; Type: INDEX; Schema: app; Owner: -
+--
+
+CREATE UNIQUE INDEX okr_reviews_one_strategy_per_instance ON app.okr_reviews USING btree (organization_id, cycle_instance_id) WHERE (review_mode = 'strategy_review'::text);
 
 
 --
@@ -10455,6 +11879,13 @@ CREATE TRIGGER trg_audit_strategic_metrics AFTER INSERT OR DELETE OR UPDATE ON a
 
 
 --
+-- Name: strategy_review_feedback_entries trg_audit_strategy_review_feedback; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_audit_strategy_review_feedback AFTER INSERT OR DELETE OR UPDATE ON app.strategy_review_feedback_entries FOR EACH ROW EXECUTE FUNCTION audit.log_row_change();
+
+
+--
 -- Name: tenant_branding trg_audit_tenant_branding; Type: TRIGGER; Schema: app; Owner: -
 --
 
@@ -10690,6 +12121,20 @@ CREATE TRIGGER trg_strategic_goals_updated_at BEFORE UPDATE ON app.strategic_goa
 --
 
 CREATE TRIGGER trg_strategic_metrics_updated_at BEFORE UPDATE ON app.strategic_metrics FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
+
+
+--
+-- Name: strategy_review_feedback_entries trg_strategy_review_feedback_sync; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_strategy_review_feedback_sync BEFORE INSERT OR UPDATE OF review_id ON app.strategy_review_feedback_entries FOR EACH ROW EXECUTE FUNCTION app.tg_strategy_review_feedback_sync();
+
+
+--
+-- Name: strategy_review_feedback_entries trg_strategy_review_feedback_updated_at; Type: TRIGGER; Schema: app; Owner: -
+--
+
+CREATE TRIGGER trg_strategy_review_feedback_updated_at BEFORE UPDATE ON app.strategy_review_feedback_entries FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
 
 
 --
@@ -11772,6 +13217,14 @@ ALTER TABLE ONLY app.cycle_cutover_snapshots
 
 
 --
+-- Name: cycle_cutover_snapshots cycle_cutover_snapshots_review_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.cycle_cutover_snapshots
+    ADD CONSTRAINT cycle_cutover_snapshots_review_id_fkey FOREIGN KEY (review_id) REFERENCES app.okr_reviews(id) ON DELETE SET NULL;
+
+
+--
 -- Name: cycle_cutover_snapshots cycle_cutover_snapshots_to_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -12748,6 +14201,22 @@ ALTER TABLE ONLY app.okr_reviews
 
 
 --
+-- Name: okr_reviews okr_reviews_override_forced_by_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.okr_reviews
+    ADD CONSTRAINT okr_reviews_override_forced_by_fkey FOREIGN KEY (override_forced_by) REFERENCES app.organization_memberships(id) ON DELETE SET NULL;
+
+
+--
+-- Name: okr_reviews okr_reviews_released_to_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.okr_reviews
+    ADD CONSTRAINT okr_reviews_released_to_cycle_instance_id_fkey FOREIGN KEY (released_to_cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE SET NULL;
+
+
+--
 -- Name: okr_updates okr_updates_created_by_membership_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
 --
 
@@ -13705,6 +15174,38 @@ ALTER TABLE ONLY app.strategy_programs
 
 ALTER TABLE ONLY app.strategy_programs
     ADD CONSTRAINT strategy_programs_strategic_direction_id_fkey FOREIGN KEY (strategic_direction_id) REFERENCES app.strategic_directions(id) ON DELETE SET NULL;
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_entries_actor_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_review_feedback_entries
+    ADD CONSTRAINT strategy_review_feedback_entries_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES app.organization_memberships(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_entries_cycle_instance_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_review_feedback_entries
+    ADD CONSTRAINT strategy_review_feedback_entries_cycle_instance_id_fkey FOREIGN KEY (cycle_instance_id) REFERENCES app.cycle_instances(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_entries_organization_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_review_feedback_entries
+    ADD CONSTRAINT strategy_review_feedback_entries_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES app.organizations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_entries_review_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: -
+--
+
+ALTER TABLE ONLY app.strategy_review_feedback_entries
+    ADD CONSTRAINT strategy_review_feedback_entries_review_id_fkey FOREIGN KEY (review_id) REFERENCES app.okr_reviews(id) ON DELETE CASCADE;
 
 
 --
@@ -15742,6 +17243,44 @@ CREATE POLICY strategy_programs_select ON app.strategy_programs FOR SELECT USING
 
 
 --
+-- Name: strategy_review_feedback_entries strategy_review_feedback_delete; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_review_feedback_delete ON app.strategy_review_feedback_entries FOR DELETE USING (app.has_permission(organization_id, 'strategy_review.moderate'::text));
+
+
+--
+-- Name: strategy_review_feedback_entries; Type: ROW SECURITY; Schema: app; Owner: -
+--
+
+ALTER TABLE app.strategy_review_feedback_entries ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_insert; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_review_feedback_insert ON app.strategy_review_feedback_entries FOR INSERT WITH CHECK ((app.has_permission(organization_id, 'strategy_review.feedback'::text) AND (actor_id IN ( SELECT m.id
+   FROM app.organization_memberships m
+  WHERE ((m.organization_id = strategy_review_feedback_entries.organization_id) AND (m.user_id = auth.uid()) AND (m.status = 'active'::text))))));
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_select; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_review_feedback_select ON app.strategy_review_feedback_entries FOR SELECT USING (app.has_permission(organization_id, 'review.read'::text));
+
+
+--
+-- Name: strategy_review_feedback_entries strategy_review_feedback_update; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY strategy_review_feedback_update ON app.strategy_review_feedback_entries FOR UPDATE USING ((app.has_permission(organization_id, 'strategy_review.feedback'::text) AND (actor_id IN ( SELECT m.id
+   FROM app.organization_memberships m
+  WHERE ((m.organization_id = strategy_review_feedback_entries.organization_id) AND (m.user_id = auth.uid()) AND (m.status = 'active'::text))))));
+
+
+--
 -- Name: target_metric_links; Type: ROW SECURITY; Schema: app; Owner: -
 --
 
@@ -16321,5 +17860,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0080'),
     ('0081'),
     ('0082'),
+    ('0083'),
     ('009'),
     ('010');

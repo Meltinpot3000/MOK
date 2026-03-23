@@ -2,8 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
-import { getReviewCycleData, getReviewDashboardData } from "@/lib/review/queries";
-import { ReviewDashboard } from "@/components/ceo/ReviewDashboard";
+import { getReviewCycleData } from "@/lib/review/queries";
 import { ReviewAttentionRequired } from "@/components/ceo/review/ReviewAttentionRequired";
 import { ReviewCycleOverview } from "@/components/ceo/review/ReviewCycleOverview";
 import { ReviewInitiativeList } from "@/components/ceo/review/ReviewInitiativeList";
@@ -19,7 +18,7 @@ function getLinkStatus(error?: string, success?: string) {
   return null;
 }
 
-const VALID_TABS = ["overview", "directions", "attention", "initiatives", "dashboard"] as const;
+const VALID_TABS = ["overview", "directions", "attention", "initiatives"] as const;
 type ReviewTab = (typeof VALID_TABS)[number];
 
 function parseTab(raw: string | undefined): ReviewTab {
@@ -43,12 +42,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
 
-  const [cycleData, dashboardData] = await Promise.all([
-    getReviewCycleData(context.organizationId, cycle.id),
-    activeTab === "dashboard"
-      ? getReviewDashboardData(context.organizationId, cycle.id)
-      : Promise.resolve(null),
-  ]);
+  const cycleData = await getReviewCycleData(context.organizationId, cycle.id);
 
   const directionNameById = Object.fromEntries(
     cycleData.directions.map((d) => [d.id, d.title])
@@ -96,9 +90,6 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         <Link href="/reviews?tab=initiatives" className={tabClass("initiatives")}>
           Initiativen
         </Link>
-        <Link href="/reviews?tab=dashboard" className={tabClass("dashboard")}>
-          OKR-Uebersicht (Legacy)
-        </Link>
       </div>
 
       {!canWrite ? (
@@ -138,9 +129,6 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         />
       ) : null}
 
-      {activeTab === "dashboard" && dashboardData ? (
-        <ReviewDashboard data={dashboardData} cycleName={cycle.name} canWrite={canWrite} />
-      ) : null}
     </div>
   );
 }
