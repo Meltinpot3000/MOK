@@ -1,13 +1,16 @@
 "use client";
 
-import { SortableTableHeader } from "@/components/table/SortableTableHeader";
-import { compareSortKeys } from "@/lib/table/compare-sort-keys";
-import { useMemo, useState } from "react";
+import {
+  ExpandableTable,
+  type ColumnDef,
+} from "@/components/ceo/ExpandableTable";
+import { useMemo } from "react";
 
 type MembershipRow = {
   id: string;
   user_id: string;
   status: "active" | "invited" | "suspended";
+  /** Funktions-/Anzeigetitel (Tabellenspalte app.organization_memberships.title). */
   title: string | null;
   created_at: string;
   responsible_id: string | null;
@@ -44,11 +47,8 @@ type Props = {
   }>;
   editableRoles: Array<{ id: string; code: string; name: string }>;
   canWrite: boolean;
-  updateMembershipRole: (formData: FormData) => Promise<void>;
-  assignResponsibleToMembership: (formData: FormData) => Promise<void>;
+  saveMembershipRow: (formData: FormData) => Promise<void>;
 };
-
-type SortCol = "user" | "status" | "role" | "responsible";
 
 function displayUser(membership: MembershipRow, identityByUserId: Record<string, UserIdentity>) {
   const responsible = Array.isArray(membership.responsible)
@@ -63,6 +63,12 @@ function displayUser(membership: MembershipRow, identityByUserId: Record<string,
   return { displayName, displayEmail };
 }
 
+function responsibleSummary(membership: MembershipRow): string {
+  const r = Array.isArray(membership.responsible) ? membership.responsible[0] : membership.responsible;
+  if (!r) return "";
+  return `${r.full_name}${r.role_title ? ` (${r.role_title})` : ""}`;
+}
+
 export function InvitationsMembershipTable({
   memberships,
   identityByUserId,
@@ -70,129 +76,137 @@ export function InvitationsMembershipTable({
   responsibles,
   editableRoles,
   canWrite,
-  updateMembershipRole,
-  assignResponsibleToMembership,
+  saveMembershipRow,
 }: Props) {
-  const [sortCol, setSortCol] = useState<SortCol | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
-  const requestSort = (col: SortCol) => {
-    if (sortCol === col) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortCol(col);
-      setSortDir("asc");
-    }
-  };
-
-  const sorted = useMemo(() => {
-    if (!sortCol) return memberships;
-    const mul = sortDir === "asc" ? 1 : -1;
-    return [...memberships].sort((a, b) => {
-      let va: string | number | null = null;
-      let vb: string | number | null = null;
-      if (sortCol === "user") {
-        va = displayUser(a, identityByUserId).displayName;
-        vb = displayUser(b, identityByUserId).displayName;
-      } else if (sortCol === "status") {
-        va = a.status;
-        vb = b.status;
-      } else if (sortCol === "role") {
-        va = (roleCodesByMembership[a.id] ?? [])[0] ?? "";
-        vb = (roleCodesByMembership[b.id] ?? [])[0] ?? "";
-      } else {
-        const ra = Array.isArray(a.responsible) ? a.responsible[0] : a.responsible;
-        const rb = Array.isArray(b.responsible) ? b.responsible[0] : b.responsible;
-        va = ra ? `${ra.full_name}${ra.role_title ? ` (${ra.role_title})` : ""}` : "";
-        vb = rb ? `${rb.full_name}${rb.role_title ? ` (${rb.role_title})` : ""}` : "";
-      }
-      return compareSortKeys(va, vb) * mul;
-    });
-  }, [memberships, sortCol, sortDir, identityByUserId, roleCodesByMembership]);
+  const columns: ColumnDef<MembershipRow>[] = useMemo(
+    () => [
+      {
+        id: "user",
+        label: "Benutzer",
+        sortValue: (row) => displayUser(row, identityByUserId).displayName,
+        render: (row) => {
+          const { displayName, displayEmail } = displayUser(row, identityByUserId);
+          return (
+            <div>
+              <div className="font-medium text-zinc-900">{displayName}</div>
+              <div className="text-zinc-500">{displayEmail ?? "E-Mail nicht verfuegbar"}</div>
+              {row.title?.trim() ? (
+                <div className="mt-1 text-xs text-zinc-600">
+                  Titel: <span className="font-medium text-zinc-800">{row.title}</span>
+                </div>
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "status",
+        label: "Status",
+        sortValue: (row) => row.status,
+        render: (row) => <span className="text-zinc-800">{row.status}</span>,
+      },
+      {
+        id: "roles",
+        label: "Rollen",
+        sortValue: (row) => [...(roleCodesByMembership[row.id] ?? [])].sort().join(", "),
+        render: (row) => {
+          const codes = [...(roleCodesByMembership[row.id] ?? [])].sort();
+          return (
+            <span className="text-zinc-800">
+              {codes.length > 0 ? codes.join(", ") : "—"}
+            </span>
+          );
+        },
+      },
+      {
+        id: "responsible",
+        label: "Verantwortliche",
+        sortValue: (row) => responsibleSummary(row),
+        render: (row) => {
+          const text = responsibleSummary(row);
+          return <span className="text-zinc-800">{text || "—"}</span>;
+        },
+      },
+    ],
+    [identityByUserId, roleCodesByMembership]
+  );
 
   return (
-    <table className="min-w-full text-sm">
-      <thead>
-        <tr className="border-b border-zinc-200 text-left text-zinc-500">
-          <SortableTableHeader
-            label="Benutzer"
-            sortDirection={sortCol === "user" ? sortDir : null}
-            onRequestSort={() => requestSort("user")}
-            className="py-2 pr-3"
-            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
-          />
-          <SortableTableHeader
-            label="Status"
-            sortDirection={sortCol === "status" ? sortDir : null}
-            onRequestSort={() => requestSort("status")}
-            className="py-2 pr-3"
-            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
-          />
-          <SortableTableHeader
-            label="Rolle"
-            sortDirection={sortCol === "role" ? sortDir : null}
-            onRequestSort={() => requestSort("role")}
-            className="py-2 pr-3"
-            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
-          />
-          <SortableTableHeader
-            label="Verantwortlicher"
-            sortDirection={sortCol === "responsible" ? sortDir : null}
-            onRequestSort={() => requestSort("responsible")}
-            className="py-2 pr-3"
-            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
-          />
-          <th className="py-2 pr-3">Aktion</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((membership) => {
-          const roleCodes = roleCodesByMembership[membership.id] ?? [];
-          const responsible = Array.isArray(membership.responsible)
-            ? membership.responsible[0]
-            : membership.responsible;
-          const { displayName, displayEmail } = displayUser(membership, identityByUserId);
-          return (
-            <tr key={membership.id} className="border-b border-zinc-100 align-top">
-              <td className="py-3 pr-3">
-                <div className="font-medium text-zinc-900">{displayName}</div>
-                <div className="text-xs text-zinc-500">{displayEmail ?? "E-Mail nicht verfuegbar"}</div>
-              </td>
-              <td className="py-3 pr-3">{membership.status}</td>
-              <td className="py-3 pr-3">
-                <form action={updateMembershipRole} className="flex items-center gap-2">
-                  <input type="hidden" name="membership_id" value={membership.id} />
-                  <select
-                    name="role_code"
-                    defaultValue={roleCodes[0] ?? ""}
-                    disabled={!canWrite}
-                    className="min-w-[200px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                  >
-                    <option value="">Rolle waehlen</option>
-                    {editableRoles.map((role) => (
-                      <option key={role.id} value={role.code}>
-                        {role.name} ({role.code})
-                      </option>
-                    ))}
-                  </select>
-                  <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                    Speichern
-                  </button>
-                </form>
-              </td>
-              <td className="py-3 pr-3">
-                {responsible
-                  ? `${responsible.full_name}${responsible.role_title ? ` (${responsible.role_title})` : ""}`
-                  : "-"}
-              </td>
-              <td className="py-3 pr-3">
-                <form action={assignResponsibleToMembership} className="flex items-center gap-2">
-                  <input type="hidden" name="membership_id" value={membership.id} />
+    <ExpandableTable<MembershipRow>
+      enableColumnPickerUi={false}
+      columns={columns}
+      rows={memberships}
+      getRowId={(row) => row.id}
+      expandLabel="Einstellungen"
+      emptyMessage="Keine Benutzer-Memberships vorhanden."
+      renderExpandedContent={(membership) => {
+        const roleCodes = (roleCodesByMembership[membership.id] ?? []).slice().sort();
+        const responsible = Array.isArray(membership.responsible)
+          ? membership.responsible[0]
+          : membership.responsible;
+        return (
+          <form action={saveMembershipRow} className="mx-auto max-w-3xl space-y-4">
+            <input type="hidden" name="membership_id" value={membership.id} />
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Rollen und Verantwortliche bearbeiten
+            </p>
+            <div className="space-y-4 border-t border-zinc-200 pt-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-800">
+                  Titel / Funktion in der Organisation
+                  <span className="ml-1 font-normal text-zinc-500">(optional)</span>
+                </label>
+                <input
+                  name="membership_title"
+                  type="text"
+                  defaultValue={membership.title ?? ""}
+                  disabled={!canWrite}
+                  placeholder="z. B. Fachreferent, Team Lead"
+                  className="mt-1 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  Wird in der Benutzerliste angezeigt; unabhaengig vom Namen aus dem Login-Konto.
+                </p>
+              </div>
+              <div className="grid gap-6 md:grid-cols-2">
+                <fieldset disabled={!canWrite} className="min-w-0 space-y-1.5 border-0 p-0">
+                  <legend className="mb-2 text-sm font-medium text-zinc-800">
+                    Organisation-Rollen
+                  </legend>
+                  {editableRoles.map((role) => (
+                    <label
+                      key={role.id}
+                      className={`flex items-start gap-2 text-sm ${canWrite ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        name="role_codes"
+                        value={role.code}
+                        defaultChecked={roleCodes.includes(role.code)}
+                        className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-zinc-300 accent-blue-600"
+                      />
+                      <span className="text-zinc-800">
+                        {role.name}{" "}
+                        <span className="text-zinc-500">({role.code})</span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+                <div className="md:border-l md:border-zinc-200 md:pl-6">
+                  <p className="mb-2 text-sm font-medium text-zinc-800">Verantwortliche Zuordnung</p>
+                  <p className="mb-2 text-xs text-zinc-500">
+                    <span className="font-medium text-zinc-600">Aktuell:</span>{" "}
+                    {responsible
+                      ? `${responsible.full_name}${
+                          responsible.role_title ? ` (${responsible.role_title})` : ""
+                        }`
+                      : "keine Zuordnung"}
+                  </p>
                   <select
                     name="responsible_id"
                     defaultValue={membership.responsible_id ?? ""}
                     disabled={!canWrite}
-                    className="min-w-[260px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
+                    className="w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
                   >
                     <option value="">Keine Zuordnung</option>
                     {responsibles.map((entry) => (
@@ -202,15 +216,21 @@ export function InvitationsMembershipTable({
                       </option>
                     ))}
                   </select>
-                  <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-3 py-1.5 text-xs">
-                    Speichern
-                  </button>
-                </form>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end border-t border-zinc-200 pt-4">
+              <button
+                type="submit"
+                disabled={!canWrite}
+                className="brand-btn px-4 py-2 text-sm font-medium"
+              >
+                Speichern
+              </button>
+            </div>
+          </form>
+        );
+      }}
+    />
   );
 }

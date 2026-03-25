@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getReviewCycleData } from "@/lib/review/queries";
+import { buildReviewOwnerSelectOptions } from "@/lib/review/review-owner-options";
 import { ReviewAttentionRequired } from "@/components/ceo/review/ReviewAttentionRequired";
 import { ReviewCycleOverview } from "@/components/ceo/review/ReviewCycleOverview";
 import { ReviewInitiativeList } from "@/components/ceo/review/ReviewInitiativeList";
@@ -46,6 +47,10 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
 
   const directionNameById = Object.fromEntries(
     cycleData.directions.map((d) => [d.id, d.title])
+  );
+  const reviewOwnerSelectOptions = buildReviewOwnerSelectOptions(
+    cycleData.ownerOptions,
+    cycleData.initiativeRows
   );
 
   const tabClass = (tab: ReviewTab) =>
@@ -113,6 +118,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
           initiativeRows={cycleData.initiativeRows}
           annualTargetsByDirectionId={cycleData.annualTargetsByDirectionId}
           attentionItems={cycleData.attentionItems}
+          ownerSelectOptions={reviewOwnerSelectOptions}
           canWrite={canWrite}
         />
       ) : null}
@@ -125,6 +131,7 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         <ReviewInitiativeList
           initiativeRows={cycleData.initiativeRows}
           directionNameById={directionNameById}
+          ownerSelectOptions={reviewOwnerSelectOptions}
           canWrite={canWrite}
         />
       ) : null}

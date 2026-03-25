@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getAuthenticatedUserId, getCeoAccessContext } from "@/lib/ceo/queries";
+import { getAuthenticatedUserId } from "@/lib/ceo/queries";
+import { getAppShellAccess } from "@/lib/rbac/page-access";
 import { getPlanningCyclesForOrganization } from "@/lib/planning/queries";
 
 export type Phase0Context = {
@@ -60,14 +61,14 @@ export async function getPhase0Context(): Promise<Phase0Context | null> {
     return null;
   }
 
-  const access = await getCeoAccessContext(userId);
-  if (!access) {
+  const shell = await getAppShellAccess(userId);
+  if (!shell) {
     return null;
   }
 
   return {
-    organizationId: access.organizationId,
-    membershipId: access.membershipId,
+    organizationId: shell.access.organizationId,
+    membershipId: shell.access.membershipId,
   };
 }
 

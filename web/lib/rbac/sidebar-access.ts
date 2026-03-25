@@ -23,16 +23,24 @@ export async function getSidebarPermissionsForMembership(
   const { data: memberRoles } = await supabase
     .schema("rbac")
     .from("member_roles")
-    .select("role_id, roles(code)")
+    .select("role_id")
     .eq("membership_id", membershipId);
 
   const roleIds = [...new Set((memberRoles ?? []).map((row) => row.role_id))];
-  const hasOrgAdminRole = (memberRoles ?? []).some(
-    (row) => (row.roles as { code?: string } | null)?.code === "org_admin"
-  );
   if (roleIds.length === 0) {
     return permissions;
   }
+
+  const { data: roleRows } = await supabase
+    .schema("rbac")
+    .from("roles")
+    .select("id, code")
+    .in("id", roleIds);
+  const roleCodeById = new Map((roleRows ?? []).map((row) => [row.id, row.code]));
+  const roleCodes = [...new Set(roleIds.map((id) => roleCodeById.get(id)).filter(Boolean) as string[])];
+  const hasOrgAdminRole = roleCodes.includes("org_admin");
+  const hasExecutiveRole = roleCodes.includes("executive");
+  const hasDepartmentLeadRole = roleCodes.includes("department_lead");
 
   const { data: rolePermissions } = await supabase
     .schema("rbac")
@@ -41,33 +49,40 @@ export async function getSidebarPermissionsForMembership(
     .in("role_id", roleIds);
 
   const permissionIds = [...new Set((rolePermissions ?? []).map((row) => row.permission_id))];
-  if (permissionIds.length === 0) {
-    return permissions;
-  }
 
-  const { data: permissionsData } = await supabase
-    .schema("rbac")
-    .from("permissions")
-    .select("id, code")
-    .in("id", permissionIds);
+  if (permissionIds.length > 0) {
+    const { data: permissionsData } = await supabase
+      .schema("rbac")
+      .from("permissions")
+      .select("id, code")
+      .in("id", permissionIds);
 
-  const codeSet = new Set((permissionsData ?? []).map((row) => row.code));
+    const codeSet = new Set((permissionsData ?? []).map((row) => row.code));
 
-  for (const itemId of SIDEBAR_ITEM_IDS) {
-    const read = codeSet.has(getReadPermissionCode(itemId));
-    const write = codeSet.has(getWritePermissionCode(itemId));
-    permissions[itemId] = {
-      read: read || write,
-      write,
-    };
+    for (const itemId of SIDEBAR_ITEM_IDS) {
+      const read = codeSet.has(getReadPermissionCode(itemId));
+      const write = codeSet.has(getWritePermissionCode(itemId));
+      permissions[itemId] = {
+        read: read || write,
+        write,
+      };
+    }
   }
 
   const hasAnySidebarPermission = SIDEBAR_ITEM_IDS.some(
     (itemId) => permissions[itemId].read || permissions[itemId].write
   );
+
+  /**
+   * Wenn nav.* in role_permissions fehlen: fuer Fuehrungsrollen Nav-Zugang setzen (sonst leere Sidebar).
+   */
   if (!hasAnySidebarPermission && hasOrgAdminRole) {
     for (const itemId of SIDEBAR_ITEM_IDS) {
       permissions[itemId] = { read: true, write: true };
+    }
+  } else if (!hasAnySidebarPermission && (hasExecutiveRole || hasDepartmentLeadRole)) {
+    for (const itemId of SIDEBAR_ITEM_IDS) {
+      permissions[itemId] = { read: true, write: false };
     }
   }
 

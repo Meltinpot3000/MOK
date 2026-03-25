@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { DEFAULT_INITIATIVE_WEIGHT } from "./initiative-review-fields";
 import { buildAttentionItems, type ReviewAttentionItem } from "./review-attention-rules";
@@ -12,10 +13,10 @@ import {
 } from "./review-cycle-view-model";
 
 const INITIATIVE_SELECT_WITH_REVIEW_ROLLUP =
-  "id, title, status, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at";
+  "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at";
 
 const INITIATIVE_SELECT_LEGACY =
-  "id, title, status, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment";
+  "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment";
 
 function isMissingReviewRollupColumnsError(message: string): boolean {
   if (!message.includes("does not exist")) return false;
@@ -99,13 +100,190 @@ export type ReviewCycleAnnualTargetBrief = {
   progress_percent: number;
 };
 
+/** Aktive Organisationsmitglieder fuer Review-Owner-Auswahl (Namen + Rollen aus dem Tenant). */
+export type ReviewCycleOwnerOption = {
+  membership_id: string;
+  display_name: string;
+  roles_label: string;
+};
+
+type OrgMembershipOwnerRow = {
+  id: string;
+  user_id: string;
+  status: string;
+  title: string | null;
+  responsible:
+    | {
+        full_name: string;
+        email: string | null;
+        role_title: string | null;
+      }
+    | Array<{
+        full_name: string;
+        email: string | null;
+        role_title: string | null;
+      }>
+    | null;
+};
+
+type MemberRoleAssignmentRow = {
+  membership_id: string;
+  role: { name: string } | { name: string }[] | null;
+};
+
+function normalizeMembershipResponsible(m: OrgMembershipOwnerRow) {
+  const r = m.responsible;
+  return Array.isArray(r) ? r[0] ?? null : r;
+}
+
+function baseDisplayNameForMembership(
+  m: OrgMembershipOwnerRow,
+  identityByUserId: Map<string, { email: string | null; name: string | null }>
+): string {
+  const responsible = normalizeMembershipResponsible(m);
+  const identity = identityByUserId.get(m.user_id);
+  const displayEmail = identity?.email ?? responsible?.email ?? null;
+  return (
+    identity?.name ??
+    responsible?.full_name ??
+    (displayEmail ? displayEmail.split("@")[0] : "Mitglied")
+  );
+}
+
+async function loadReviewCycleOwnerContext(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  initiativeOwnerMembershipIds: (string | null)[]
+): Promise<{
+  ownerLabelByMembershipId: Map<string, string>;
+  ownerOptions: ReviewCycleOwnerOption[];
+}> {
+  const ownerIdsFromInitiatives = new Set(
+    initiativeOwnerMembershipIds.filter((x): x is string => Boolean(x))
+  );
+
+  const { data: activeMembersRaw, error: activeErr } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select(
+      "id, user_id, status, title, responsible:responsible_id(full_name, email, role_title)"
+    )
+    .eq("organization_id", organizationId)
+    .eq("status", "active");
+
+  if (activeErr) {
+    console.error("[getReviewCycleData] organization_memberships (active)", activeErr.message);
+  }
+
+  const activeMembers = (activeMembersRaw ?? []) as OrgMembershipOwnerRow[];
+  const activeIdSet = new Set(activeMembers.map((m) => m.id));
+  const missingForLabels = [...ownerIdsFromInitiatives].filter((id) => !activeIdSet.has(id));
+
+  let extraMembers: OrgMembershipOwnerRow[] = [];
+  if (missingForLabels.length > 0) {
+    const { data: extraRaw, error: extraErr } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select(
+        "id, user_id, status, title, responsible:responsible_id(full_name, email, role_title)"
+      )
+      .eq("organization_id", organizationId)
+      .in("id", missingForLabels);
+    if (extraErr) {
+      console.error("[getReviewCycleData] organization_memberships (extra owners)", extraErr.message);
+    }
+    extraMembers = (extraRaw ?? []) as OrgMembershipOwnerRow[];
+  }
+
+  const allMembers = [...activeMembers, ...extraMembers];
+  const allIds = [...new Set(allMembers.map((m) => m.id))];
+
+  const roleNamesByMembership = new Map<string, string[]>();
+  if (allIds.length > 0) {
+    const { data: roleRows, error: roleErr } = await supabase
+      .schema("rbac")
+      .from("member_roles")
+      .select("membership_id, role:role_id(name)")
+      .in("membership_id", allIds);
+    if (roleErr) {
+      console.error("[getReviewCycleData] member_roles", roleErr.message);
+    }
+    for (const row of (roleRows ?? []) as MemberRoleAssignmentRow[]) {
+      const roleVal = Array.isArray(row.role) ? row.role[0] : row.role;
+      const name = roleVal?.name?.trim();
+      if (!name) continue;
+      const list = roleNamesByMembership.get(row.membership_id) ?? [];
+      list.push(name);
+      roleNamesByMembership.set(row.membership_id, list);
+    }
+    for (const [k, names] of [...roleNamesByMembership.entries()]) {
+      roleNamesByMembership.set(
+        k,
+        [...new Set(names)].sort((a, b) => a.localeCompare(b, "de"))
+      );
+    }
+  }
+
+  const identityByUserId = new Map<string, { email: string | null; name: string | null }>();
+  const adminClient = createSupabaseAdminClient();
+  const uniqueUserIds = [...new Set(allMembers.map((m) => m.user_id))];
+  if (adminClient && uniqueUserIds.length > 0) {
+    await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const { data } = await adminClient.auth.admin.getUserById(userId);
+        const email = data.user?.email?.toLowerCase() ?? null;
+        const metadata =
+          data.user?.user_metadata && typeof data.user.user_metadata === "object"
+            ? (data.user.user_metadata as Record<string, unknown>)
+            : null;
+        const fullNameRaw = metadata?.full_name ?? metadata?.name ?? metadata?.display_name ?? null;
+        const fullName =
+          typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0 ? fullNameRaw.trim() : null;
+        identityByUserId.set(userId, { email, name: fullName });
+      })
+    );
+  }
+
+  const ownerLabelByMembershipId = new Map<string, string>();
+  const ownerOptions: ReviewCycleOwnerOption[] = [];
+
+  const pushLabel = (membershipId: string, displayName: string, rolesSorted: string[]) => {
+    const roles_label = rolesSorted.join(", ");
+    const label = roles_label.length > 0 ? `${displayName} · ${roles_label}` : displayName;
+    ownerLabelByMembershipId.set(membershipId, label);
+  };
+
+  for (const m of extraMembers) {
+    const displayName = baseDisplayNameForMembership(m, identityByUserId);
+    const rolesSorted = roleNamesByMembership.get(m.id) ?? [];
+    pushLabel(m.id, displayName, rolesSorted);
+  }
+
+  for (const m of activeMembers) {
+    const displayName = baseDisplayNameForMembership(m, identityByUserId);
+    const rolesSorted = roleNamesByMembership.get(m.id) ?? [];
+    pushLabel(m.id, displayName, rolesSorted);
+    ownerOptions.push({
+      membership_id: m.id,
+      display_name: displayName,
+      roles_label: rolesSorted.join(", "),
+    });
+  }
+
+  ownerOptions.sort((a, b) =>
+    a.display_name.localeCompare(b.display_name, "de", { sensitivity: "base" })
+  );
+
+  return { ownerLabelByMembershipId, ownerOptions };
+}
+
 export type ReviewCycleData = {
   initiativeRows: ReviewCycleInitiativeInput[];
   directionSummaries: StrategicDirectionReviewSummary[];
   attentionItems: ReviewAttentionItem[];
   kpis: ReviewCycleKpis;
   directions: Array<{ id: string; title: string; status: string; priority: number }>;
-  ownerOptions: Array<{ membership_id: string; full_name: string }>;
+  ownerOptions: ReviewCycleOwnerOption[];
   annualTargetsByDirectionId: Record<string, ReviewCycleAnnualTargetBrief[]>;
   cycleInstanceId: string;
 };
@@ -123,7 +301,6 @@ export async function getReviewCycleData(
     initiativesResult,
     linksResult,
     targetsResult,
-    ownersResult,
     objectivesResult,
     dirObjLinksResult,
   ] = await Promise.all([
@@ -144,7 +321,7 @@ export async function getReviewCycleData(
       .schema("app")
       .from("initiatives")
       .select(
-        "id, title, status, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at"
+        "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at"
       )
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIds),
@@ -162,11 +339,6 @@ export async function getReviewCycleData(
       .in("cycle_instance_id", cycleIds),
     supabase
       .schema("app")
-      .from("responsibles")
-      .select("membership_id, full_name")
-      .eq("organization_id", organizationId),
-    supabase
-      .schema("app")
       .from("objectives")
       .select("id, title")
       .eq("organization_id", organizationId)
@@ -178,7 +350,7 @@ export async function getReviewCycleData(
       .eq("organization_id", organizationId),
   ]);
 
-  for (const label of ["directions", "programs", "initiatives", "links", "targets", "owners", "objectives", "dirObjLinks"] as const) {
+  for (const label of ["directions", "programs", "initiatives", "links", "targets", "objectives", "dirObjLinks"] as const) {
     const err =
       label === "directions"
         ? directionsResult.error
@@ -190,11 +362,9 @@ export async function getReviewCycleData(
               ? linksResult.error
               : label === "targets"
                 ? targetsResult.error
-                : label === "owners"
-                  ? ownersResult.error
-                  : label === "objectives"
-                    ? objectivesResult.error
-                    : dirObjLinksResult.error;
+                : label === "objectives"
+                  ? objectivesResult.error
+                  : dirObjLinksResult.error;
     if (err) console.error(`[getReviewCycleData] ${label}`, err.message);
   }
 
@@ -213,6 +383,7 @@ export async function getReviewCycleData(
     id: string;
     title: string;
     status: string;
+    priority: number | null;
     program_id: string | null;
     owner_membership_id: string | null;
     start_date: string | null;
@@ -225,6 +396,13 @@ export async function getReviewCycleData(
     progress_percent: number | null;
     last_review_update_at: string | null;
   }>;
+
+  const { ownerLabelByMembershipId, ownerOptions } = await loadReviewCycleOwnerContext(
+    supabase,
+    organizationId,
+    initiativesRaw.map((r) => r.owner_membership_id)
+  );
+
   const targetLinks = (linksResult.data ?? []) as Array<{
     initiative_id: string;
     annual_target_id: string;
@@ -235,7 +413,6 @@ export async function getReviewCycleData(
     title: string;
     progress_percent: number;
   }>;
-  const ownerRows = (ownersResult.data ?? []) as Array<{ membership_id: string; full_name: string }>;
   const objectives = (objectivesResult.data ?? []) as Array<{ id: string; title: string }>;
   const directionObjectiveLinks = (dirObjLinksResult.data ?? []) as Array<{
     strategic_direction_id: string;
@@ -276,7 +453,6 @@ export async function getReviewCycleData(
   );
   const programTitleById = new Map(programs.map((p) => [p.id, p.title]));
   const annualTargetById = new Map(annualTargets.map((t) => [t.id, t]));
-  const ownerNameByMembership = new Map(ownerRows.map((r) => [r.membership_id, r.full_name]));
 
   const now = new Date();
   let overdueKeyResultCount = 0;
@@ -289,11 +465,12 @@ export async function getReviewCycleData(
 
   const initiatives = initiativesRaw.map((row) => ({
     ...row,
+    priority: row.priority ?? 3,
     weight: row.weight ?? DEFAULT_INITIATIVE_WEIGHT,
     progress_percent: row.progress_percent ?? 0,
     program_title: row.program_id ? programTitleById.get(row.program_id) ?? null : null,
     owner_display_name: row.owner_membership_id
-      ? ownerNameByMembership.get(row.owner_membership_id) ?? null
+      ? ownerLabelByMembershipId.get(row.owner_membership_id) ?? null
       : null,
   }));
 
@@ -327,7 +504,7 @@ export async function getReviewCycleData(
     attentionItems,
     kpis,
     directions,
-    ownerOptions: ownerRows,
+    ownerOptions,
     annualTargetsByDirectionId,
     cycleInstanceId,
   };

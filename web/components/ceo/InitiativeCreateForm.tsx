@@ -3,20 +3,27 @@
 import { useEffect, useMemo, useState } from "react";
 import type { InitiativeKrLinkContext, PipKeyResultOption } from "@/lib/strategy-cycle/queries";
 
-const FORM_STATUSES = ["planned", "active", "on_hold", "completed"] as const;
+const FORM_STATUSES = [
+  "draft",
+  "planned",
+  "active",
+  "at_risk",
+  "on_hold",
+  "completed",
+  "archived",
+] as const;
 
 const STATUS_LABELS: Record<(typeof FORM_STATUSES)[number], string> = {
+  draft: "Draft",
   planned: "Geplant",
   active: "Aktiv",
+  at_risk: "Auffaellig",
   on_hold: "On Hold",
   completed: "Abgeschlossen",
-};
-
-const EXTRA_STATUS_LABELS: Record<string, string> = {
-  draft: "Entwurf",
-  at_risk: "Auffaellig",
   archived: "Archiviert",
 };
+
+const EXTRA_STATUS_LABELS: Record<string, string> = {};
 
 export type InitiativeFormSelection = {
   id: string;
@@ -29,6 +36,8 @@ export type InitiativeFormSelection = {
   description: string | null;
   annualTargetIds: string[];
   keyResultIds: string[];
+  start_date: string | null;
+  end_date: string | null;
 };
 
 type InitiativeCreateFormProps = {
@@ -43,6 +52,7 @@ type InitiativeCreateFormProps = {
   targetTitleById: Record<string, string>;
   krContextsByKrId: Record<string, InitiativeKrLinkContext>;
   onClearSelection: () => void;
+  showClearButton?: boolean;
 };
 
 function statusOptionsFor(current: string): string[] {
@@ -70,6 +80,7 @@ export function InitiativeCreateForm({
   targetTitleById,
   krContextsByKrId,
   onClearSelection,
+  showClearButton = true,
 }: InitiativeCreateFormProps) {
   const [title, setTitle] = useState("");
   const [programId, setProgramId] = useState("");
@@ -80,6 +91,8 @@ export function InitiativeCreateForm({
   const [description, setDescription] = useState("");
   const [targetIds, setTargetIds] = useState<string[]>([]);
   const [krIds, setKrIds] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [pickTarget, setPickTarget] = useState("");
   const [pickKr, setPickKr] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
@@ -98,6 +111,8 @@ export function InitiativeCreateForm({
       setDescription("");
       setTargetIds([]);
       setKrIds([]);
+      setStartDate("");
+      setEndDate("");
       setPickTarget("");
       setPickKr("");
       return;
@@ -130,6 +145,9 @@ export function InitiativeCreateForm({
       return "Fortschritt muss eine Zahl zwischen 0 und 100 sein.";
     }
     if (priority < 1 || priority > 5) return "Prioritaet muss zwischen 1 und 5 liegen.";
+    if (startDate && endDate && startDate > endDate) {
+      return "Das Enddatum darf nicht vor dem Startdatum liegen.";
+    }
     return null;
   };
 
@@ -169,12 +187,6 @@ export function InitiativeCreateForm({
     <form action={handleSave} className="mt-4 space-y-3">
       {isEdit ? <input type="hidden" name="initiative_id" value={selectedInitiative!.id} /> : null}
 
-      {clientError ? (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-          {clientError}
-        </p>
-      ) : null}
-
       <input type="hidden" name="title" value={title} />
       <input type="hidden" name="program_id" value={programId} />
       <input type="hidden" name="status" value={status} />
@@ -182,12 +194,20 @@ export function InitiativeCreateForm({
       <input type="hidden" name="owner_membership_id" value={ownerId} />
       <input type="hidden" name="progress_percent" value={String(progressNum)} />
       <input type="hidden" name="description" value={description} />
+      <input type="hidden" name="start_date" value={startDate} />
+      <input type="hidden" name="end_date" value={endDate} />
       {targetIds.map((id) => (
         <input key={id} type="hidden" name="annual_target_id" value={id} />
       ))}
       {krIds.map((id) => (
         <input key={id} type="hidden" name="key_result_id" value={id} />
       ))}
+
+      {clientError ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          {clientError}
+        </p>
+      ) : null}
 
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-700">Titel</label>
@@ -201,6 +221,10 @@ export function InitiativeCreateForm({
 
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-700">Programm</label>
+        <p className="mb-1.5 text-[11px] text-zinc-500">
+          Nur offene Programme sind zur Auswahl vorgeschlagen; bestehende Zuordnungen zu abgeschlossenen
+          Programmen bleiben beim Bearbeiten sichtbar.
+        </p>
         <select
           value={programId}
           onChange={(e) => setProgramId(e.target.value)}
@@ -261,6 +285,27 @@ export function InitiativeCreateForm({
         </select>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-700">Startdatum</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-700">Enddatum</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-700">Fortschritt (%)</label>
         <input
@@ -279,7 +324,7 @@ export function InitiativeCreateForm({
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          rows={3}
+          rows={4}
           placeholder="Kurzbeschreibung"
           className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
         />
@@ -393,7 +438,7 @@ export function InitiativeCreateForm({
         Initiative speichern
       </button>
 
-      {isEdit ? (
+      {isEdit && showClearButton ? (
         <button
           type="button"
           onClick={() => {

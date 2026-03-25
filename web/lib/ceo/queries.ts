@@ -100,8 +100,64 @@ function pickDefaultCycle(cycles: PlanningCycle[]): PlanningCycle | null {
   return scope[0] ?? null;
 }
 
-function isCeoRole(roleCode: string): boolean {
-  return roleCode === "org_admin" || roleCode === "executive";
+const KNOWN_ORG_ROLE_LABELS_DE: Record<string, string> = {
+  org_admin: "Organisations-Administration",
+  executive: "Geschaeftsleitung",
+  department_lead: "Bereichsleitung",
+  team_member: "Teammitglied",
+};
+
+function orgRoleRankForSidebar(code: string): number {
+  if (code === "org_admin") return 3;
+  if (code === "executive") return 2;
+  if (code === "department_lead") return 1;
+  return 0;
+}
+
+/** Hoechste Rolle: org_admin > executive > department_lead > uebrige (alphabetisch). */
+export function highestOrgRoleCode(roleCodes: string[]): string | null {
+  const unique = [...new Set(roleCodes.map((c) => String(c).trim()).filter(Boolean))];
+  if (!unique.length) return null;
+  unique.sort(
+    (a, b) => orgRoleRankForSidebar(b) - orgRoleRankForSidebar(a) || a.localeCompare(b)
+  );
+  return unique[0] ?? null;
+}
+
+/** Deutsche Kurzbezeichnung; unbekannte Codes werden als Code angezeigt. */
+export function labelForOrgRoleCodeDe(code: string): string {
+  return KNOWN_ORG_ROLE_LABELS_DE[code] ?? code;
+}
+
+/** Anzeige unter CITADEL: Name aus Metadaten bevorzugt, sonst E-Mail. */
+export async function getAuthUserSidebarIdentity(): Promise<{
+  displayLine: string;
+  email: string | null;
+}> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { displayLine: "", email: null };
+  }
+  const email = user.email?.toLowerCase() ?? null;
+  const metadata =
+    user.user_metadata && typeof user.user_metadata === "object"
+      ? (user.user_metadata as Record<string, unknown>)
+      : null;
+  const fullNameRaw = metadata?.full_name ?? metadata?.name ?? metadata?.display_name;
+  const fullName =
+    typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0 ? fullNameRaw.trim() : null;
+  return { displayLine: fullName ?? email ?? "Benutzer", email };
+}
+
+/** Hoehere Zahl = bevorzugt bei Wahl der Arbeits-Membership (Sidebar + Phase0). */
+function orgMembershipPreferenceRank(roleCodes: string[]): number {
+  if (roleCodes.includes("org_admin")) return 3;
+  if (roleCodes.includes("executive")) return 2;
+  if (roleCodes.includes("department_lead")) return 1;
+  return 0;
 }
 
 export async function getAuthenticatedUserId(): Promise<string | null> {
@@ -117,25 +173,23 @@ export async function getAuthenticatedUserId(): Promise<string | null> {
   return user.id;
 }
 
-export async function getCeoAccessContext(
-  userId?: string
-): Promise<CeoAccessContext | null> {
+/**
+ * Alle aktiven Organisations-Mitgliedschaften des Nutzers (jede Rolle, z. B. auch team_member),
+ * sortiert nach Rollen-Prioritaet, dann aelteste Mitgliedschaft.
+ */
+export async function getRankedCeoAccessContexts(userId: string): Promise<CeoAccessContext[]> {
   const supabase = await createSupabaseServerClient();
-  const resolvedUserId = userId ?? (await getAuthenticatedUserId());
-
-  if (!resolvedUserId) {
-    return null;
-  }
 
   const { data: memberships } = await supabase
     .schema("app")
     .from("organization_memberships")
-    .select("id, organization_id")
-    .eq("user_id", resolvedUserId)
-    .eq("status", "active");
+    .select("id, organization_id, created_at")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
 
   if (!memberships || memberships.length === 0) {
-    return null;
+    return [];
   }
 
   const membershipIds = memberships.map((membership) => membership.id);
@@ -156,37 +210,68 @@ export async function getCeoAccessContext(
     .select("membership_id, role_id")
     .in("membership_id", membershipIds);
 
-  if (!memberRoles || memberRoles.length === 0) {
-    return null;
+  const memberRoleRows = memberRoles ?? [];
+  const roleIds = [...new Set(memberRoleRows.map((memberRole) => memberRole.role_id))];
+
+  const roleById = new Map<string, string>();
+  if (roleIds.length > 0) {
+    const { data: roles } = await supabase
+      .schema("rbac")
+      .from("roles")
+      .select("id, code")
+      .in("id", roleIds);
+    for (const role of roles ?? []) {
+      roleById.set(role.id, role.code);
+    }
   }
 
-  const roleIds = [...new Set(memberRoles.map((memberRole) => memberRole.role_id))];
-  const { data: roles } = await supabase
-    .schema("rbac")
-    .from("roles")
-    .select("id, code")
-    .in("id", roleIds);
-
-  const roleById = new Map((roles ?? []).map((role) => [role.id, role.code]));
-
+  type MembershipRow = (typeof memberships)[number];
+  const candidates: Array<{ membership: MembershipRow; roleCodes: string[] }> = [];
   for (const membership of memberships) {
-    const roleCodes = memberRoles
+    const roleCodes = memberRoleRows
       .filter((memberRole) => memberRole.membership_id === membership.id)
       .map((memberRole) => roleById.get(memberRole.role_id))
       .filter((roleCode): roleCode is string => Boolean(roleCode));
 
-    if (roleCodes.some(isCeoRole)) {
-      return {
-        userId: resolvedUserId,
-        organizationId: membership.organization_id,
-        organizationName: organizationNameById.get(membership.organization_id) ?? "Tenant",
-        membershipId: membership.id,
-        roleCodes,
-      };
-    }
+    candidates.push({ membership, roleCodes });
   }
 
-  return null;
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  candidates.sort((a, b) => {
+    const byRank = orgMembershipPreferenceRank(b.roleCodes) - orgMembershipPreferenceRank(a.roleCodes);
+    if (byRank !== 0) return byRank;
+    const ta = a.membership.created_at ? Date.parse(String(a.membership.created_at)) : 0;
+    const tb = b.membership.created_at ? Date.parse(String(b.membership.created_at)) : 0;
+    if (ta !== tb) return ta - tb;
+    return a.membership.id.localeCompare(b.membership.id);
+  });
+
+  return candidates.map(
+    (c) =>
+      ({
+        userId,
+        organizationId: c.membership.organization_id,
+        organizationName: organizationNameById.get(c.membership.organization_id) ?? "Tenant",
+        membershipId: c.membership.id,
+        roleCodes: c.roleCodes,
+      }) satisfies CeoAccessContext
+  );
+}
+
+export async function getCeoAccessContext(
+  userId?: string
+): Promise<CeoAccessContext | null> {
+  const resolvedUserId = userId ?? (await getAuthenticatedUserId());
+
+  if (!resolvedUserId) {
+    return null;
+  }
+
+  const ranked = await getRankedCeoAccessContexts(resolvedUserId);
+  return ranked[0] ?? null;
 }
 
 export async function getPlanningCyclesForOrganization(

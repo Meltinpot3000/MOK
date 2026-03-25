@@ -8,7 +8,8 @@ import { useMemo, useState } from "react";
 type InviteView = {
   id: string;
   invited_email: string;
-  role_code: string;
+  invited_display_name: string | null;
+  role_codes: string[];
   status: string;
   expires_at: string;
   loginUrl: string;
@@ -23,7 +24,7 @@ type Props = {
   revokeInvitation: (formData: FormData) => Promise<void>;
 };
 
-type SortCol = "email" | "role" | "status" | "expiresAt";
+type SortCol = "email" | "name" | "role" | "status" | "expiresAt";
 
 export function InvitationsPendingTable({
   invitationViews,
@@ -53,9 +54,12 @@ export function InvitationsPendingTable({
       if (sortCol === "email") {
         va = a.invited_email;
         vb = b.invited_email;
+      } else if (sortCol === "name") {
+        va = a.invited_display_name ?? "";
+        vb = b.invited_display_name ?? "";
       } else if (sortCol === "role") {
-        va = a.role_code;
-        vb = b.role_code;
+        va = [...a.role_codes].sort().join(", ");
+        vb = [...b.role_codes].sort().join(", ");
       } else if (sortCol === "status") {
         va = a.status;
         vb = b.status;
@@ -79,7 +83,14 @@ export function InvitationsPendingTable({
             buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
           />
           <SortableTableHeader
-            label="Rolle"
+            label="Name (Titel)"
+            sortDirection={sortCol === "name" ? sortDir : null}
+            onRequestSort={() => requestSort("name")}
+            className="py-2"
+            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
+          />
+          <SortableTableHeader
+            label="Rollen"
             sortDirection={sortCol === "role" ? sortDir : null}
             onRequestSort={() => requestSort("role")}
             className="py-2"
@@ -108,7 +119,10 @@ export function InvitationsPendingTable({
         {sorted.map((invite) => (
           <tr key={invite.id} className="border-b border-zinc-100 align-top">
             <td className="py-3 pr-3">{invite.invited_email}</td>
-            <td className="py-3 pr-3">{invite.role_code}</td>
+            <td className="py-3 pr-3 text-zinc-700">
+              {invite.invited_display_name?.trim() ? invite.invited_display_name : "—"}
+            </td>
+            <td className="py-3 pr-3">{invite.role_codes.length ? invite.role_codes.join(", ") : "—"}</td>
             <td className="py-3 pr-3">{invite.status}</td>
             <td className="py-3 pr-3 text-xs text-zinc-600">
               {new Date(invite.expires_at).toLocaleDateString("de-DE")}

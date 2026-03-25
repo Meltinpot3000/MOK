@@ -32,6 +32,8 @@ type ProgramCreateFormProps = {
   ownerOptions: Array<{ id: string; label: string }>;
   selectedProgram: ProgramFormSelection | null;
   onClearSelection: () => void;
+  /** „Neu anlegen / Zuruecksetzen“ nur im linken Erfassen-Panel; in Tabellen-Zeile ausblenden. */
+  showClearButton?: boolean;
 };
 
 function emptyFormState() {
@@ -55,6 +57,7 @@ export function ProgramCreateForm({
   ownerOptions,
   selectedProgram,
   onClearSelection,
+  showClearButton = true,
 }: ProgramCreateFormProps) {
   const [form, setForm] = useState(emptyFormState);
   const [clientError, setClientError] = useState<string | null>(null);
@@ -208,13 +211,14 @@ export function ProgramCreateForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-zinc-700">Owner</label>
+        <label className="mb-1 block text-xs font-medium text-zinc-700">Sponsor</label>
+        <p className="mb-1 text-[11px] text-zinc-500">Nur Organisationsmitglieder mit Rolle Executive.</p>
         <select
           value={form.ownerMembershipId}
           onChange={(e) => setForm((s) => ({ ...s, ownerMembershipId: e.target.value }))}
           className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
         >
-          <option value="">Kein Owner</option>
+          <option value="">Kein Sponsor</option>
           {ownerOptions.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
@@ -276,7 +280,7 @@ export function ProgramCreateForm({
         Programm speichern
       </button>
 
-      {isEdit ? (
+      {isEdit && showClearButton ? (
         <button
           type="button"
           onClick={() => {

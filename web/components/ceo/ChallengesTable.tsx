@@ -186,45 +186,37 @@ export function ChallengesTable({
 
         return (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-zinc-900">
-                {challenge.title}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                Verknüpfte Stossrichtungen:{" "}
+                {directionCountByChallengeId[challenge.id] ?? 0}
               </span>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                  Verknüpfte Stossrichtungen:{" "}
-                  {directionCountByChallengeId[challenge.id] ?? 0}
-                </span>
-                <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  Challenge-Score:{" "}
-                  {Number(challenge.challenge_score ?? 0).toFixed(2)}
-                </span>
-                <form
-                  action={actions.deleteStrategicChallengeInCycle}
-                  className="inline"
+              <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                Challenge-Score:{" "}
+                {Number(challenge.challenge_score ?? 0).toFixed(2)}
+              </span>
+              <form
+                action={actions.deleteStrategicChallengeInCycle}
+                className="inline"
+              >
+                <input
+                  type="hidden"
+                  name="strategic_challenge_id"
+                  value={challenge.id}
+                />
+                <button
+                  type="submit"
+                  disabled={!canWrite}
+                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                 >
-                  <input
-                    type="hidden"
-                    name="strategic_challenge_id"
-                    value={challenge.id}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!canWrite}
-                    className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                  >
-                    Loeschen
-                  </button>
-                </form>
-              </div>
+                  Loeschen
+                </button>
+              </form>
             </div>
-            {challenge.description ? (
-              <p className="text-xs text-zinc-600">{challenge.description}</p>
-            ) : null}
 
             <form
               action={actions.updateStrategicChallengeAssessment}
-              className="flex flex-wrap items-end gap-2"
+              className="space-y-3"
             >
               <input
                 type="hidden"
@@ -232,14 +224,24 @@ export function ChallengesTable({
                 value={challenge.id}
               />
               <label className="block text-xs text-zinc-600">
+                Titel
+                <input
+                  name="title"
+                  defaultValue={challenge.title}
+                  required
+                  className="mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="block text-xs text-zinc-600">
                 Beschreibung
                 <textarea
                   name="description"
                   defaultValue={challenge.description ?? ""}
                   rows={4}
-                  className="mt-1 block w-full min-w-[320px] max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                  className="mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
                 />
               </label>
+              <div className="flex flex-wrap items-end gap-2">
               <label className="text-xs text-zinc-600">
                 Auswirkung (1–5)
                 <input
@@ -291,6 +293,7 @@ export function ChallengesTable({
               >
                 Bewertung speichern
               </button>
+              </div>
             </form>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

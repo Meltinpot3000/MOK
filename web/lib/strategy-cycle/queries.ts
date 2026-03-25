@@ -297,7 +297,7 @@ export async function getStrategyCycleWorkspaceData(
       .schema("app")
       .from("initiatives")
       .select(
-        "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent"
+        "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent, start_date, end_date"
       )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
@@ -544,6 +544,8 @@ export async function getStrategyCycleWorkspaceData(
     linked_okrs: string[] | null;
     deliverables: string[] | null;
     progress_percent?: number | null;
+    start_date?: string | null;
+    end_date?: string | null;
     linked_key_result_titles?: string[];
     kr_link_contexts?: InitiativeKrLinkContext[];
   };
@@ -699,11 +701,49 @@ export async function getStrategyCycleWorkspaceData(
   if (ownerMembershipError) {
     console.error("[getStrategyCycleWorkspaceData] organization_memberships", ownerMembershipError.message);
   }
-  const programOwnerOptions = (ownerMembershipRows ?? []).map((row) => {
-    const resp = (row as { responsibles?: { full_name?: string; email?: string } | null }).responsibles;
-    const label = resp?.full_name?.trim() || resp?.email?.trim() || "Mitglied";
-    return { id: row.id, label };
-  });
+
+  const executiveMembershipIds = new Set<string>();
+  const { data: executiveRoleRow } = await supabase
+    .schema("rbac")
+    .from("roles")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("code", "executive")
+    .maybeSingle();
+  const executiveRoleId = (executiveRoleRow as { id: string } | null)?.id ?? null;
+  if (executiveRoleId) {
+    const { data: executiveMemberLinks } = await supabase
+      .schema("rbac")
+      .from("member_roles")
+      .select("membership_id")
+      .eq("role_id", executiveRoleId);
+    for (const link of executiveMemberLinks ?? []) {
+      executiveMembershipIds.add((link as { membership_id: string }).membership_id);
+    }
+  }
+
+  const programOwnerOptions = (ownerMembershipRows ?? [])
+    .filter((row) => executiveMembershipIds.has(row.id))
+    .map((row) => {
+      const resp = (row as { responsibles?: { full_name?: string; email?: string } | null }).responsibles;
+      const label = resp?.full_name?.trim() || resp?.email?.trim() || "Mitglied";
+      return { id: row.id, label };
+    });
+
+  const { data: responsibleRows, error: responsibleError } = await supabase
+    .schema("app")
+    .from("responsibles")
+    .select("membership_id, full_name")
+    .eq("organization_id", organizationId);
+  if (responsibleError) {
+    console.error("[getStrategyCycleWorkspaceData] responsibles", responsibleError.message);
+  }
+  const responsibleNameByMembershipId = Object.fromEntries(
+    ((responsibleRows ?? []) as Array<{ membership_id: string; full_name: string | null }>).map((r) => [
+      r.membership_id,
+      r.full_name?.trim() || "Mitglied",
+    ])
+  );
 
   let pipKeyResultOptions: PipKeyResultOption[] = [];
   const objectiveRowsForPip = objectives as Array<{
@@ -778,6 +818,7 @@ export async function getStrategyCycleWorkspaceData(
     programs,
     programOverviews,
     programOwnerOptions,
+    responsibleNameByMembershipId,
     pipKeyResultOptions,
     challenges,
     annualTargets,

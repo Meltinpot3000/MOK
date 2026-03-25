@@ -341,7 +341,12 @@ function getStatusMessage(error: string | undefined, success: string | undefined
       text: "Das Enddatum darf nicht vor dem Startdatum liegen.",
     };
   if (error === "program-invalid-owner")
-    return { type: "error", text: "Der gewaehlte Owner gehoert nicht zu dieser Organisation." };
+    return { type: "error", text: "Der gewaehlte Sponsor gehoert nicht zu dieser Organisation." };
+  if (error === "program-invalid-sponsor-role")
+    return {
+      type: "error",
+      text: "Als Sponsor sind nur Personen mit Rolle Executive zulaessig.",
+    };
   if (error === "program-invalid-direction")
     return {
       type: "error",
@@ -370,6 +375,11 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "error", text: "Programm wurde nicht gefunden oder gehoert nicht zu diesem Zyklus." };
   if (error === "initiative-invalid-owner")
     return { type: "error", text: "Der gewaehlte Owner gehoert nicht zu dieser Organisation." };
+  if (error === "initiative-invalid-dates")
+    return {
+      type: "error",
+      text: "Bei der Initiative darf das Enddatum nicht vor dem Startdatum liegen.",
+    };
   if (error === "initiative-insert-failed")
     return { type: "error", text: "Initiative konnte nicht erstellt werden." };
   if (error === "initiative-update-failed")
@@ -767,6 +777,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     const krIds = krContexts.map((c) => c.key_result_id);
     const okrLegacy = Array.isArray(i.linked_okrs) ? (i.linked_okrs as string[]) : null;
     const delLegacy = Array.isArray(i.deliverables) ? (i.deliverables as string[]) : null;
+    const startRaw = (i as { start_date?: string | null }).start_date;
+    const endRaw = (i as { end_date?: string | null }).end_date;
     return {
       id: i.id,
       title: i.title,
@@ -776,6 +788,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       progress_percent: i.progress_percent ?? 0,
       owner_membership_id: i.owner_membership_id ?? null,
       description: i.description ?? null,
+      start_date: startRaw ? String(startRaw).slice(0, 10) : null,
+      end_date: endRaw ? String(endRaw).slice(0, 10) : null,
       kr_link_contexts: krContexts,
       annual_target_ids: atIds,
       key_result_ids: krIds,
@@ -787,8 +801,24 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const programsOpenForInitiatives = (workspace.programs ?? [])
     .filter((p) => String((p as { status?: string }).status ?? "") !== "closed")
     .map((p) => ({ id: p.id, title: p.title }));
-  const ownerLabelByPipMembershipId = Object.fromEntries(
+  const ownerLabelByPipMembershipId: Record<string, string> = Object.fromEntries(
     (workspace.programOwnerOptions ?? []).map((o) => [o.id, o.label] as const)
+  );
+  for (const [mid, name] of Object.entries(workspace.responsibleNameByMembershipId ?? {})) {
+    if (!ownerLabelByPipMembershipId[mid]) ownerLabelByPipMembershipId[mid] = name;
+  }
+  const pipOwnerOptionById = new Map(
+    (workspace.programOwnerOptions ?? []).map((o) => [o.id, o] as const)
+  );
+  for (const row of initiativePipRows) {
+    const oid = row.owner_membership_id;
+    if (!oid || pipOwnerOptionById.has(oid)) continue;
+    const label =
+      ownerLabelByPipMembershipId[oid] ?? (workspace.responsibleNameByMembershipId ?? {})[oid] ?? "Mitglied";
+    pipOwnerOptionById.set(oid, { id: oid, label });
+  }
+  const pipInitiativeOwnerOptions = [...pipOwnerOptionById.values()].sort((a, b) =>
+    a.label.localeCompare(b.label, "de")
   );
   const programsByDirectionId = new Map<string, Array<{ id: string; title: string }>>();
   for (const program of workspace.programs ?? []) {
@@ -1335,34 +1365,38 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
       {activeL1 === "objectives" ? (
         <section className="space-y-4">
-          <article className="brand-card p-6">
-            <h2 className="text-lg font-semibold text-zinc-900">Objectives (Target State)</h2>
-            <p className="mt-1 text-sm text-zinc-600">
-              Definiere stabile Zielbilder fuer 3-5 Jahre mit Wichtigkeit und Status.
-            </p>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+            <article className="brand-card p-6">
+              <h2 className="text-lg font-semibold text-zinc-900">Objective erfassen</h2>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Neue Objectives hier anlegen (stabile Zielbilder, typ. 3–5 Jahre). Bestehende Eintraege rechts in
+                der Tabelle aufklappen und dort bearbeiten.
+              </p>
               <ObjectiveCreateForm action={createObjectiveInCycle} canWrite={canWrite} />
-            </div>
-            <div className="mt-4">
-              <ObjectivesTable
-                objectives={workspace.objectives ?? []}
-                industries={workspace.availableDimensions?.industries ?? []}
-                businessModels={workspace.availableDimensions?.businessModels ?? []}
-                industryIdsByObjective={Object.fromEntries(workspace.industryIdsByObjectiveId ?? [])}
-                businessModelIdsByObjective={Object.fromEntries(workspace.businessModelIdsByObjectiveId ?? [])}
-                creatorDisplayNameByMembershipId={workspace.creatorDisplayNameByMembershipId}
-                canWrite={canWrite}
-                actions={{
-                  updateObjectiveInCycle,
-                  deleteObjectiveInCycle,
-                  linkObjectiveToIndustryInCycle,
-                  unlinkObjectiveFromIndustryInCycle,
-                  linkObjectiveToBusinessModelInCycle,
-                  unlinkObjectiveFromBusinessModelInCycle,
-                }}
-              />
-            </div>
-          </article>
+            </article>
+            <article className="brand-card p-6">
+              <h3 className="text-base font-semibold text-zinc-900">Objectives</h3>
+              <div className="mt-4">
+                <ObjectivesTable
+                  objectives={workspace.objectives ?? []}
+                  industries={workspace.availableDimensions?.industries ?? []}
+                  businessModels={workspace.availableDimensions?.businessModels ?? []}
+                  industryIdsByObjective={Object.fromEntries(workspace.industryIdsByObjectiveId ?? [])}
+                  businessModelIdsByObjective={Object.fromEntries(workspace.businessModelIdsByObjectiveId ?? [])}
+                  creatorDisplayNameByMembershipId={workspace.creatorDisplayNameByMembershipId}
+                  canWrite={canWrite}
+                  actions={{
+                    updateObjectiveInCycle,
+                    deleteObjectiveInCycle,
+                    linkObjectiveToIndustryInCycle,
+                    unlinkObjectiveFromIndustryInCycle,
+                    linkObjectiveToBusinessModelInCycle,
+                    unlinkObjectiveFromBusinessModelInCycle,
+                  }}
+                />
+              </div>
+            </article>
+          </div>
 
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Portfolio-Bewertung</h3>
@@ -1704,6 +1738,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 title: d.title,
               }))}
               ownerOptions={workspace.programOwnerOptions ?? []}
+              ownerLabelByMembershipId={ownerLabelByPipMembershipId}
               programRows={(workspace.programs ?? []).map((p) => {
                 const o = programOverviewById.get(p.id);
                 const pr = p as {
@@ -1751,7 +1786,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 title: p.title,
                 status: String((p as { status?: string }).status ?? "draft"),
               }))}
-              ownerOptions={workspace.programOwnerOptions ?? []}
+              ownerOptions={pipInitiativeOwnerOptions}
               annualTargets={(workspace.annualTargets ?? []).map((t) => ({
                 id: t.id,
                 title: t.title,

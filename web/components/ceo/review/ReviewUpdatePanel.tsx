@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { applyInitiativeReviewUpdate } from "@/app/(ceo)/reviews/actions";
 import { ALLOWED_INITIATIVE_WEIGHTS } from "@/lib/review/initiative-review-fields";
 import { deriveInitiativeHealth } from "@/lib/review/initiative-health";
@@ -10,13 +10,34 @@ import { healthBadgeClass, healthLabelDe, initiativeStatusLabelDe } from "./revi
 type ReviewUpdatePanelProps = {
   initiative: ReviewCycleInitiativeInput;
   canWrite: boolean;
+  ownerSelectOptions: Array<{ id: string; label: string }>;
 };
 
-export function ReviewUpdatePanel({ initiative, canWrite }: ReviewUpdatePanelProps) {
+function ownerOptionsForInitiative(
+  initiative: ReviewCycleInitiativeInput,
+  base: Array<{ id: string; label: string }>
+): Array<{ id: string; label: string }> {
+  const oid = initiative.owner_membership_id;
+  if (!oid || base.some((o) => o.id === oid)) return base;
+  return [
+    ...base,
+    { id: oid, label: initiative.owner_display_name ?? "Zugewiesener Owner" },
+  ];
+}
+
+export function ReviewUpdatePanel({
+  initiative,
+  canWrite,
+  ownerSelectOptions,
+}: ReviewUpdatePanelProps) {
   const [weightOpen, setWeightOpen] = useState(false);
   const [progressPercent, setProgressPercent] = useState(initiative.progress_percent);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const derived = deriveInitiativeHealth(initiative);
+  const ownerOptions = useMemo(
+    () => ownerOptionsForInitiative(initiative, ownerSelectOptions),
+    [initiative, ownerSelectOptions]
+  );
 
   async function onSubmit(formData: FormData) {
     setMessage(null);
@@ -35,8 +56,7 @@ export function ReviewUpdatePanel({ initiative, canWrite }: ReviewUpdatePanelPro
 
   return (
     <div className="brand-surface space-y-4 rounded-md border border-zinc-200 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-zinc-900">{initiative.title}</span>
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <span
           className={`rounded px-2 py-0.5 text-xs font-medium ${healthBadgeClass(derived)}`}
         >
@@ -103,6 +123,29 @@ export function ReviewUpdatePanel({ initiative, canWrite }: ReviewUpdatePanelPro
           ) : (
             <input type="hidden" name="weight" value={initiative.weight} />
           )}
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-zinc-600" htmlFor={`own-${initiative.id}`}>
+            Owner
+          </label>
+          <p className="mb-1 text-xs text-zinc-500">
+            Aktives Organisationsmitglied; Anzeige: Name und zugewiesene Rollen im Tenant.
+          </p>
+          <select
+            id={`own-${initiative.id}`}
+            name="owner_membership_id"
+            defaultValue={initiative.owner_membership_id ?? ""}
+            disabled={!canWrite}
+            className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+          >
+            <option value="">Kein Owner</option>
+            {ownerOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -173,11 +216,7 @@ export function ReviewUpdatePanel({ initiative, canWrite }: ReviewUpdatePanelPro
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={!canWrite}
-          className="brand-btn-primary rounded-md px-4 py-2 text-sm disabled:opacity-50"
-        >
+        <button type="submit" disabled={!canWrite} className="brand-btn w-full px-4 py-2 text-sm sm:w-auto">
           Review speichern
         </button>
       </form>

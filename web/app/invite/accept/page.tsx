@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { invitationRoleCodesFromRow } from "@/lib/invitations";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type AcceptInvitePageProps = {
@@ -41,7 +42,9 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
   const { data: invite } = await supabase
     .schema("app")
     .from("member_invitations")
-    .select("id, organization_id, invited_email, role_code, status, expires_at")
+    .select(
+      "id, organization_id, invited_email, invited_display_name, role_code, role_codes, status, expires_at"
+    )
     .eq("token", token)
     .single();
 
@@ -96,64 +99,111 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     );
   }
 
-  const { data: role } = await supabase
+  const inviteRoleCodes = invitationRoleCodesFromRow({
+    role_codes: invite.role_codes,
+    role_code: invite.role_code,
+  });
+
+  if (inviteRoleCodes.length === 0) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
+        <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-zinc-900">Einladung unvollstaendig</h1>
+          <p className="mt-2 text-sm text-zinc-600">Fuer diese Einladung sind keine Rollen hinterlegt.</p>
+        </section>
+      </main>
+    );
+  }
+
+  const { data: roleRows } = await supabase
     .schema("rbac")
     .from("roles")
-    .select("id")
+    .select("id, code")
     .eq("organization_id", invite.organization_id)
-    .eq("code", invite.role_code)
-    .single();
+    .in("code", inviteRoleCodes);
 
-  if (!role) {
+  if (!roleRows || roleRows.length !== inviteRoleCodes.length) {
     return (
       <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Rolle fehlt</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Die in der Einladung hinterlegte Rolle existiert nicht mehr.
+            Mindestens eine in der Einladung angegebene Organisations-Rolle ist fuer diesen Mandanten in der
+            Datenbank nicht vorhanden, z. B. weil sie nie eingerichtet wurde, der Rollencode nicht passt oder
+            die Einladung veraltet ist. Bitte die Administration kontaktieren.
           </p>
         </section>
       </main>
     );
   }
 
-  const { data: membership } = await supabase
+  const displayTitle =
+    typeof invite.invited_display_name === "string" && invite.invited_display_name.trim().length > 0
+      ? invite.invited_display_name.trim()
+      : null;
+
+  const membershipPayload: {
+    organization_id: string;
+    user_id: string;
+    status: "active";
+    title?: string | null;
+  } = {
+    organization_id: invite.organization_id,
+    user_id: user.id,
+    status: "active",
+  };
+  if (displayTitle !== null) {
+    membershipPayload.title = displayTitle;
+  }
+
+  const { data: membership, error: membershipError } = await supabase
     .schema("app")
     .from("organization_memberships")
-    .upsert(
-      {
-        organization_id: invite.organization_id,
-        user_id: user.id,
-        status: "active",
-      },
-      { onConflict: "organization_id,user_id" }
-    )
+    .upsert(membershipPayload, { onConflict: "organization_id,user_id" })
     .select("id")
     .single();
 
-  if (!membership) {
+  if (membershipError || !membership) {
     return (
       <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Mitgliedschaft fehlgeschlagen</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Deine Mitgliedschaft konnte nicht angelegt werden. Bitte die Administration kontaktieren.
+            Deine Mitgliedschaft konnte nicht angelegt werden. Bitte die Administration kontaktieren oder den
+            Einladungslink erneut aufrufen.
           </p>
+          {membershipError?.message ? (
+            <p className="mt-3 break-words font-mono text-xs text-zinc-500">{membershipError.message}</p>
+          ) : null}
         </section>
       </main>
     );
   }
 
-  await supabase.schema("rbac").from("member_roles").upsert(
-    {
+  const { error: rolesError } = await supabase.schema("rbac").from("member_roles").upsert(
+    roleRows.map((row) => ({
       membership_id: membership.id,
-      role_id: role.id,
-    },
+      role_id: row.id,
+    })),
     { onConflict: "membership_id,role_id" }
   );
 
+  if (rolesError) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
+        <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-zinc-900">Rollen konnten nicht gesetzt werden</h1>
+          <p className="mt-2 text-sm text-zinc-600">
+            Die Mitgliedschaft ist angelegt, die Organisations-Rollen nicht. Bitte die Administration kontaktieren.
+          </p>
+          <p className="mt-3 break-words font-mono text-xs text-zinc-500">{rolesError.message}</p>
+        </section>
+      </main>
+    );
+  }
+
   if (invite.status === "pending") {
-    await supabase
+    const { error: inviteUpdateError } = await supabase
       .schema("app")
       .from("member_invitations")
       .update({
@@ -162,6 +212,28 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         accepted_at: new Date().toISOString(),
       })
       .eq("id", invite.id);
+    if (inviteUpdateError) {
+      return (
+        <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
+          <section className="w-full rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
+            <h1 className="text-2xl font-semibold text-zinc-900">Zugriff aktiviert, Status nicht aktualisiert</h1>
+            <p className="mt-2 text-sm text-zinc-600">
+              Du solltest die App nutzen koennen. Die Einladung konnte in der Datenbank nicht als angenommen markiert
+              werden — bitte die Administration informieren, falls du noch unter «offene Einladungen» gesehen wirst.
+            </p>
+            <p className="mt-3 break-words font-mono text-xs text-zinc-500">{inviteUpdateError.message}</p>
+            <div className="mt-6">
+              <Link
+                href="/dashboard"
+                className="inline-block rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Zum Dashboard
+              </Link>
+            </div>
+          </section>
+        </main>
+      );
+    }
   }
 
   return (

@@ -246,10 +246,7 @@ export function ObjectivesTable({
 
         return (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-zinc-900">
-                {objective.title}
-              </span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <form action={actions.deleteObjectiveInCycle} className="inline">
                 <input
                   type="hidden"
@@ -265,9 +262,6 @@ export function ObjectivesTable({
                 </button>
               </form>
             </div>
-            {objective.description ? (
-              <p className="text-xs text-zinc-600">{objective.description}</p>
-            ) : null}
 
             <form
               action={actions.updateObjectiveInCycle}

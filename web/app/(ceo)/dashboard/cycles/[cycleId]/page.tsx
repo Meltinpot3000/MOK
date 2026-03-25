@@ -1,11 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { KpiCards } from "@/components/ceo/KpiCards";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
-import {
-  getAuthenticatedUserId,
-  getCeoAccessContext,
-  getCeoDashboardData,
-} from "@/lib/ceo/queries";
+import { getCeoDashboardData } from "@/lib/ceo/queries";
 
 type CycleDetailPageProps = {
   params: Promise<{
@@ -22,17 +18,7 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
     redirect("/no-access");
   }
 
-  const userId = await getAuthenticatedUserId();
-
-  if (!userId) {
-    redirect("/login");
-  }
-
-  const access = await getCeoAccessContext(userId);
-
-  if (!access) {
-    redirect("/no-access");
-  }
+  const access = pageAccess.access;
 
   const { cycleId } = await params;
   const data = await getCeoDashboardData(access.organizationId, cycleId);

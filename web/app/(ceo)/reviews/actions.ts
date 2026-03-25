@@ -168,13 +168,15 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
 
   const end_date = parseOptionalDate(String(formData.get("end_date") ?? ""));
   const review_comment = String(formData.get("review_comment") ?? "").trim() || null;
+  const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
+  const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
 
   const supabase = await createSupabaseServerClient();
   const { data: current, error: loadError } = await supabase
     .schema("app")
     .from("initiatives")
     .select(
-      "status, progress_percent, weight, execution_health_override, end_date, review_comment"
+      "status, progress_percent, weight, execution_health_override, end_date, review_comment, owner_membership_id"
     )
     .eq("id", initiativeId)
     .eq("organization_id", context.organizationId)
@@ -183,6 +185,17 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
   if (loadError) return { error: loadError.message };
   if (!current) return { error: "Initiative nicht gefunden" };
 
+  if (owner_membership_id) {
+    const { data: ownerRow } = await supabase
+      .schema("app")
+      .from("organization_memberships")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", owner_membership_id)
+      .maybeSingle();
+    if (!ownerRow) return { error: "Ungueltiger Owner" };
+  }
+
   const row = current as {
     status: string;
     progress_percent: number | null;
@@ -190,6 +203,7 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
     execution_health_override: string | null;
     end_date: string | null;
     review_comment: string | null;
+    owner_membership_id: string | null;
   };
 
   const prevOverride = row.execution_health_override ?? null;
@@ -197,13 +211,16 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
   const normalizedEnd = end_date;
   const prevEnd = row.end_date ?? null;
 
+  const prevOwner = row.owner_membership_id ?? null;
+
   const changed =
     row.status !== status ||
     (row.progress_percent ?? 0) !== progressRaw ||
     (row.weight ?? 3) !== weightRaw ||
     prevOverride !== nextOverride ||
     prevEnd !== normalizedEnd ||
-    (row.review_comment ?? null) !== review_comment;
+    (row.review_comment ?? null) !== review_comment ||
+    prevOwner !== owner_membership_id;
 
   const payload: Record<string, unknown> = {
     status,
@@ -214,6 +231,7 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
     execution_health_override_at: nextOverride ? new Date().toISOString() : null,
     end_date: normalizedEnd,
     review_comment,
+    owner_membership_id,
   };
 
   if (changed) {

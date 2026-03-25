@@ -6274,6 +6274,8 @@ CREATE TABLE app.member_invitations (
     last_sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    role_codes jsonb DEFAULT '[]'::jsonb NOT NULL,
+    invited_display_name text,
     CONSTRAINT member_invitations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'revoked'::text, 'expired'::text])))
 );
 
@@ -10651,13 +10653,6 @@ CREATE INDEX idx_operating_models_org_cycle ON app.operating_models USING btree 
 --
 
 CREATE INDEX idx_operating_models_org_cycle_instance ON app.operating_models USING btree (organization_id, cycle_instance_id);
-
-
---
--- Name: idx_org_memberships_responsible_unique; Type: INDEX; Schema: app; Owner: -
---
-
-CREATE UNIQUE INDEX idx_org_memberships_responsible_unique ON app.organization_memberships USING btree (responsible_id) WHERE (responsible_id IS NOT NULL);
 
 
 --
@@ -16442,6 +16437,24 @@ CREATE POLICY memberships_insert ON app.organization_memberships FOR INSERT WITH
 
 
 --
+-- Name: organization_memberships memberships_invitee_accept_insert; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY memberships_invitee_accept_insert ON app.organization_memberships FOR INSERT WITH CHECK (((user_id = auth.uid()) AND (status = 'active'::text) AND (EXISTS ( SELECT 1
+   FROM app.member_invitations i
+  WHERE ((i.organization_id = i.organization_id) AND (lower(i.invited_email) = lower(COALESCE((auth.jwt() ->> 'email'::text), ''::text))) AND (i.status = 'pending'::text))))));
+
+
+--
+-- Name: organization_memberships memberships_invitee_accept_update; Type: POLICY; Schema: app; Owner: -
+--
+
+CREATE POLICY memberships_invitee_accept_update ON app.organization_memberships FOR UPDATE USING (((user_id = auth.uid()) AND (EXISTS ( SELECT 1
+   FROM app.member_invitations i
+  WHERE ((i.organization_id = i.organization_id) AND (lower(i.invited_email) = lower(COALESCE((auth.jwt() ->> 'email'::text), ''::text))) AND (i.status = 'pending'::text)))))) WITH CHECK (((user_id = auth.uid()) AND (status = 'active'::text)));
+
+
+--
 -- Name: organization_memberships memberships_select; Type: POLICY; Schema: app; Owner: -
 --
 
@@ -17481,6 +17494,31 @@ CREATE POLICY member_roles_insert ON rbac.member_roles FOR INSERT WITH CHECK ((E
 
 
 --
+-- Name: member_roles member_roles_invitee_accept_insert; Type: POLICY; Schema: rbac; Owner: -
+--
+
+CREATE POLICY member_roles_invitee_accept_insert ON rbac.member_roles FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
+   FROM ((app.organization_memberships m
+     JOIN app.member_invitations i ON (((i.organization_id = m.organization_id) AND (lower(i.invited_email) = lower(COALESCE((auth.jwt() ->> 'email'::text), ''::text))) AND (i.status = 'pending'::text))))
+     JOIN rbac.roles r ON (((r.id = member_roles.role_id) AND (r.organization_id = m.organization_id))))
+  WHERE ((m.id = member_roles.membership_id) AND (m.user_id = auth.uid()) AND ((i.role_codes @> jsonb_build_array(r.code)) OR (((i.role_codes = '[]'::jsonb) OR (jsonb_array_length(i.role_codes) = 0)) AND (r.code = i.role_code)))))));
+
+
+--
+-- Name: member_roles member_roles_invitee_accept_update; Type: POLICY; Schema: rbac; Owner: -
+--
+
+CREATE POLICY member_roles_invitee_accept_update ON rbac.member_roles FOR UPDATE USING ((EXISTS ( SELECT 1
+   FROM (app.organization_memberships m
+     JOIN app.member_invitations i ON (((i.organization_id = m.organization_id) AND (lower(i.invited_email) = lower(COALESCE((auth.jwt() ->> 'email'::text), ''::text))) AND (i.status = 'pending'::text))))
+  WHERE ((m.id = member_roles.membership_id) AND (m.user_id = auth.uid()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM ((app.organization_memberships m
+     JOIN app.member_invitations i ON (((i.organization_id = m.organization_id) AND (lower(i.invited_email) = lower(COALESCE((auth.jwt() ->> 'email'::text), ''::text))) AND (i.status = 'pending'::text))))
+     JOIN rbac.roles r ON (((r.id = member_roles.role_id) AND (r.organization_id = m.organization_id))))
+  WHERE ((m.id = member_roles.membership_id) AND (m.user_id = auth.uid()) AND ((i.role_codes @> jsonb_build_array(r.code)) OR (((i.role_codes = '[]'::jsonb) OR (jsonb_array_length(i.role_codes) = 0)) AND (r.code = i.role_code)))))));
+
+
+--
 -- Name: member_roles member_roles_select; Type: POLICY; Schema: rbac; Owner: -
 --
 
@@ -17861,5 +17899,10 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0081'),
     ('0082'),
     ('0083'),
+    ('0084'),
+    ('0085'),
+    ('0086'),
+    ('0087'),
+    ('0088'),
     ('009'),
     ('010');

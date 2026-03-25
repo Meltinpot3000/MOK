@@ -18,6 +18,7 @@ type ReviewStrategicDirectionDetailProps = {
   initiativeRows: ReviewCycleInitiativeInput[];
   annualTargets: ReviewCycleAnnualTargetBrief[];
   attentionForDirection: ReviewAttentionItem[];
+  ownerSelectOptions: Array<{ id: string; label: string }>;
   canWrite: boolean;
 };
 
@@ -27,6 +28,7 @@ export function ReviewStrategicDirectionDetail({
   initiativeRows,
   annualTargets,
   attentionForDirection,
+  ownerSelectOptions,
   canWrite,
 }: ReviewStrategicDirectionDetailProps) {
   const assignedActive = initiativeRows.filter(
@@ -122,7 +124,12 @@ export function ReviewStrategicDirectionDetail({
         </p>
         <div className="mt-3 space-y-4">
           {assignedActive.map((i) => (
-            <ReviewUpdatePanel key={i.id} initiative={i} canWrite={canWrite} />
+            <ReviewUpdatePanel
+              key={i.id}
+              initiative={i}
+              canWrite={canWrite}
+              ownerSelectOptions={ownerSelectOptions}
+            />
           ))}
         </div>
       </div>

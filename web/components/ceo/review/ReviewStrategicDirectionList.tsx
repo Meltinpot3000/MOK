@@ -14,6 +14,7 @@ type ReviewStrategicDirectionListProps = {
   initiativeRows: ReviewCycleInitiativeInput[];
   annualTargetsByDirectionId: Record<string, ReviewCycleAnnualTargetBrief[]>;
   attentionItems: ReviewAttentionItem[];
+  ownerSelectOptions: Array<{ id: string; label: string }>;
   canWrite: boolean;
 };
 
@@ -22,6 +23,7 @@ export function ReviewStrategicDirectionList({
   initiativeRows,
   annualTargetsByDirectionId,
   attentionItems,
+  ownerSelectOptions,
   canWrite,
 }: ReviewStrategicDirectionListProps) {
   return (
@@ -77,6 +79,7 @@ export function ReviewStrategicDirectionList({
                     initiativeRows={initiativeRows}
                     annualTargets={targets}
                     attentionForDirection={att}
+                    ownerSelectOptions={ownerSelectOptions}
                     canWrite={canWrite}
                   />
                 </div>

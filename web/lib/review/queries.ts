@@ -4,6 +4,7 @@ export {
   getReviewCycleData,
   type ReviewCycleData,
   type ReviewCycleAnnualTargetBrief,
+  type ReviewCycleOwnerOption,
 } from "./review-cycle-data";
 
 export async function getReviewSnapshots(

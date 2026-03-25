@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { PlanningCycle, TenantBranding } from "@/lib/ceo/queries";
 import { SIDEBAR_ITEMS, type SidebarPermissionMap } from "@/lib/sidebar-access";
 import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
+import { SidebarAccountMenu } from "@/components/ceo/SidebarAccountMenu";
 
 type CycleSidebarProps = {
   cycles: PlanningCycle[];
@@ -12,6 +13,11 @@ type CycleSidebarProps = {
   productName: string;
   permissions: SidebarPermissionMap;
   nowIso: string;
+  /** Erste Zeile: voller Name oder E-Mail */
+  userDisplayLine: string;
+  userEmail: string | null;
+  /** Bereits aufgeloeste hoechste Organisations-Rolle (Kurztext). */
+  primaryRoleLabel: string;
 };
 
 function cycleLinkClass(isActive: boolean): string {
@@ -20,7 +26,16 @@ function cycleLinkClass(isActive: boolean): string {
     : "block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100";
 }
 
-export function CycleSidebar({ cycles, branding, productName, permissions, nowIso }: CycleSidebarProps) {
+export function CycleSidebar({
+  cycles,
+  branding,
+  productName,
+  permissions,
+  nowIso,
+  userDisplayLine,
+  userEmail,
+  primaryRoleLabel,
+}: CycleSidebarProps) {
   const pathname = usePathname();
   const brandingConfig =
     branding?.branding_config && typeof branding.branding_config === "object"
@@ -103,12 +118,24 @@ export function CycleSidebar({ cycles, branding, productName, permissions, nowIs
           {showJobBell ? <JobNotificationsBell /> : null}
         </div>
         <h1 className="mt-2.5 break-words text-lg font-semibold leading-tight text-zinc-900">{productName}</h1>
-        <a
-          href="/logout"
-          className="mt-3 inline-block rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
-        >
-          Abmelden
-        </a>
+        {userDisplayLine ? (
+          <div className="mt-3 flex items-start gap-2.5 rounded-md border border-zinc-200/90 bg-zinc-50 px-3 py-2.5">
+            <SidebarAccountMenu userDisplayLine={userDisplayLine} userEmail={userEmail} />
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="truncate text-sm font-medium text-zinc-900" title={userDisplayLine}>
+                {userDisplayLine}
+              </p>
+              {userEmail && userDisplayLine.trim().toLowerCase() !== userEmail.trim().toLowerCase() ? (
+                <p className="truncate text-xs text-zinc-500" title={userEmail}>
+                  {userEmail}
+                </p>
+              ) : null}
+              <p className="truncate pt-0.5 text-xs font-medium text-zinc-800" title={primaryRoleLabel}>
+                {primaryRoleLabel}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mb-4">

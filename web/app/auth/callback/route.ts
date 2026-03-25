@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { type EmailOtpType } from "@supabase/supabase-js";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseRouteHandlerClient } from "@/lib/supabase/route-handler";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const next = requestUrl.searchParams.get("next") ?? "/dashboard";
   const errorRedirect = new URL("/auth/error", requestUrl.origin);
   const safeNext = next.startsWith("/") ? next : "/dashboard";
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseRouteHandlerClient();
 
   try {
     if (code) {

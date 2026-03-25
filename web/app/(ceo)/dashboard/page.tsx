@@ -3,11 +3,7 @@ import { redirect } from "next/navigation";
 import { KpiCards } from "@/components/ceo/KpiCards";
 import { CyclePulseOverview } from "@/components/ceo/CyclePulseOverview";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
-import {
-  getAuthenticatedUserId,
-  getCeoAccessContext,
-  getCeoDashboardData,
-} from "@/lib/ceo/queries";
+import { getAuthenticatedUserId, getCeoDashboardData } from "@/lib/ceo/queries";
 import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
 
 export default async function CeoDashboardPage() {
@@ -25,12 +21,7 @@ export default async function CeoDashboardPage() {
     redirect("/login");
   }
 
-  const access = await getCeoAccessContext(userId);
-
-  if (!access) {
-    redirect("/no-access");
-  }
-
+  const access = pageAccess.access;
   const data = await getCeoDashboardData(access.organizationId);
 
   if (!data.selectedCycle) {

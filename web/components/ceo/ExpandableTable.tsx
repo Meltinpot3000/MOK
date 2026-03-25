@@ -30,6 +30,8 @@ type ExpandableTableProps<T> = {
   /** Zeile waehlen (Klick auf Datenzeile; +/- bleibt nur Aufklappen). */
   selectedRowId?: string | null;
   onDataRowClick?: (row: T) => void;
+  /** Wenn false: kein Spalten-Umschalter (kompakte Tabellen). */
+  enableColumnPickerUi?: boolean;
 };
 
 const PILL_BASE =
@@ -66,6 +68,7 @@ export function ExpandableTable<T>({
   rowIdPrefix,
   selectedRowId = null,
   onDataRowClick,
+  enableColumnPickerUi = true,
 }: ExpandableTableProps<T>) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortColumnId, setSortColumnId] = useState<string | null>(null);
@@ -77,7 +80,7 @@ export function ExpandableTable<T>({
     });
     return s;
   });
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -128,17 +131,19 @@ export function ExpandableTable<T>({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setShowColumnPicker((v) => !v)}
-          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50"
-          title="Spalten ein-/ausblenden"
-        >
-          Spalten
-        </button>
-      </div>
-      {showColumnPicker && (
+      {enableColumnPickerUi ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setColumnPickerOpen((v) => !v)}
+            className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50"
+            title="Spalten ein-/ausblenden"
+          >
+            Spalten
+          </button>
+        </div>
+      ) : null}
+      {enableColumnPickerUi && columnPickerOpen ? (
         <div className="flex flex-wrap gap-2 rounded border border-zinc-200 bg-zinc-50 p-2">
           {columns.map((c) => (
             <label key={c.id} className="flex cursor-pointer items-center gap-2 text-xs">
@@ -152,7 +157,7 @@ export function ExpandableTable<T>({
             </label>
           ))}
         </div>
-      )}
+      ) : null}
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse border border-zinc-200">
           <thead>

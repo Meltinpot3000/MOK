@@ -68,6 +68,7 @@ import {
   evaluateObjectiveWithLlm,
   evaluateObjectivePortfolioWithLlm,
 } from "@/lib/analysis-network/objective-evaluation-providers";
+import { membershipHasExecutiveRole } from "@/lib/rbac/membership-executive";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -3642,6 +3643,10 @@ export async function updateStrategicChallengeAssessment(formData: FormData) {
   if (!strategicChallengeId) {
     done("/strategy-cycle?l1=strategic-directions&l2=challenges");
   }
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=missing-title");
+  }
   const impactScore = readSmallIntField(formData, "impact_score", 3);
   const urgencyScore = readSmallIntField(formData, "urgency_score", 3);
   const scopeScore = readSmallIntField(formData, "scope_score", 3);
@@ -3658,6 +3663,7 @@ export async function updateStrategicChallengeAssessment(formData: FormData) {
     .schema("app")
     .from("strategic_challenges")
     .update({
+      title,
       description,
       impact_score: impactScore,
       urgency_score: urgencyScore,
@@ -4074,6 +4080,14 @@ export async function createStrategyProgramInCycle(formData: FormData) {
     if (!ownerRow) {
       done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-owner");
     }
+    const sponsorOk = await membershipHasExecutiveRole(
+      supabase,
+      context.organizationId,
+      owner_membership_id
+    );
+    if (!sponsorOk) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-sponsor-role");
+    }
   }
 
   const { data: directionRow, error: directionReadError } = await supabase
@@ -4167,6 +4181,14 @@ export async function updateStrategyProgramInCycle(formData: FormData) {
       .maybeSingle();
     if (!ownerRow) {
       done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-owner");
+    }
+    const sponsorOk = await membershipHasExecutiveRole(
+      supabase,
+      context.organizationId,
+      owner_membership_id
+    );
+    if (!sponsorOk) {
+      done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-sponsor-role");
     }
   }
 
@@ -4403,7 +4425,15 @@ async function filterKeyResultIdsForCycleInstance(
   );
 }
 
-const PIP_INITIATIVE_CREATE_STATUSES = ["planned", "active", "on_hold", "completed"] as const;
+const PIP_INITIATIVE_CREATE_STATUSES = [
+  "draft",
+  "planned",
+  "active",
+  "at_risk",
+  "on_hold",
+  "completed",
+  "archived",
+] as const;
 const INITIATIVE_DB_STATUSES = new Set([
   "draft",
   "planned",
@@ -4442,6 +4472,11 @@ export async function createPipInitiativeInCycle(formData: FormData) {
   const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
   const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
   const description = String(formData.get("description") ?? "").trim() || null;
+  const start_date = String(formData.get("start_date") ?? "").trim() || null;
+  const end_date = String(formData.get("end_date") ?? "").trim() || null;
+  if (start_date && end_date && start_date > end_date) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-dates");
+  }
 
   const supabase = await createSupabaseServerClient();
 
@@ -4486,6 +4521,8 @@ export async function createPipInitiativeInCycle(formData: FormData) {
       status: statusRaw,
       progress_percent,
       owner_membership_id,
+      start_date,
+      end_date,
       linked_okrs: [],
       deliverables: [],
       created_by_membership_id: context.membershipId,
@@ -4566,6 +4603,11 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
   const ownerRaw = String(formData.get("owner_membership_id") ?? "").trim();
   const owner_membership_id = ownerRaw.length > 0 ? ownerRaw : null;
   const description = String(formData.get("description") ?? "").trim() || null;
+  const start_date = String(formData.get("start_date") ?? "").trim() || null;
+  const end_date = String(formData.get("end_date") ?? "").trim() || null;
+  if (start_date && end_date && start_date > end_date) {
+    done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-dates");
+  }
 
   const supabase = await createSupabaseServerClient();
 
@@ -4620,6 +4662,8 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
       progress_percent,
       owner_membership_id,
       description,
+      start_date,
+      end_date,
     })
     .eq("id", initiativeId)
     .eq("organization_id", context.organizationId)

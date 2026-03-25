@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ProgramCreateForm, type ProgramFormSelection } from "@/components/ceo/ProgramCreateForm";
+import { ProgramCreateForm } from "@/components/ceo/ProgramCreateForm";
 import { ProgramsTable, type ProgramInitiativeRow, type ProgramRow } from "@/components/ceo/ProgramsTable";
 
 type ProgramPipWorkspaceProps = {
@@ -10,9 +9,12 @@ type ProgramPipWorkspaceProps = {
   updateProgramAction: (formData: FormData) => void | Promise<void>;
   /** Nur «aktiv» im Sinne Programm-Erfassung (Matrix-Regel). */
   strategicDirectionsForPrograms: Array<{ id: string; title: string }>;
-  /** Alle Stossrichtungen des Zyklus (Fallback, falls Programm noch alte/inaktive ID hat). */
+  /** Alle Stossrichtungen des Zyklus (Fallback beim Bearbeiten in der Tabellenzeile). */
   strategicDirectionsAll: Array<{ id: string; title: string }>;
+  /** Sponsoren-Auswahl: nur Rolle Executive (Daten aus Workspace). */
   ownerOptions: Array<{ id: string; label: string }>;
+  /** Anzeigenamen auch fuer Alt-Sponsoren ohne Executive-Rolle (Tabellenspalte / Zusatzoption). */
+  ownerLabelByMembershipId: Record<string, string>;
   programRows: ProgramRow[];
   directionTitleById: Record<string, string>;
   initiativesByProgramId: Record<string, ProgramInitiativeRow[]>;
@@ -25,57 +27,27 @@ export function ProgramPipWorkspace({
   strategicDirectionsForPrograms,
   strategicDirectionsAll,
   ownerOptions,
+  ownerLabelByMembershipId,
   programRows,
   directionTitleById,
   initiativesByProgramId,
 }: ProgramPipWorkspaceProps) {
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
-
-  const ownerLabelByMembershipId = useMemo(
-    () => Object.fromEntries(ownerOptions.map((o) => [o.id, o.label])),
-    [ownerOptions]
-  );
-
-  const selectedProgram: ProgramFormSelection | null = useMemo(() => {
-    if (!selectedProgramId) return null;
-    const row = programRows.find((p) => p.id === selectedProgramId);
-    if (!row) return null;
-    return {
-      id: row.id,
-      title: row.title,
-      description: row.description,
-      strategic_direction_id: row.strategic_direction_id,
-      status: row.status,
-      owner_membership_id: row.owner_membership_id,
-      start_date: row.start_date,
-      end_date: row.end_date,
-      budget_total: row.budget_total,
-      initiative_active_count: row.initiative_active_count,
-    };
-  }, [selectedProgramId, programRows]);
-
-  const directionsForForm = useMemo(() => {
-    const active = strategicDirectionsForPrograms;
-    const sel = selectedProgram?.strategic_direction_id;
-    if (!sel || active.some((d) => d.id === sel)) return active;
-    const extra = strategicDirectionsAll.find((d) => d.id === sel);
-    return extra ? [...active, extra] : active;
-  }, [strategicDirectionsForPrograms, strategicDirectionsAll, selectedProgram]);
-
   return (
     <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <article className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">
-          {selectedProgram ? "Programm bearbeiten" : "Programm erfassen"}
-        </h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Programm erfassen</h2>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          Neue Programme hier anlegen. Bestehende Programme in der Tabelle rechts aufklappen und dort bearbeiten
+          (wie bei strategischen Stossrichtungen).
+        </p>
         <ProgramCreateForm
           canWrite={canWrite}
           createAction={createProgramAction}
           updateAction={updateProgramAction}
-          strategicDirections={directionsForForm}
+          strategicDirections={strategicDirectionsForPrograms}
           ownerOptions={ownerOptions}
-          selectedProgram={selectedProgram}
-          onClearSelection={() => setSelectedProgramId(null)}
+          selectedProgram={null}
+          onClearSelection={() => {}}
         />
       </article>
       <article className="brand-card p-6">
@@ -86,8 +58,12 @@ export function ProgramPipWorkspace({
             directionTitleById={directionTitleById}
             ownerLabelByMembershipId={ownerLabelByMembershipId}
             initiativesByProgramId={initiativesByProgramId}
-            selectedProgramId={selectedProgramId}
-            onSelectProgram={setSelectedProgramId}
+            canWrite={canWrite}
+            createProgramAction={createProgramAction}
+            updateProgramAction={updateProgramAction}
+            strategicDirectionsForPrograms={strategicDirectionsForPrograms}
+            strategicDirectionsAll={strategicDirectionsAll}
+            ownerOptions={ownerOptions}
           />
         </div>
       </article>

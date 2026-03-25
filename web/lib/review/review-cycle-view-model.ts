@@ -75,6 +75,7 @@ export type ReviewCycleInitiativeInput = InitiativeRow & {
   id: string;
   title: string;
   status: string;
+  priority: number;
   program_id: string | null;
   program_title: string | null;
   owner_membership_id: string | null;
@@ -110,6 +111,7 @@ export function buildReviewCycleInitiativeRows(
       id: string;
       title: string;
       status: string;
+      priority: number;
       program_id: string | null;
       program_title: string | null;
       owner_membership_id: string | null;

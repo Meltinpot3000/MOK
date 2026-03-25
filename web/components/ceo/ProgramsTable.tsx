@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ProgramCreateForm, type ProgramFormSelection } from "@/components/ceo/ProgramCreateForm";
 import { ExpandableTable } from "./ExpandableTable";
 import {
   deriveProgramOverviewHealth,
@@ -102,13 +103,60 @@ export type ProgramRow = {
   progress_percent_from_initiatives: number;
 };
 
+function programRowToSelection(p: ProgramRow): ProgramFormSelection {
+  return {
+    id: p.id,
+    title: p.title,
+    description: p.description,
+    strategic_direction_id: p.strategic_direction_id,
+    status: p.status,
+    owner_membership_id: p.owner_membership_id,
+    start_date: p.start_date,
+    end_date: p.end_date,
+    budget_total: p.budget_total,
+    initiative_active_count: p.initiative_active_count,
+  };
+}
+
+/** Sponsoren-Dropdown: Executives; bei Altbestand zusaetzlich aktueller Sponsor (ohne Executive), bis umgestellt. */
+function sponsorSelectOptionsForProgram(
+  program: ProgramRow,
+  executiveOptions: Array<{ id: string; label: string }>,
+  labelByMembershipId: Record<string, string>
+): Array<{ id: string; label: string }> {
+  const mid = program.owner_membership_id;
+  if (!mid || executiveOptions.some((o) => o.id === mid)) return executiveOptions;
+  return [
+    ...executiveOptions,
+    {
+      id: mid,
+      label: `${labelByMembershipId[mid] ?? mid} (ohne Executive-Rolle)`,
+    },
+  ];
+}
+
+function strategicDirectionsForProgramRow(
+  program: ProgramRow,
+  active: Array<{ id: string; title: string }>,
+  all: Array<{ id: string; title: string }>
+): Array<{ id: string; title: string }> {
+  const sel = program.strategic_direction_id;
+  if (!sel || active.some((d) => d.id === sel)) return active;
+  const extra = all.find((d) => d.id === sel);
+  return extra ? [...active, extra] : active;
+}
+
 type ProgramsTableProps = {
   programs: ProgramRow[];
   directionTitleById: Record<string, string>;
   ownerLabelByMembershipId: Record<string, string>;
   initiativesByProgramId: Record<string, ProgramInitiativeRow[]>;
-  selectedProgramId: string | null;
-  onSelectProgram: (programId: string) => void;
+  canWrite: boolean;
+  createProgramAction: (formData: FormData) => void | Promise<void>;
+  updateProgramAction: (formData: FormData) => void | Promise<void>;
+  strategicDirectionsForPrograms: Array<{ id: string; title: string }>;
+  strategicDirectionsAll: Array<{ id: string; title: string }>;
+  ownerOptions: Array<{ id: string; label: string }>;
 };
 
 export function ProgramsTable({
@@ -116,8 +164,12 @@ export function ProgramsTable({
   directionTitleById,
   ownerLabelByMembershipId,
   initiativesByProgramId,
-  selectedProgramId,
-  onSelectProgram,
+  canWrite,
+  createProgramAction,
+  updateProgramAction,
+  strategicDirectionsForPrograms,
+  strategicDirectionsAll,
+  ownerOptions,
 }: ProgramsTableProps) {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterOwnerMembershipId, setFilterOwnerMembershipId] = useState("");
@@ -215,7 +267,7 @@ export function ProgramsTable({
     },
     {
       id: "owner",
-      label: "Owner",
+      label: "Sponsor",
       sortValue: (p: ProgramRow) =>
         p.owner_membership_id ? ownerLabelByMembershipId[p.owner_membership_id] ?? null : null,
       render: (p: ProgramRow) => (
@@ -267,7 +319,7 @@ export function ProgramsTable({
         </div>
         <div className="min-w-[140px] flex-1">
           <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Owner
+            Sponsor
           </label>
           <select
             value={filterOwnerMembershipId}
@@ -301,69 +353,32 @@ export function ProgramsTable({
       getRowId={(p) => p.id}
       expandLabel="Details"
       emptyMessage="Noch keine Programme erfasst."
-      selectedRowId={selectedProgramId}
-      onDataRowClick={(row) => onSelectProgram(row.id)}
       renderExpandedContent={(program) => {
-        const health = deriveProgramOverviewHealth({
-          initiativeActiveCount: program.initiative_active_count,
-          progressPercent: program.progress_percent_from_initiatives,
-        });
         const inits = initiativesByProgramId[program.id] ?? [];
-        const pct = Math.round(Number(program.progress_percent_from_initiatives) || 0);
         return (
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-2 text-xs">
-              {program.strategic_direction_id ? (
-                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-700">
-                  Stossrichtung:{" "}
-                  {directionTitleById[program.strategic_direction_id] ?? "n/a"}
-                </span>
-              ) : null}
-              <span
-                className={`rounded-full border px-2.5 py-1 font-medium ${statusPillClass(program.status)}`}
-              >
-                {PROGRAM_STATUS_LABELS_UI[program.status as (typeof PROGRAM_STATUSES)[number]] ??
-                  program.status}
-              </span>
-              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-700">
-                Owner:{" "}
-                {program.owner_membership_id
-                  ? ownerLabelByMembershipId[program.owner_membership_id] ?? "–"
-                  : "–"}
-              </span>
-              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-700">
-                Zeitraum: {formatProgramPeriodDe(program.start_date, program.end_date)}
-              </span>
-              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-700">
-                Budget: {formatChf(program.budget_total)}
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-zinc-900">{program.title}</span>
             </div>
-
-            <div className="flex flex-wrap gap-3 border-t border-zinc-200 pt-3 text-xs text-zinc-700">
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${healthDotClass(health)}`}
-                  title={programOverviewHealthLabelDe(health)}
-                />
-                <span className="font-medium text-zinc-800">Fortschritt:</span> {pct}&nbsp;%
-              </span>
-              <span>
-                <span className="font-medium text-zinc-800">Initiativen gesamt:</span>{" "}
-                {program.initiative_count}
-              </span>
-              <span>
-                <span className="font-medium text-zinc-800">Initiativen aktiv:</span>{" "}
-                {program.initiative_active_count}
-              </span>
-              <span>
-                <span className="font-medium text-zinc-800">Initiativen abgeschlossen:</span>{" "}
-                {program.initiative_done_count}
-              </span>
-            </div>
-
-            {program.description ? (
-              <p className="text-xs text-zinc-600">{program.description}</p>
-            ) : null}
+            <ProgramCreateForm
+              key={program.id}
+              canWrite={canWrite}
+              createAction={createProgramAction}
+              updateAction={updateProgramAction}
+              strategicDirections={strategicDirectionsForProgramRow(
+                program,
+                strategicDirectionsForPrograms,
+                strategicDirectionsAll
+              )}
+              ownerOptions={sponsorSelectOptionsForProgram(
+                program,
+                ownerOptions,
+                ownerLabelByMembershipId
+              )}
+              selectedProgram={programRowToSelection(program)}
+              onClearSelection={() => {}}
+              showClearButton={false}
+            />
 
             <div>
               <p className="mb-2 text-xs font-semibold text-zinc-800">Zugehoerige Initiativen</p>

@@ -344,40 +344,32 @@ export function StrategicDirectionsTable({
 
         return (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-zinc-900">
-                {direction.title}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                Abdeckung {coverage.percent}% ({coverage.linked}/
+                {coverage.total || 0})
               </span>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                  Abdeckung {coverage.percent}% ({coverage.linked}/
-                  {coverage.total || 0})
-                </span>
-                <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
-                  Prioritaet (Score):{" "}
-                  {direction.priority != null && direction.priority !== ""
-                    ? Number(direction.priority).toFixed(2)
-                    : "—"}
-                </span>
-                <form action={actions.deleteStrategicDirectionInCycle} className="inline">
-                  <input
-                    type="hidden"
-                    name="strategic_direction_id"
-                    value={direction.id}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!canWrite}
-                    className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                  >
-                    Loeschen
-                  </button>
-                </form>
-              </div>
+              <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
+                Prioritaet (Score):{" "}
+                {direction.priority != null && direction.priority !== ""
+                  ? Number(direction.priority).toFixed(2)
+                  : "—"}
+              </span>
+              <form action={actions.deleteStrategicDirectionInCycle} className="inline">
+                <input
+                  type="hidden"
+                  name="strategic_direction_id"
+                  value={direction.id}
+                />
+                <button
+                  type="submit"
+                  disabled={!canWrite}
+                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                >
+                  Loeschen
+                </button>
+              </form>
             </div>
-            {direction.description ? (
-              <p className="text-xs text-zinc-600">{direction.description}</p>
-            ) : null}
 
             <form
               action={actions.updateStrategicDirectionAssessment}

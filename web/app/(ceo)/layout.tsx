@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { redirect } from "next/navigation";
 import { CycleSidebar } from "@/components/ceo/CycleSidebar";
-import { getSidebarPermissionsForMembership } from "@/lib/rbac/sidebar-access";
+import { getAppShellAccess } from "@/lib/rbac/page-access";
 import {
   getAuthenticatedUserId,
-  getCeoAccessContext,
+  getAuthUserSidebarIdentity,
   getPlanningCyclesForOrganization,
   getTenantBranding,
+  highestOrgRoleCode,
+  labelForOrgRoleCodeDe,
 } from "@/lib/ceo/queries";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -18,9 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
     };
   }
 
-  const access = await getCeoAccessContext(userId);
-  const productName = access?.organizationName
-    ? `${access.organizationName} CITADEL`
+  const shell = await getAppShellAccess(userId);
+  const productName = shell?.access.organizationName
+    ? `${shell.access.organizationName} CITADEL`
     : "CITADEL";
 
   return {
@@ -37,22 +39,28 @@ export default async function CeoLayout({
     redirect("/login");
   }
 
-  const access = await getCeoAccessContext(userId);
+  const shell = await getAppShellAccess(userId);
 
-  if (!access) {
+  if (!shell) {
     redirect("/no-access");
   }
 
-  const [cycles, branding, sidebarPermissions] = await Promise.all([
+  const { access, permissions: sidebarPermissions } = shell;
+  const [cycles, branding, sidebarIdentity] = await Promise.all([
     getPlanningCyclesForOrganization(access.organizationId),
     getTenantBranding(access.organizationId),
-    getSidebarPermissionsForMembership(access.membershipId),
+    getAuthUserSidebarIdentity(),
   ]);
 
-  const hasAnySidebarRead = Object.values(sidebarPermissions).some((permission) => permission.read);
-  if (!hasAnySidebarRead) {
-    redirect("/no-access");
-  }
+  const userDisplayLine =
+    sidebarIdentity.displayLine.trim() ||
+    sidebarIdentity.email?.trim() ||
+    "Benutzer";
+  const topOrgRoleCode = highestOrgRoleCode(access.roleCodes);
+  const primaryRoleLabel = topOrgRoleCode
+    ? labelForOrgRoleCodeDe(topOrgRoleCode)
+    : "Keine zugewiesene Rolle";
+
   const productName = access.organizationName
     ? `${access.organizationName} CITADEL`
     : "CITADEL";
@@ -70,6 +78,9 @@ export default async function CeoLayout({
         productName={productName}
         permissions={sidebarPermissions}
         nowIso={new Date().toISOString()}
+        userDisplayLine={userDisplayLine}
+        userEmail={sidebarIdentity.email}
+        primaryRoleLabel={primaryRoleLabel}
       />
       <main className="flex-1 p-6">{children}</main>
     </div>
