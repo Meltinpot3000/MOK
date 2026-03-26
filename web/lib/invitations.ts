@@ -171,8 +171,10 @@ export type MemberInvitation = {
   id: string;
   organization_id: string;
   invited_email: string;
-  /** Optional; wird bei Annahme als membership.title gesetzt. */
+  /** Optional; bei Annahme → membership.display_name (organisationsbezogener Anzeigename). */
   invited_display_name: string | null;
+  /** Optional; bei Annahme → membership.title (Funktion in der Organisation). */
+  invited_membership_title: string | null;
   /** Erste Rolle; fuer Rueckwaertskompatibilitaet. */
   role_code: string;
   /** Alle Rollen der Einladung (effektiv nach dem Speichern). */
@@ -236,14 +238,18 @@ export async function listInvitations(organizationId: string): Promise<MemberInv
     .schema("app")
     .from("member_invitations")
     .select(
-      "id, organization_id, invited_email, invited_display_name, role_code, role_codes, token, status, expires_at, created_at, last_sent_at, accepted_at"
+      "id, organization_id, invited_email, invited_display_name, invited_membership_title, role_code, role_codes, token, status, expires_at, created_at, last_sent_at, accepted_at"
     )
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
     .limit(100);
 
   const rows = (data ?? []) as Array<
-    MemberInvitation & { role_codes?: unknown; invited_display_name?: string | null }
+    MemberInvitation & {
+      role_codes?: unknown;
+      invited_display_name?: string | null;
+      invited_membership_title?: string | null;
+    }
   >;
   return rows.map((row) => {
     const role_codes = invitationRoleCodesFromRow({
@@ -252,7 +258,8 @@ export async function listInvitations(organizationId: string): Promise<MemberInv
     });
     const role_code = role_codes[0] ?? row.role_code ?? "team_member";
     const invited_display_name = row.invited_display_name ?? null;
-    return { ...row, role_code, role_codes, invited_display_name };
+    const invited_membership_title = row.invited_membership_title ?? null;
+    return { ...row, role_code, role_codes, invited_display_name, invited_membership_title };
   });
 }
 
@@ -290,6 +297,7 @@ export async function provisionMembershipFromInvitationForEmail(params: {
   organizationId: string;
   invitedEmail: string;
   roleRows: { id: string; code: string }[];
+  membershipDisplayName: string | null;
   membershipTitle: string | null;
 }): Promise<void> {
   const admin = createSupabaseAdminClient();
@@ -302,19 +310,24 @@ export async function provisionMembershipFromInvitationForEmail(params: {
     return;
   }
 
-  const payload: {
-    organization_id: string;
-    user_id: string;
-    status: "active";
-    title?: string | null;
-  } = {
+  const incomingDisplay = params.membershipDisplayName?.trim() || null;
+  const incomingTitle = params.membershipTitle?.trim() || null;
+
+  const { data: existing } = await admin
+    .schema("app")
+    .from("organization_memberships")
+    .select("display_name, title")
+    .eq("organization_id", params.organizationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const payload = {
     organization_id: params.organizationId,
     user_id: userId,
-    status: "active",
+    status: "active" as const,
+    display_name: incomingDisplay ?? (existing?.display_name as string | null) ?? null,
+    title: incomingTitle ?? (existing?.title as string | null) ?? null,
   };
-  if (params.membershipTitle?.trim()) {
-    payload.title = params.membershipTitle.trim();
-  }
 
   const { data: membership, error: mErr } = await admin
     .schema("app")

@@ -9,6 +9,7 @@ type InviteView = {
   id: string;
   invited_email: string;
   invited_display_name: string | null;
+  invited_membership_title: string | null;
   role_codes: string[];
   status: string;
   expires_at: string;
@@ -54,9 +55,12 @@ export function InvitationsPendingTable({
       if (sortCol === "email") {
         va = a.invited_email;
         vb = b.invited_email;
-      } else if (sortCol === "name") {
+      } else if (sortCol === "displayName") {
         va = a.invited_display_name ?? "";
         vb = b.invited_display_name ?? "";
+      } else if (sortCol === "membershipTitle") {
+        va = a.invited_membership_title ?? "";
+        vb = b.invited_membership_title ?? "";
       } else if (sortCol === "role") {
         va = [...a.role_codes].sort().join(", ");
         vb = [...b.role_codes].sort().join(", ");
@@ -83,9 +87,16 @@ export function InvitationsPendingTable({
             buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
           />
           <SortableTableHeader
-            label="Name (Titel)"
-            sortDirection={sortCol === "name" ? sortDir : null}
-            onRequestSort={() => requestSort("name")}
+            label="Anzeigename"
+            sortDirection={sortCol === "displayName" ? sortDir : null}
+            onRequestSort={() => requestSort("displayName")}
+            className="py-2"
+            buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
+          />
+          <SortableTableHeader
+            label="Titel / Funktion"
+            sortDirection={sortCol === "membershipTitle" ? sortDir : null}
+            onRequestSort={() => requestSort("membershipTitle")}
             className="py-2"
             buttonClassName="hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
           />
@@ -121,6 +132,9 @@ export function InvitationsPendingTable({
             <td className="py-3 pr-3">{invite.invited_email}</td>
             <td className="py-3 pr-3 text-zinc-700">
               {invite.invited_display_name?.trim() ? invite.invited_display_name : "—"}
+            </td>
+            <td className="py-3 pr-3 text-zinc-700">
+              {invite.invited_membership_title?.trim() ? invite.invited_membership_title : "—"}
             </td>
             <td className="py-3 pr-3">{invite.role_codes.length ? invite.role_codes.join(", ") : "—"}</td>
             <td className="py-3 pr-3">{invite.status}</td>

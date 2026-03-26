@@ -97,6 +97,12 @@ export function OkrPlanningWorkspace({ data, cycleInstanceId, canWrite }: OkrPla
     });
   }, [data.initiatives, directionFilter, statusFilter, ownerFilter, quickLower]);
 
+  const selectedOkrCycleEndDate = useMemo(() => {
+    const id = data.selectedOkrCycleId;
+    if (!id) return null;
+    return data.okrCycles.find((c) => c.id === id)?.end_date ?? null;
+  }, [data.okrCycles, data.selectedOkrCycleId]);
+
   const filteredOkrObjectives = useMemo(() => {
     if (!quickLower) return data.okrObjectives;
     return data.okrObjectives.filter((obj) => {
@@ -197,8 +203,20 @@ export function OkrPlanningWorkspace({ data, cycleInstanceId, canWrite }: OkrPla
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">OKR-Builder</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          OKR-Objectives und Key Results für den gewählten Zeitraum — mit führender Stoßrichtung und
-          Initiative–Key-Result-Verknüpfungen.
+          OKR-Objectives und Key Results für den gewählten Zeitraum. Die{" "}
+          <span className="font-medium text-zinc-800">führende Stoßrichtung</span> legen Sie am Objective fest;
+          Verknüpfungen zu{" "}
+          <span className="font-medium text-zinc-800">Initiativen</span> erfolgen im System pro{" "}
+          <span className="font-medium text-zinc-800">Key Result</span>: jeweilige KR-Zeile anklicken und aufklappen,
+          dort Bereich „Unterstützende Initiativen“.
+        </p>
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs leading-relaxed text-amber-950">
+          <span className="font-medium">Initiative ↔ Key Result verknüpfen:</span> Im Objective die{" "}
+          <span className="font-medium">KR-Überschrift</span> anklicken (aufklappen). Unten im Bereich{" "}
+          <span className="font-medium">„Unterstützende Initiativen“</span> die passenden Initiativen{" "}
+          <span className="font-medium">ankreuzen</span> und{" "}
+          <span className="font-medium">„Verknüpfungen speichern“</span> wählen — die gelben Hinweise in beiden Spalten
+          verschwinden danach.
         </p>
 
         {data.okrCycles.length === 0 ? (
@@ -217,7 +235,7 @@ export function OkrPlanningWorkspace({ data, cycleInstanceId, canWrite }: OkrPla
               >
                 {data.okrCycles.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({formatDeDate(c.start_date)} – {formatDeDate(c.end_date)})
+                    {c.name}
                   </option>
                 ))}
               </select>
@@ -237,12 +255,24 @@ export function OkrPlanningWorkspace({ data, cycleInstanceId, canWrite }: OkrPla
 
             <ul className="mt-6 space-y-4">
               {filteredOkrObjectives.length === 0 ? (
-                <li className="text-sm text-zinc-600">
-                  {!data.selectedOkrCycleId
-                    ? "Kein Zeitraum gewählt."
-                    : data.okrObjectives.length === 0
-                      ? "Noch keine OKR-Objectives in diesem Zeitraum."
-                      : "Keine Treffer für die Suche."}
+                <li className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
+                  {!data.selectedOkrCycleId ? (
+                    "Kein Zeitraum gewählt."
+                  ) : data.okrObjectives.length === 0 ? (
+                    <>
+                      <span className="font-medium text-zinc-900">Noch kein OKR-Objective in diesem Zeitraum.</span>{" "}
+                      Bitte zuerst das Formular{" "}
+                      <span className="font-medium text-zinc-900">„Neues OKR-Objective“</span> direkt oben in diesem
+                      Kasten ausfüllen und anlegen. Anschließend erscheint eine Karte mit Ihrem Ziel —{" "}
+                      <span className="font-medium text-zinc-900">unter „Key Results“</span> finden Sie dann{" "}
+                      <span className="font-medium text-zinc-900">„Key Result hinzufügen“</span>.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium text-zinc-900">Keine Treffer für die Suche.</span> Leeren Sie das
+                      Suchfeld oben („Suche (zusätzlich zu Filtern)“), um alle Objectives wiederzusehen.
+                    </>
+                  )}
                 </li>
               ) : (
                 filteredOkrObjectives.map((obj) => (
@@ -250,6 +280,7 @@ export function OkrPlanningWorkspace({ data, cycleInstanceId, canWrite }: OkrPla
                     key={obj.id}
                     objective={obj}
                     cycleInstanceId={cycleInstanceId}
+                    okrCycleEndDate={selectedOkrCycleEndDate}
                     directions={data.strategicDirections}
                     responsibles={data.responsibles}
                     initiatives={data.initiatives}
@@ -310,6 +341,17 @@ function InitiativeContextCard({ row }: { row: OkrPlanningInitiativeRow }) {
           Key Results: {row.linkedKeyResultTitles.join(", ")}
         </p>
       ) : null}
+      {row.warningNoKeyResultLink ? (
+        <p className="mt-2 border-l-2 border-amber-400 pl-2 text-xs leading-relaxed text-zinc-700">
+          <span className="font-medium text-zinc-800">Wo verknüpfen?</span> Auf dieser Seite im Kasten{" "}
+          <span className="font-medium">„OKR-Builder“</span> zum passenden{" "}
+          <span className="font-medium">Key Result</span> gehen,{" "}
+          <span className="font-medium">Titel anklicken</span> (aufklappen), dort bei{" "}
+          <span className="font-medium">„Unterstützende Initiativen“</span> diese Initiative{" "}
+          <span className="font-medium">ankreuzen</span> und{" "}
+          <span className="font-medium">„Verknüpfungen speichern“</span>.
+        </p>
+      ) : null}
     </li>
   );
 }
@@ -347,6 +389,10 @@ function CreateOkrObjectiveForm(props: {
       }}
     >
       <p className="text-sm font-medium text-zinc-800">Neues OKR-Objective</p>
+      <p className="mt-1 text-xs text-zinc-500">
+        Initiativen können nicht direkt am Objective gewählt werden — nach dem Anlegen eines Key Results dieses
+        aufklappen und Initiativen dort zuordnen.
+      </p>
       <input type="hidden" name="okr_cycle_id" value={okrCycleId} />
       <label className="block text-xs text-zinc-600">
         Titel *
@@ -407,6 +453,7 @@ function CreateOkrObjectiveForm(props: {
 function OkrObjectiveBlock(props: {
   objective: OkrPlanningObjectiveRow;
   cycleInstanceId: string;
+  okrCycleEndDate: string | null;
   directions: Array<{ id: string; title: string }>;
   responsibles: OkrResponsibleOption[];
   initiatives: OkrPlanningInitiativeRow[];
@@ -422,6 +469,7 @@ function OkrObjectiveBlock(props: {
   const {
     objective,
     cycleInstanceId,
+    okrCycleEndDate,
     directions,
     responsibles,
     initiatives,
@@ -480,6 +528,7 @@ function OkrObjectiveBlock(props: {
           className="mt-3 space-y-2 border-t border-zinc-200 pt-3"
             action={(fd) => {
             startTransition(async () => {
+              const ownerRaw = String(fd.get("owner_membership_id") ?? "").trim();
               const r = await updateOkrObjectiveAction({
                 cycleInstanceId,
                 objectiveId: objective.id,
@@ -487,6 +536,7 @@ function OkrObjectiveBlock(props: {
                 description: String(fd.get("description") ?? "") || null,
                 strategicDirectionId: String(fd.get("strategic_direction_id") ?? ""),
                 status: String(fd.get("status") ?? "draft"),
+                ownerMembershipId: ownerRaw || null,
               });
               if ("error" in r && r.error) window.alert(r.error);
               else onMutationSuccess();
@@ -564,8 +614,11 @@ function OkrObjectiveBlock(props: {
         </form>
       ) : null}
 
-      <div className="mt-3">
-        <p className="text-xs font-medium text-zinc-700">Key Results</p>
+      <div className="mt-4 border-t border-zinc-200 pt-4">
+        <p className="text-sm font-semibold text-zinc-900">Key Results</p>
+        <p className="mt-0.5 text-xs text-zinc-500">
+          Messgrößen zu diesem Objective — hier unten können Sie neue Key Results anlegen.
+        </p>
         <ul className="mt-2 space-y-2">
           {objective.keyResults.map((kr) => (
             <KeyResultRow
@@ -573,6 +626,7 @@ function OkrObjectiveBlock(props: {
               kr={kr}
               objectiveId={objective.id}
               cycleInstanceId={cycleInstanceId}
+              okrCycleEndDate={okrCycleEndDate}
               responsibles={responsibles}
               objectiveOwnerMembershipId={objective.ownerMembershipId}
               initiatives={initiatives}
@@ -593,7 +647,9 @@ function OkrObjectiveBlock(props: {
             startTransition={startTransition}
             onSuccess={onMutationSuccess}
           />
-        ) : null}
+        ) : (
+          <p className="mt-3 text-xs text-zinc-500">Nur Lesen: Key Results können in diesem Modus nicht angelegt werden.</p>
+        )}
       </div>
     </li>
   );
@@ -616,6 +672,7 @@ function KeyResultRow(props: {
   const {
     kr,
     cycleInstanceId,
+    okrCycleEndDate,
     responsibles,
     objectiveOwnerMembershipId,
     initiatives,
@@ -636,20 +693,45 @@ function KeyResultRow(props: {
   return (
     <li className="rounded-md border border-zinc-200 bg-white p-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button type="button" onClick={onToggle} className="text-left text-sm font-medium text-zinc-800 hover:underline">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          className="text-left text-sm font-medium text-zinc-800 hover:underline"
+        >
+          <span className="mr-1 text-zinc-400" aria-hidden>
+            {expanded ? "▼" : "▶"}
+          </span>
           {kr.title}
+          {!expanded && kr.warningNoInitiativeLink ? (
+            <span className="mt-0.5 block text-xs font-normal text-amber-800">
+              Zum Verknüpfen mit Initiativen aufklappen
+            </span>
+          ) : null}
         </button>
         <div className="flex flex-wrap gap-1">
           {kr.warningNoInitiativeLink ? (
-            <WarningBadge>Kein Umsetzungstreiber verknüpft</WarningBadge>
+            <WarningBadge>Keine Initiative mit diesem KR verknüpft</WarningBadge>
           ) : null}
         </div>
       </div>
       <p className="mt-1 text-xs text-zinc-600">
         {kr.metricType}: {kr.currentValue ?? "—"} / Ziel {kr.targetValue ?? "—"} ({kr.measurementUnit ?? "—"})
+        {okrCycleEndDate ? (
+          <span className="ml-1 text-zinc-500">
+            · Fällig: {formatDeDate(okrCycleEndDate)} (Ende OKR-Zyklus)
+          </span>
+        ) : null}
       </p>
       {kr.linkedInitiativeTitles.length > 0 ? (
         <p className="text-xs text-zinc-600">Treiber: {kr.linkedInitiativeTitles.join(", ")}</p>
+      ) : null}
+      {!expanded && kr.warningNoInitiativeLink ? (
+        <p className="mt-2 border-l-2 border-amber-400 pl-2 text-xs leading-relaxed text-zinc-700">
+          <span className="font-medium text-zinc-800">So geht’s:</span> KR oben aufklappen, Bereich{" "}
+          <span className="font-medium">„Unterstützende Initiativen“</span>: passende Initiativen ankreuzen, dann{" "}
+          <span className="font-medium">„Verknüpfungen speichern“</span>.
+        </p>
       ) : null}
 
       {expanded && canWrite ? (
@@ -658,7 +740,6 @@ function KeyResultRow(props: {
             action={(fd) => {
               startTransition(async () => {
                 const ownerRaw = String(fd.get("kr_owner_membership_id") ?? "").trim();
-                const dueRaw = String(fd.get("due_date") ?? "").trim();
                 const r = await updateKeyResultAction({
                   keyResultId: kr.id,
                   title: String(fd.get("title") ?? ""),
@@ -668,7 +749,6 @@ function KeyResultRow(props: {
                   currentValue: fd.get("current_value") ? Number(fd.get("current_value")) : null,
                   measurementUnit: String(fd.get("measurement_unit") ?? "") || null,
                   status: String(fd.get("status") ?? "draft"),
-                  dueDate: dueRaw || null,
                   ownerMembershipId: ownerRaw || null,
                 });
                 if ("error" in r && r.error) window.alert(r.error);
@@ -679,15 +759,13 @@ function KeyResultRow(props: {
           >
             <input name="title" defaultValue={kr.title} className="w-full rounded border px-2 py-1 text-xs" />
             <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-zinc-600">
-                Fällig
-                <input
-                  type="date"
-                  name="due_date"
-                  defaultValue={kr.dueDate ? kr.dueDate.slice(0, 10) : ""}
-                  className="ml-1 rounded border px-1 py-0.5 text-xs"
-                />
-              </label>
+              <p className="text-xs text-zinc-600">
+                Fällig:{" "}
+                <span className="font-medium text-zinc-800">
+                  {okrCycleEndDate ? formatDeDate(okrCycleEndDate) : "—"}
+                </span>
+                <span className="text-zinc-500"> (automatisch Ende OKR-Zyklus)</span>
+              </p>
               <label className="text-xs text-zinc-600">
                 KR-Owner
                 <select
@@ -762,6 +840,10 @@ function KeyResultRow(props: {
             }}
           >
             <p className="text-xs font-medium text-zinc-700">Unterstützende Initiativen</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">
+              Hier legen Sie fest, welche Initiativen aus der linken Spalte dieses Key Result messbar unterstützen.
+              Mehrfachauswahl möglich.
+            </p>
             <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded border border-zinc-200 p-2">
               {initiatives.length === 0 ? (
                 <span className="text-xs text-zinc-500">Keine Initiativen im Zyklus.</span>
@@ -814,7 +896,7 @@ function CreateKeyResultForm(props: {
   const { objectiveId, cycleInstanceId, pending, startTransition, onSuccess } = props;
   return (
     <form
-      className="mt-3 space-y-2 border-t border-zinc-200 pt-3"
+      className="mt-4 space-y-2 rounded-md border border-dashed border-zinc-400 bg-zinc-50/80 p-3"
       action={(fd) => {
         startTransition(async () => {
           const r = await createKeyResultAction({
@@ -828,15 +910,34 @@ function CreateKeyResultForm(props: {
         });
       }}
     >
-      <p className="text-xs font-medium text-zinc-700">Key Result hinzufügen</p>
-      <div className="flex flex-wrap gap-2">
-        <input name="title" required placeholder="Titel" className="min-w-[12rem] flex-1 rounded border px-2 py-1 text-xs" />
-        <select name="metric_type" defaultValue="numeric" className="rounded border px-2 py-1 text-xs">
-          <option value="numeric">numeric</option>
-          <option value="percent">percent</option>
-          <option value="boolean">boolean</option>
-        </select>
-        <button type="submit" disabled={pending} className="rounded bg-zinc-900 px-2 py-1 text-xs text-white">
+      <p className="text-sm font-semibold text-zinc-900">Key Result hinzufügen</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block min-w-[12rem] flex-1 text-xs text-zinc-600">
+          Titel
+          <input
+            name="title"
+            required
+            placeholder="z. B. Umsatz Q2"
+            className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm"
+          />
+        </label>
+        <label className="block text-xs text-zinc-600">
+          Metrik
+          <select
+            name="metric_type"
+            defaultValue="numeric"
+            className="mt-1 block rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="numeric">numeric</option>
+            <option value="percent">percent</option>
+            <option value="boolean">boolean</option>
+          </select>
+        </label>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
           Anlegen
         </button>
       </div>

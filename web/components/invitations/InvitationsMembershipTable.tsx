@@ -10,7 +10,8 @@ type MembershipRow = {
   id: string;
   user_id: string;
   status: "active" | "invited" | "suspended";
-  /** Funktions-/Anzeigetitel (Tabellenspalte app.organization_memberships.title). */
+  display_name: string | null;
+  /** Funktion in der Organisation (app.organization_memberships.title). */
   title: string | null;
   created_at: string;
   responsible_id: string | null;
@@ -57,6 +58,7 @@ function displayUser(membership: MembershipRow, identityByUserId: Record<string,
   const identity = identityByUserId[membership.user_id];
   const displayEmail = identity?.email ?? responsible?.email ?? null;
   const displayName =
+    (membership.display_name?.trim() ? membership.display_name.trim() : null) ??
     identity?.name ??
     responsible?.full_name ??
     (displayEmail ? displayEmail.split("@")[0] : "Unbekannter Benutzer");
@@ -153,6 +155,24 @@ export function InvitationsMembershipTable({
             <div className="space-y-4 border-t border-zinc-200 pt-4">
               <div>
                 <label className="block text-sm font-medium text-zinc-800">
+                  Anzeigename in der Organisation
+                  <span className="ml-1 font-normal text-zinc-500">(optional)</span>
+                </label>
+                <input
+                  name="membership_display_name"
+                  type="text"
+                  defaultValue={membership.display_name ?? ""}
+                  disabled={!canWrite}
+                  placeholder="z. B. Max Mustermann"
+                  className="mt-1 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  Ersetzt in dieser Organisation den Namen aus dem Login-Konto in Listen und Zuordnungen, wenn
+                  ausgefuellt.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-800">
                   Titel / Funktion in der Organisation
                   <span className="ml-1 font-normal text-zinc-500">(optional)</span>
                 </label>
@@ -165,7 +185,7 @@ export function InvitationsMembershipTable({
                   className="mt-1 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
                 />
                 <p className="mt-1 text-xs text-zinc-500">
-                  Wird in der Benutzerliste angezeigt; unabhaengig vom Namen aus dem Login-Konto.
+                  Rollenbezeichnung oder Funktion — getrennt vom persoenlichen Anzeigenamen.
                 </p>
               </div>
               <div className="grid gap-6 md:grid-cols-2">

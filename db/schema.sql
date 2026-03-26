@@ -2451,6 +2451,39 @@ begin
     end if;
   end loop;
 
+  insert into app.okr_cycles (
+    organization_id,
+    cycle_instance_id,
+    name,
+    code,
+    start_date,
+    end_date,
+    status,
+    planning_cycle_id
+  )
+  select
+    ci.organization_id,
+    ci.id,
+    ('OKR-Zyklus ' || to_char(ci.starts_on, 'DD.MM.YYYY') || ' – ' || to_char(ci.ends_on, 'DD.MM.YYYY')),
+    ci.code,
+    ci.starts_on,
+    ci.ends_on,
+    'draft'::text,
+    ci.legacy_planning_cycle_id
+  from app.cycle_instances ci
+  where ci.cycle_scheme_id = p_cycle_scheme_id
+    and ci.legacy_planning_cycle_id is null
+    and not exists (
+      select 1
+      from app.cycle_instances child
+      where child.parent_instance_id = ci.id
+        and child.cycle_scheme_id = ci.cycle_scheme_id
+        and child.legacy_planning_cycle_id is null
+    )
+    and not exists (
+      select 1 from app.okr_cycles oc where oc.cycle_instance_id = ci.id
+    );
+
   return v_created;
 end;
 $$;
@@ -2478,6 +2511,39 @@ CREATE FUNCTION app.resolve_active_cycle_instance(p_organization_id uuid, p_leve
   order by ci.level_no desc, ci.starts_on desc
   limit 1;
 $$;
+
+
+--
+-- Name: resolve_auth_user_identities(uuid[]); Type: FUNCTION; Schema: app; Owner: -
+--
+
+CREATE FUNCTION app.resolve_auth_user_identities(p_user_ids uuid[]) RETURNS TABLE(user_id uuid, email text, meta_full_name text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  select
+    u.id as user_id,
+    nullif(trim(u.email::text), '') as email,
+    nullif(
+      trim(
+        coalesce(
+          nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
+          nullif(trim(u.raw_user_meta_data->>'name'), ''),
+          nullif(trim(u.raw_user_meta_data->>'display_name'), '')
+        )
+      ),
+      ''
+    ) as meta_full_name
+  from auth.users u
+  where u.id = any (p_user_ids);
+$$;
+
+
+--
+-- Name: FUNCTION resolve_auth_user_identities(p_user_ids uuid[]); Type: COMMENT; Schema: app; Owner: -
+--
+
+COMMENT ON FUNCTION app.resolve_auth_user_identities(p_user_ids uuid[]) IS 'Service-role only: batch resolve auth email/display name (owner labels).';
 
 
 --
@@ -6276,6 +6342,7 @@ CREATE TABLE app.member_invitations (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     role_codes jsonb DEFAULT '[]'::jsonb NOT NULL,
     invited_display_name text,
+    invited_membership_title text,
     CONSTRAINT member_invitations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'revoked'::text, 'expired'::text])))
 );
 
@@ -6590,6 +6657,7 @@ CREATE TABLE app.organization_memberships (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     responsible_id uuid,
+    display_name text,
     CONSTRAINT organization_memberships_hierarchy_level_check CHECK (((hierarchy_level >= 1) AND (hierarchy_level <= 3))),
     CONSTRAINT organization_memberships_status_check CHECK ((status = ANY (ARRAY['active'::text, 'invited'::text, 'suspended'::text])))
 );
@@ -17904,5 +17972,11 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('0086'),
     ('0087'),
     ('0088'),
+    ('0089'),
     ('009'),
+    ('0090'),
+    ('0091'),
+    ('0092'),
+    ('0093'),
+    ('0094'),
     ('010');

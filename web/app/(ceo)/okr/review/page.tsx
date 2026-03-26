@@ -62,7 +62,7 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
       <OkrReviewWorkspace
         cycleInstanceId={cycle.id}
         okrCycleId={ctx.workspace.selectedOkrCycleId}
-        okrCycleLabel={selected ? `${selected.name} (${selected.start_date} – ${selected.end_date})` : "—"}
+        okrCycleLabel={selected?.name ?? "—"}
         canWrite={pageAccess.canWrite}
         objectives={ctx.workspace.okrObjectives}
         initial={

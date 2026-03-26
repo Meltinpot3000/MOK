@@ -21,6 +21,7 @@ function formatDeDate(iso: string | null): string {
 type OkrTrackingViewProps = {
   cycleInstanceId: string;
   okrCycleId: string | null;
+  okrCycleEndDate: string | null;
   canWrite: boolean;
   objectiveViews: OkrObjectiveView[];
 };
@@ -28,6 +29,7 @@ type OkrTrackingViewProps = {
 export function OkrTrackingView({
   cycleInstanceId,
   okrCycleId,
+  okrCycleEndDate,
   canWrite,
   objectiveViews,
 }: OkrTrackingViewProps) {
@@ -296,7 +298,6 @@ export function OkrTrackingView({
                                   currentValue: fd.get("current_value") ? Number(fd.get("current_value")) : null,
                                   measurementUnit: String(fd.get("measurement_unit") ?? "") || null,
                                   status: String(fd.get("status") ?? "draft"),
-                                  dueDate: String(fd.get("due_date") ?? "").trim() || null,
                                 });
                                 if ("error" in r && r.error) window.alert(r.error);
                                 else router.refresh();
@@ -308,8 +309,14 @@ export function OkrTrackingView({
                               defaultValue={kv.keyResult.title}
                               className="w-full rounded border px-2 py-1 text-xs"
                             />
+                            <p className="w-full text-[11px] text-zinc-600">
+                              Fällig:{" "}
+                              <span className="font-medium text-zinc-800">
+                                {okrCycleEndDate ? formatDeDate(okrCycleEndDate) : formatDeDate(kv.keyResult.dueDate)}
+                              </span>
+                              <span className="text-zinc-500"> (Ende OKR-Zyklus)</span>
+                            </p>
                             <div className="flex flex-wrap gap-1">
-                              <input type="date" name="due_date" defaultValue={kv.keyResult.dueDate?.slice(0, 10) ?? ""} className="rounded border px-1 text-xs" />
                               <select name="metric_type" defaultValue={kv.keyResult.metricType} className="rounded border text-xs">
                                 <option value="numeric">numeric</option>
                                 <option value="percent">percent</option>

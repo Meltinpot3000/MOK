@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOkrCycles } from "@/lib/okr/queries";
 import {
   resolveStrategicDirectionForInitiative,
@@ -25,6 +26,76 @@ function isMissingReviewRollupColumnsError(message: string): boolean {
     message.includes("weight") ||
     message.includes("progress_percent") ||
     message.includes("last_review_update_at")
+  );
+}
+
+type MembershipOwnerRow = {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  title: string | null;
+};
+
+type AuthUserIdentity = { email: string | null; name: string | null };
+
+async function fetchAuthIdentityByUserId(userIds: string[]): Promise<Map<string, AuthUserIdentity>> {
+  const identityByUserId = new Map<string, AuthUserIdentity>();
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueUserIds.length === 0) return identityByUserId;
+
+  const adminClient = createSupabaseAdminClient();
+  if (!adminClient) return identityByUserId;
+
+  const { data: rpcRows, error: rpcError } = await adminClient
+    .schema("app")
+    .rpc("resolve_auth_user_identities", { p_user_ids: uniqueUserIds });
+
+  if (!rpcError && rpcRows && Array.isArray(rpcRows)) {
+    for (const row of rpcRows as Array<{
+      user_id: string;
+      email: string | null;
+      meta_full_name: string | null;
+    }>) {
+      identityByUserId.set(row.user_id, {
+        email: row.email?.trim() || null,
+        name: row.meta_full_name?.trim() || null,
+      });
+    }
+    return identityByUserId;
+  }
+
+  if (rpcError) {
+    console.error("[getOkrPlanningWorkspaceData] resolve_auth_user_identities", rpcError.message);
+  }
+
+  await Promise.all(
+    uniqueUserIds.map(async (userId) => {
+      const { data } = await adminClient.auth.admin.getUserById(userId);
+      const email = data.user?.email?.trim() ? data.user.email.trim() : null;
+      const metadata =
+        data.user?.user_metadata && typeof data.user.user_metadata === "object"
+          ? (data.user.user_metadata as Record<string, unknown>)
+          : null;
+      const fullNameRaw = metadata?.full_name ?? metadata?.name ?? metadata?.display_name ?? null;
+      const name =
+        typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0 ? fullNameRaw.trim() : null;
+      identityByUserId.set(userId, { email, name });
+    })
+  );
+  return identityByUserId;
+}
+
+function okrOwnerLabelFromUserIdentity(
+  row: MembershipOwnerRow,
+  identityByUserId: Map<string, AuthUserIdentity>
+): string {
+  const identity = identityByUserId.get(row.user_id);
+  return (
+    row.display_name?.trim() ||
+    identity?.name ||
+    identity?.email ||
+    row.title?.trim() ||
+    "Mitglied"
   );
 }
 
@@ -148,7 +219,7 @@ export async function getOkrPlanningWorkspaceData(
   const [
     directionsResult,
     programsResult,
-    ownersResult,
+    membershipsResult,
     linksResult,
     targetsResult,
     objectivesResult,
@@ -169,9 +240,12 @@ export async function getOkrPlanningWorkspaceData(
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
-      .from("responsibles")
-      .select("membership_id, full_name")
-      .eq("organization_id", organizationId),
+      .from("organization_memberships")
+      .select("id, user_id, display_name, title")
+      .eq("organization_id", organizationId)
+      .in("status", ["active", "invited"])
+      .order("display_name", { ascending: true })
+      .order("id", { ascending: true }),
     supabase
       .schema("app")
       .from("initiative_target_links")
@@ -215,11 +289,14 @@ export async function getOkrPlanningWorkspaceData(
     programs.map((p) => [p.id, { id: p.id, strategic_direction_id: p.strategic_direction_id }])
   );
   const programTitleById = new Map(programs.map((p) => [p.id, p.title]));
+  const membershipOwnerRows = (membershipsResult.data ?? []) as MembershipOwnerRow[];
+  const identityByUserId = await fetchAuthIdentityByUserId(
+    membershipOwnerRows.map((r) => r.user_id)
+  );
   const ownerByMembership = new Map(
-    ((ownersResult.data ?? []) as Array<{ membership_id: string; full_name: string }>).map((o) => [
-      o.membership_id,
-      o.full_name,
-    ])
+    membershipOwnerRows.map(
+      (row) => [row.id, okrOwnerLabelFromUserIdentity(row, identityByUserId)] as const
+    )
   );
   const targetLinks = (linksResult.data ?? []) as ReviewCycleInitiativeTargetLinkRow[];
   const annualTargets = (targetsResult.data ?? []) as Array<{ id: string; strategic_direction_id: string }>;
@@ -390,12 +467,11 @@ export async function getOkrPlanningWorkspaceData(
     };
   });
 
-  const responsibles: OkrResponsibleOption[] = (
-    (ownersResult.data ?? []) as Array<{ membership_id: string; full_name: string }>
-  ).map((r) => ({
-    membershipId: r.membership_id,
-    fullName: r.full_name,
+  const responsibles: OkrResponsibleOption[] = membershipOwnerRows.map((row) => ({
+    membershipId: row.id,
+    fullName: okrOwnerLabelFromUserIdentity(row, identityByUserId),
   }));
+  responsibles.sort((a, b) => a.fullName.localeCompare(b.fullName, "de"));
 
   return {
     cycleInstanceId,

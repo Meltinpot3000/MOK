@@ -28,6 +28,11 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
 
   const params = await searchParams;
   const ctx = await getOkrCycleContext(context.organizationId, cycle.id, params.okrCycle?.trim() || null);
+  const selectedCycleId = ctx.workspace.selectedOkrCycleId;
+  const okrCycleEndDate =
+    selectedCycleId != null
+      ? (ctx.workspace.okrCycles.find((c) => c.id === selectedCycleId)?.end_date ?? null)
+      : null;
 
   return (
     <section className="space-y-4">
@@ -46,6 +51,7 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
         <OkrTrackingView
           cycleInstanceId={cycle.id}
           okrCycleId={ctx.workspace.selectedOkrCycleId}
+          okrCycleEndDate={okrCycleEndDate}
           canWrite={pageAccess.canWrite}
           objectiveViews={ctx.objectiveViews}
         />

@@ -76,6 +76,36 @@ async function assertOkrCycle(
   return Boolean(data?.id);
 }
 
+/** `YYYY-MM-DD` für key_results.due_date — Ende des am Objective hängenden OKR-Zyklus */
+async function keyResultDueDateFromOkrCycleEnd(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  objectiveId: string
+): Promise<string | null> {
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("objectives")
+    .select("okr_cycle_id, cycle_instance_id")
+    .eq("id", objectiveId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (!obj?.okr_cycle_id || !obj.cycle_instance_id) return null;
+
+  const { data: oc } = await supabase
+    .schema("app")
+    .from("okr_cycles")
+    .select("end_date")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", obj.cycle_instance_id)
+    .eq("id", obj.okr_cycle_id)
+    .maybeSingle();
+
+  if (!oc?.end_date) return null;
+  const raw = typeof oc.end_date === "string" ? oc.end_date : String(oc.end_date);
+  return raw.length >= 10 ? raw.slice(0, 10) : raw;
+}
+
 async function replaceLeadingStrategicDirectionLink(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   organizationId: string;
@@ -321,6 +351,12 @@ export async function createKeyResultAction(input: {
 
   if (!obj?.okr_cycle_id) return { error: "OKR-Objective nicht gefunden." };
 
+  const dueDate = await keyResultDueDateFromOkrCycleEnd(
+    supabase,
+    auth.context.organizationId,
+    input.objectiveId
+  );
+
   const { data: inserted, error } = await supabase
     .schema("app")
     .from("key_results")
@@ -334,6 +370,7 @@ export async function createKeyResultAction(input: {
       current_value: input.currentValue ?? null,
       measurement_unit: input.measurementUnit?.trim() || null,
       status: "draft",
+      due_date: dueDate,
     })
     .select("id")
     .single();
@@ -352,7 +389,6 @@ export async function updateKeyResultAction(input: {
   currentValue?: number | null;
   measurementUnit?: string | null;
   status?: string;
-  dueDate?: string | null;
   ownerMembershipId?: string | null;
 }) {
   const auth = await requireOkrWrite();
@@ -362,6 +398,22 @@ export async function updateKeyResultAction(input: {
   if (!title) return { error: "Titel fehlt." };
 
   const supabase = await createSupabaseServerClient();
+
+  const { data: krContext } = await supabase
+    .schema("app")
+    .from("key_results")
+    .select("objective_id")
+    .eq("id", input.keyResultId)
+    .eq("organization_id", auth.context.organizationId)
+    .maybeSingle();
+
+  if (!krContext?.objective_id) return { error: "Key Result nicht gefunden." };
+
+  const dueDate = await keyResultDueDateFromOkrCycleEnd(
+    supabase,
+    auth.context.organizationId,
+    krContext.objective_id
+  );
 
   let ownerPatch: string | null | undefined = undefined;
   if (input.ownerMembershipId !== undefined) {
@@ -386,10 +438,8 @@ export async function updateKeyResultAction(input: {
     current_value: input.currentValue ?? null,
     measurement_unit: input.measurementUnit?.trim() || null,
     status: input.status?.trim() || "draft",
+    due_date: dueDate,
   };
-  if (input.dueDate !== undefined) {
-    updateRow.due_date = input.dueDate && input.dueDate.trim() !== "" ? input.dueDate.trim() : null;
-  }
   if (ownerPatch !== undefined) updateRow.owner_membership_id = ownerPatch;
 
   const { error } = await supabase

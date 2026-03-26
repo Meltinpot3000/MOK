@@ -27,7 +27,9 @@ type MembershipRow = {
   id: string;
   user_id: string;
   status: "active" | "invited" | "suspended";
-  /** Funktions-/Anzeigetitel in der Organisation (nicht Auth-Name). */
+  /** Organisations-spezifischer Anzeigename (nicht Auth-Login-Name). */
+  display_name: string | null;
+  /** Funktion / Rollenbezeichnung in der Organisation. */
   title: string | null;
   created_at: string;
   responsible_id: string | null;
@@ -169,7 +171,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         .schema("app")
         .from("organization_memberships")
         .select(
-          "id, user_id, status, title, created_at, responsible_id, responsible:responsible_id(id, full_name, email, role_title)"
+          "id, user_id, status, display_name, title, created_at, responsible_id, responsible:responsible_id(id, full_name, email, role_title)"
         )
         .eq("organization_id", context.organizationId)
         .order("created_at", { ascending: false })
@@ -282,6 +284,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
           .filter(Boolean)
       ),
     ];
+    const membershipDisplayNameRaw = String(formData.get("membership_display_name") ?? "").trim();
+    const membershipDisplayName = membershipDisplayNameRaw.length > 0 ? membershipDisplayNameRaw : null;
     const membershipTitleRaw = String(formData.get("membership_title") ?? "").trim();
     const membershipTitle = membershipTitleRaw.length > 0 ? membershipTitleRaw : null;
 
@@ -354,7 +358,11 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
     const { error: membershipUpdateError } = await supabase
       .schema("app")
       .from("organization_memberships")
-      .update({ responsible_id: nextResponsibleId, title: membershipTitle })
+      .update({
+        responsible_id: nextResponsibleId,
+        display_name: membershipDisplayName,
+        title: membershipTitle,
+      })
       .eq("id", membership.id)
       .eq("organization_id", localContext.organizationId);
     if (membershipUpdateError) redirect("/invitations?error=save-failed");
@@ -373,6 +381,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
 
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const invitedDisplayName = String(formData.get("invited_display_name") ?? "").trim();
+    const invitedMembershipTitle = String(formData.get("invited_membership_title") ?? "").trim();
     const roleCodes = [
       ...new Set(
         formData
@@ -408,6 +417,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         organization_id: localContext.organizationId,
         invited_email: email,
         invited_display_name: invitedDisplayName || null,
+        invited_membership_title: invitedMembershipTitle || null,
         role_code: roleCodes[0],
         role_codes: roleCodes,
         created_by_membership_id: localContext.membershipId,
@@ -446,7 +456,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       organizationId: localContext.organizationId,
       invitedEmail: email,
       roleRows: roleRows as { id: string; code: string }[],
-      membershipTitle: invitedDisplayName || null,
+      membershipDisplayName: invitedDisplayName || null,
+      membershipTitle: invitedMembershipTitle || null,
     });
 
     revalidatePath("/invitations");
@@ -480,7 +491,9 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
     const { data: invite } = await supabase
       .schema("app")
       .from("member_invitations")
-      .select("id, token, invited_email, status, role_code, role_codes, invited_display_name")
+      .select(
+        "id, token, invited_email, status, role_code, role_codes, invited_display_name, invited_membership_title"
+      )
       .eq("id", inviteId)
       .eq("organization_id", localContext.organizationId)
       .single();
@@ -521,7 +534,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
             organizationId: localContext.organizationId,
             invitedEmail: invite.invited_email.trim().toLowerCase(),
             roleRows: resendRoleRows,
-            membershipTitle: invite.invited_display_name?.trim() || null,
+            membershipDisplayName: invite.invited_display_name?.trim() || null,
+            membershipTitle: invite.invited_membership_title?.trim() || null,
           });
         }
       }
@@ -657,19 +671,34 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
             </label>
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-zinc-700">
-                Anzeigename / Titel in der Organisation{" "}
+                Anzeigename in der Organisation{" "}
                 <span className="font-normal text-zinc-500">(optional)</span>
               </span>
               <input
                 name="invited_display_name"
                 type="text"
                 autoComplete="name"
-                placeholder="z. B. Max Mustermann, Team Lead Vertrieb"
+                placeholder="z. B. Max Mustermann"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
               />
               <span className="mt-1 block text-xs text-zinc-500">
-                Wird nach Annahme der Einladung als Eintrag «Titel» auf der Mitgliedschaft gespeichert (nicht der
-                Supabase-Login-Name).
+                Wird auf der Mitgliedschaft gespeichert und in Listen bevorzugt — unabhaengig vom Namen im
+                Login-Konto.
+              </span>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-zinc-700">
+                Titel / Funktion{" "}
+                <span className="font-normal text-zinc-500">(optional)</span>
+              </span>
+              <input
+                name="invited_membership_title"
+                type="text"
+                placeholder="z. B. Team Lead Vertrieb"
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Separate Angabe zur Rolle in der Organisation; nicht mit dem Anzeigenamen verwechselt.
               </span>
             </label>
             <fieldset

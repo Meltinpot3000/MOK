@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/okr/dashboard", label: "Dashboard" },
   { href: "/okr/tracking", label: "Tracking" },
-  { href: "/okr/planning", label: "Planning" },
+  { href: "/okr/planning", label: "Planung" },
   { href: "/okr/review", label: "Review" },
 ] as const;
 

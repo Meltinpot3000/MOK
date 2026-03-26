@@ -50,7 +50,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
         <h1 className="text-xl font-semibold text-zinc-900">OKR-Dashboard</h1>
         <p className="text-sm text-zinc-600">Kein OKR-Zeitraum verfügbar oder auswählbar.</p>
         <Link href="/okr/planning" className="text-sm text-zinc-800 underline">
-          Zur Planning
+          zur Planung
         </Link>
       </section>
     );
@@ -68,7 +68,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
         <div className="brand-card p-6 text-sm text-zinc-600">
           <p>Keine OKR-Objectives in diesem Zeitraum.</p>
           <Link href="/okr/planning" className="mt-2 inline-block text-zinc-800 underline">
-            In Planning anlegen
+            In der Planung anlegen
           </Link>
         </div>
       </section>
@@ -145,7 +145,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
         )}
         {kpis.initiativesWithoutKr > 0 ? (
           <p className="mt-4 text-sm text-amber-800">
-            {kpis.initiativesWithoutKr} Initiative(n) ohne Key-Result-Verknüpfung (siehe Planning).
+            {kpis.initiativesWithoutKr} Initiative(n) ohne Key-Result-Verknüpfung (siehe Planung).
           </p>
         ) : null}
       </section>

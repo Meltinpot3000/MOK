@@ -19,7 +19,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   if (!cycle) {
     return (
       <section className="brand-card p-6">
-        <h1 className="text-xl font-semibold text-zinc-900">OKR Planning</h1>
+        <h1 className="text-xl font-semibold text-zinc-900">OKR-Planung</h1>
         <p className="mt-2 text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
       </section>
     );
@@ -38,7 +38,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
     <section className="space-y-4">
       <article className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Planning</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Planung</h1>
         <p className="mt-1 text-sm text-zinc-600">
           Execution-Kontext und OKR-Builder mit Stoßrichtung, Initiative–Key-Result-Links und Ownern.
         </p>

@@ -43,7 +43,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     .schema("app")
     .from("member_invitations")
     .select(
-      "id, organization_id, invited_email, invited_display_name, role_code, role_codes, status, expires_at"
+      "id, organization_id, invited_email, invited_display_name, invited_membership_title, role_code, role_codes, status, expires_at"
     )
     .eq("token", token)
     .single();
@@ -137,24 +137,31 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     );
   }
 
-  const displayTitle =
+  const inviteDisplayName =
     typeof invite.invited_display_name === "string" && invite.invited_display_name.trim().length > 0
       ? invite.invited_display_name.trim()
       : null;
+  const inviteTitle =
+    typeof invite.invited_membership_title === "string" &&
+    invite.invited_membership_title.trim().length > 0
+      ? invite.invited_membership_title.trim()
+      : null;
 
-  const membershipPayload: {
-    organization_id: string;
-    user_id: string;
-    status: "active";
-    title?: string | null;
-  } = {
+  const { data: existingMembership } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("display_name, title")
+    .eq("organization_id", invite.organization_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const membershipPayload = {
     organization_id: invite.organization_id,
     user_id: user.id,
-    status: "active",
+    status: "active" as const,
+    display_name: inviteDisplayName ?? (existingMembership?.display_name as string | null) ?? null,
+    title: inviteTitle ?? (existingMembership?.title as string | null) ?? null,
   };
-  if (displayTitle !== null) {
-    membershipPayload.title = displayTitle;
-  }
 
   const { data: membership, error: membershipError } = await supabase
     .schema("app")

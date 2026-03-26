@@ -111,6 +111,7 @@ type OrgMembershipOwnerRow = {
   id: string;
   user_id: string;
   status: string;
+  display_name: string | null;
   title: string | null;
   responsible:
     | {
@@ -143,7 +144,9 @@ function baseDisplayNameForMembership(
   const responsible = normalizeMembershipResponsible(m);
   const identity = identityByUserId.get(m.user_id);
   const displayEmail = identity?.email ?? responsible?.email ?? null;
+  const orgDisplay = m.display_name?.trim() ? m.display_name.trim() : null;
   return (
+    orgDisplay ??
     identity?.name ??
     responsible?.full_name ??
     (displayEmail ? displayEmail.split("@")[0] : "Mitglied")
@@ -166,7 +169,7 @@ async function loadReviewCycleOwnerContext(
     .schema("app")
     .from("organization_memberships")
     .select(
-      "id, user_id, status, title, responsible:responsible_id(full_name, email, role_title)"
+      "id, user_id, status, display_name, title, responsible:responsible_id(full_name, email, role_title)"
     )
     .eq("organization_id", organizationId)
     .eq("status", "active");
@@ -185,7 +188,7 @@ async function loadReviewCycleOwnerContext(
       .schema("app")
       .from("organization_memberships")
       .select(
-        "id, user_id, status, title, responsible:responsible_id(full_name, email, role_title)"
+        "id, user_id, status, display_name, title, responsible:responsible_id(full_name, email, role_title)"
       )
       .eq("organization_id", organizationId)
       .in("id", missingForLabels);

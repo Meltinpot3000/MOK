@@ -599,13 +599,11 @@ export async function getStrategyCycleWorkspaceData(
       const { data: cycles } = await supabase
         .schema("app")
         .from("okr_cycles")
-        .select("id, name, start_date, end_date")
+        .select("id, name")
         .eq("organization_id", organizationId)
         .in("id", okrCycleIds);
       for (const c of cycles ?? []) {
-        const sd = c.start_date ? String(c.start_date).slice(0, 10) : "";
-        const ed = c.end_date ? String(c.end_date).slice(0, 10) : "";
-        okrCycleLabelById.set(c.id, sd && ed ? `${c.name} (${sd} – ${ed})` : c.name);
+        okrCycleLabelById.set(c.id, c.name);
       }
     }
     function krContextForLink(krId: string): InitiativeKrLinkContext | null {
@@ -770,13 +768,11 @@ export async function getStrategyCycleWorkspaceData(
       const { data: pipCycles } = await supabase
         .schema("app")
         .from("okr_cycles")
-        .select("id, name, start_date, end_date")
+        .select("id, name")
         .eq("organization_id", organizationId)
         .in("id", pipOkrCycleIds);
       for (const c of pipCycles ?? []) {
-        const sd = c.start_date ? String(c.start_date).slice(0, 10) : "";
-        const ed = c.end_date ? String(c.end_date).slice(0, 10) : "";
-        pipOkrCycleLabelById.set(c.id, sd && ed ? `${c.name} (${sd} – ${ed})` : c.name);
+        pipOkrCycleLabelById.set(c.id, c.name);
       }
     }
     for (const kr of krPickerRows ?? []) {
