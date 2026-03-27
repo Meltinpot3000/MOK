@@ -3,14 +3,16 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
+import { listOkrReviewSessionsForCycle } from "@/lib/okr/review-sessions";
+import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
-import { OkrReviewWorkspace } from "@/components/ceo/okr/OkrReviewWorkspace";
+import { OkrReviewSessionWorkspace } from "@/components/ceo/okr/OkrReviewSessionWorkspace";
 import { ReviewHeaderTrigger } from "@/components/ceo/strategy-review/ReviewHeaderTrigger";
 import { fetchReviewTriggerState } from "@/lib/strategy-review/queries";
 import type { ReviewTriggerState } from "@/lib/strategy-review/types";
 
 type PageProps = {
-  searchParams: Promise<{ okrCycle?: string }>;
+  searchParams: Promise<{ okrCycle?: string; session?: string }>;
 };
 
 export default async function OkrReviewPage({ searchParams }: PageProps) {
@@ -32,8 +34,30 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
   }
 
   const params = await searchParams;
-  const ctx = await getOkrCycleContext(context.organizationId, cycle.id, params.okrCycle?.trim() || null);
+  const okrCycleParam = params.okrCycle?.trim() || null;
+  const sessionParam = params.session?.trim() || null;
+  const ctx = await getOkrCycleContext(context.organizationId, cycle.id, okrCycleParam);
   const selected = ctx.workspace.okrCycles.find((c) => c.id === ctx.workspace.selectedOkrCycleId);
+
+  const permCodes = await getPermissionCodesForMembership(context.membershipId);
+  const canManageSessions = permCodes.has("okr.review.session.manage");
+  const canAssignFacilitator = permCodes.has("okr.review.facilitator.assign");
+
+  let sessions = [] as Awaited<ReturnType<typeof listOkrReviewSessionsForCycle>>;
+  if (ctx.workspace.selectedOkrCycleId) {
+    sessions = await listOkrReviewSessionsForCycle(
+      context.organizationId,
+      cycle.id,
+      ctx.workspace.selectedOkrCycleId
+    );
+  }
+
+  const selectedSessionId =
+    sessionParam && sessions.some((s) => s.id === sessionParam) ? sessionParam : null;
+
+  const searchParamsObj: Record<string, string> = {};
+  if (okrCycleParam) searchParamsObj.okrCycle = okrCycleParam;
+  const searchQuery = new URLSearchParams(searchParamsObj).toString();
 
   let trigger: ReviewTriggerState | null = null;
   if (pageAccess.canWrite) {
@@ -48,9 +72,9 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-            <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Review</h1>
+            <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Review-Workspace</h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Ein Eintrag pro OKR-Zeitraum (quarterly_review). Zeitraum wählst du direkt unter diesem Header.
+              Review-Sessions pro OKR-Zeitraum: Planung, Meeting-Artefakte und Abschluss — getrennt vom Tracking.
             </p>
             <p className="mt-2 text-xs text-zinc-500">
               <a className="text-zinc-700 underline hover:text-zinc-900" href={`/okr/strategy-review?instance=${cycle.id}`}>
@@ -66,24 +90,23 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
         <OkrCycleCarousel cycles={ctx.workspace.okrCycles} selectedId={ctx.workspace.selectedOkrCycleId} />
       ) : null}
 
-      <OkrReviewWorkspace
-        cycleInstanceId={cycle.id}
-        okrCycleId={ctx.workspace.selectedOkrCycleId}
-        okrCycleLabel={selected?.name ?? "—"}
-        canWrite={pageAccess.canWrite}
-        objectives={ctx.workspace.okrObjectives}
-        initial={
-          ctx.okrReview
-            ? {
-                summary: ctx.okrReview.summary,
-                successes: ctx.okrReview.successes,
-                problems: ctx.okrReview.problems,
-                lessons_learned: ctx.okrReview.lessons_learned,
-                next_actions: ctx.okrReview.next_actions,
-              }
-            : null
-        }
-      />
+      {!ctx.workspace.selectedOkrCycleId ? (
+        <p className="brand-card p-6 text-sm text-zinc-600">Kein OKR-Zeitraum gewählt.</p>
+      ) : (
+        <OkrReviewSessionWorkspace
+          cycleInstanceId={cycle.id}
+          okrCycleId={ctx.workspace.selectedOkrCycleId}
+          okrCycleLabel={selected?.name ?? "—"}
+          searchQuery={searchQuery}
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          responsibles={ctx.workspace.responsibles}
+          currentMembershipId={context.membershipId}
+          canManageSessions={canManageSessions}
+          canAssignFacilitator={canAssignFacilitator}
+          kpis={ctx.kpis}
+          objectiveViews={ctx.objectiveViews}        />
+      )}
     </section>
   );
 }

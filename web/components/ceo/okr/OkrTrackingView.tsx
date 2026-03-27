@@ -4,7 +4,6 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
-import { canEditOkrKeyResultForUser } from "@/lib/okr/okr-object-permissions";
 import { buildRollupSeries } from "@/lib/okr/rollup-series";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
 import { OkrRollupSparkline } from "@/components/ceo/okr/OkrRollupSparkline";
@@ -46,8 +45,12 @@ type OkrTrackingViewProps = {
   okrCycleEndDate: string | null;
   canWriteArea: boolean;
   currentMembershipId: string;
+  /** Objectives im gewählten OKR-Zeitraum (vor Zugriffsfilter) — für sinnvolle Leer-Meldung */
+  inCycleObjectiveCount: number;
   objectiveViews: OkrObjectiveView[];
   updatesByKeyResultId: Record<string, OkrUpdateRow[]>;
+  /** Server-vorberechnet: KR-Update (Check-in) erlaubt */
+  keyResultCanUpdateById: Record<string, boolean>;
 };
 
 export function OkrTrackingView({
@@ -56,8 +59,10 @@ export function OkrTrackingView({
   okrCycleEndDate,
   canWriteArea,
   currentMembershipId,
+  inCycleObjectiveCount,
   objectiveViews,
   updatesByKeyResultId,
+  keyResultCanUpdateById,
 }: OkrTrackingViewProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -130,7 +135,9 @@ export function OkrTrackingView({
           expandLabel=""
           emptyMessage={
             objectiveViews.length === 0
-              ? "Keine OKRs mit dir als Owner."
+              ? inCycleObjectiveCount === 0
+                ? "Keine OKR-Objectives in diesem Zeitraum — anderen OKR-Zyklus wählen oder in der Planung anlegen."
+                : "Es gibt Objectives in diesem Zeitraum, aber keines, das Sie mit Ihrer Rolle lesen dürfen (Owner, Deputy oder direkte Team-Linie)."
               : "Keine Einträge."
           }
           renderExpandedContent={(ov) => {
@@ -141,7 +148,11 @@ export function OkrTrackingView({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-zinc-900">{ov.objective.title}</p>
                     <p className="truncate text-[11px] text-zinc-500">
-                      {ov.objective.leadingStrategicDirectionTitle ?? "—"} · {ov.objective.ownerDisplayName ?? "—"}
+                      {ov.objective.leadingStrategicDirectionTitle ?? "—"} · Owner:{" "}
+                      {ov.objective.ownerDisplayName ?? "—"}
+                      {ov.objective.deputyDisplayName
+                        ? ` · Deputy: ${ov.objective.deputyDisplayName}`
+                        : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -165,12 +176,7 @@ export function OkrTrackingView({
                 <ul className="mt-2 divide-y divide-zinc-100 rounded-md border border-zinc-200 bg-white">
                   {ov.keyResults.map((kv) => {
                     const canEditThisKr =
-                      canWriteArea &&
-                      canEditOkrKeyResultForUser(
-                        currentMembershipId,
-                        ov.objective.ownerMembershipId,
-                        kv.keyResult.ownerMembershipId
-                      );
+                      canWriteArea && Boolean(keyResultCanUpdateById[kv.keyResult.id]);
                     const updates = updatesByKeyResultId[kv.keyResult.id] ?? [];
                     const histOpen = historyOpenFor === kv.keyResult.id;
                     const lastIn = updates[0];

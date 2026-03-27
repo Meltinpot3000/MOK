@@ -22,17 +22,14 @@ import {
   deleteOkrObjectiveAction,
   linkKeyResultInitiativeAction,
   saveOkrPlanningPanelAction,
+  shiftOkrObjectiveToNextCycleAction,
   unlinkKeyResultInitiativeAction,
 } from "@/app/(ceo)/okr-workspace/actions";
+import { resolveNextOkrCycleId } from "@/lib/okr/okr-cycle-nav";
 import {
   addressedLinkCountToneClass,
   MATRIX_TABLE_LINK_PILLS_MAX,
 } from "@/lib/strategy-cycle/matrix-link-count-tone";
-import {
-  canEditOkrKeyResultForUser,
-  canEditOkrObjectiveForUser,
-} from "@/lib/okr/okr-object-permissions";
-
 const OKR_FORM_LABEL = "block text-xs text-zinc-600";
 const OKR_FORM_CONTROL = "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm";
 
@@ -149,6 +146,22 @@ function KeyResultPlanningKrOneLineRow({
           </select>
         </label>
       ) : null}
+      <label className={`mt-2 block w-full max-w-md ${OKR_KR_INLINE_LBL}`}>
+        Key-Result-Deputy
+        <select
+          name={`kr_${kr.id}_deputy_membership_id`}
+          defaultValue={kr.deputyMembershipId ?? ""}
+          disabled={krFieldsDisabled}
+          className={ctl}
+        >
+          <option value="">— (wie Objective-Deputy)</option>
+          {responsibles.map((r) => (
+            <option key={r.membershipId} value={r.membershipId}>
+              {r.fullName}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="mt-2 flex flex-wrap items-end gap-x-2 gap-y-2">
         <label className={`w-[7.5rem] shrink-0 ${OKR_KR_INLINE_LBL}`}>
@@ -395,6 +408,13 @@ type OkrPlanningWorkspaceProps = {
   cycleInstanceId: string;
   canWrite: boolean;
   currentMembershipId: string;
+  /** OKR-Objective-Owner: nach OKR-Berechtigung gefiltert (z. B. nur du bei update.own). */
+  objectiveOwnerChoices: OkrResponsibleOption[];
+  objectiveEditById: Record<string, boolean>;
+  keyResultEditById: Record<string, boolean>;
+  canCreateKeyResultByObjectiveId: Record<string, boolean>;
+  /** Anzahl Objectives im Zeitraum vor Lesefilter — für Leermeldung wie im Tracking */
+  inCycleOkrObjectiveCountBeforeReadFilter?: number;
 };
 
 function formatDeDate(iso: string | null): string {
@@ -406,6 +426,11 @@ function formatDeDate(iso: string | null): string {
   }
 }
 
+function okrObjectiveStatusLabelDe(status: string): string {
+  if (status === "shifted") return "Verschoben";
+  return status;
+}
+
 function WarningBadge({ children }: { children: React.ReactNode }) {
   return (
     <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
@@ -415,6 +440,87 @@ function WarningBadge({ children }: { children: React.ReactNode }) {
 }
 
 /** Alle über Key Results verknüpften Initiativen eines Objectives, nach Titel sortiert, IDs dedupliziert. */
+function OkrObjectiveRowActions({
+  cycleInstanceId,
+  objectiveId,
+  objectiveStatus,
+  selectedOkrCycleId,
+  canEditRow,
+  canWrite,
+  hasNextCycle,
+  pending,
+  startTransition,
+  router,
+  onAfterShift,
+}: {
+  cycleInstanceId: string;
+  objectiveId: string;
+  objectiveStatus: string;
+  selectedOkrCycleId: string | null;
+  canEditRow: boolean;
+  canWrite: boolean;
+  hasNextCycle: boolean;
+  pending: boolean;
+  startTransition: (cb: () => void) => void;
+  router: ReturnType<typeof useRouter>;
+  onAfterShift: () => void;
+}) {
+  const allowed =
+    canWrite &&
+    canEditRow &&
+    Boolean(selectedOkrCycleId) &&
+    objectiveStatus !== "shifted" &&
+    hasNextCycle;
+
+  if (!allowed) {
+    return <span className="inline-block w-8" aria-hidden />;
+  }
+
+  return (
+    <details className="relative">
+      <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-transparent text-zinc-600 hover:border-zinc-200 hover:bg-zinc-100 [&::-webkit-details-marker]:hidden">
+        <span className="sr-only">Aktionen zu Objective</span>
+        <span className="select-none text-lg leading-none" aria-hidden>
+          ⋮
+        </span>
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 min-w-[14rem] rounded-md border border-zinc-200 bg-white py-1 shadow-md">
+        <button
+          type="button"
+          disabled={pending}
+          className="w-full px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          onClick={(e) => {
+            e.preventDefault();
+            const det = e.currentTarget.closest("details") as HTMLDetailsElement | null;
+            if (det) det.open = false;
+            if (
+              !window.confirm(
+                "Offene Key Results (Fortschritt unter 100 %) werden in den nächsten OKR-Zeitraum kopiert; Initiative-Verknüpfungen werden den Kopien zugeordnet. Das Objective hier wird als «Verschoben» markiert. Fortfahren?",
+              )
+            ) {
+              return;
+            }
+            startTransition(async () => {
+              const r = await shiftOkrObjectiveToNextCycleAction({
+                cycleInstanceId,
+                objectiveId,
+                fromOkrCycleId: selectedOkrCycleId!,
+              });
+              if (r && "error" in r && r.error) window.alert(r.error);
+              else if (r && "newOkrCycleId" in r && r.newOkrCycleId) {
+                router.push(`/okr/planning?okrCycle=${encodeURIComponent(r.newOkrCycleId)}`);
+                onAfterShift();
+              }
+            });
+          }}
+        >
+          OKR-Objective in den nächsten Zyklus verschieben
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function collectLinkedInitiativesForOkrObjective(
   o: OkrPlanningObjectiveRow,
 ): Array<{ id: string; title: string }> {
@@ -508,7 +614,7 @@ function buildOkrObjectiveTableColumns(
       id: "status",
       label: "Status",
       sortValue: (o) => o.status,
-      render: (o) => <span className="text-zinc-700">{o.status}</span>,
+      render: (o) => <span className="text-zinc-700">{okrObjectiveStatusLabelDe(o.status)}</span>,
     },
     {
       id: "progress",
@@ -524,6 +630,11 @@ export function OkrPlanningWorkspace({
   cycleInstanceId,
   canWrite,
   currentMembershipId,
+  objectiveOwnerChoices,
+  objectiveEditById,
+  keyResultEditById,
+  canCreateKeyResultByObjectiveId,
+  inCycleOkrObjectiveCountBeforeReadFilter,
 }: OkrPlanningWorkspaceProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -553,13 +664,58 @@ export function OkrPlanningWorkspace({
   const tableEmptyMessage = !data.selectedOkrCycleId
     ? "Kein Zeitraum gewählt."
     : data.okrObjectives.length === 0
-      ? "Noch kein OKR-Objective in diesem Zeitraum — links im Formular anlegen."
+      ? inCycleOkrObjectiveCountBeforeReadFilter != null &&
+          inCycleOkrObjectiveCountBeforeReadFilter > 0
+        ? "Es gibt Objectives in diesem Zeitraum, aber keines, das Sie mit Ihrer Rolle lesen dürfen (Owner, Deputy oder direkte Team-Linie)."
+        : "Noch kein OKR-Objective in diesem Zeitraum — links im Formular anlegen."
       : "Keine Treffer für die Suche — Suchfeld leeren, um alle Objectives zu sehen.";
 
-  const objectiveTableColumns = useMemo(
-    () => buildOkrObjectiveTableColumns(data.initiatives.length),
-    [data.initiatives.length],
+  const nextOkrCycleId = useMemo(
+    () =>
+      resolveNextOkrCycleId(
+        data.okrCycles.map((c) => ({ id: c.id, start_date: c.start_date })),
+        data.selectedOkrCycleId,
+      ),
+    [data.okrCycles, data.selectedOkrCycleId],
   );
+
+  const objectiveTableColumns = useMemo(() => {
+    const base = buildOkrObjectiveTableColumns(data.initiatives.length);
+    return [
+      ...base,
+      {
+        id: "actions",
+        label: "",
+        headerClassName: "w-10 max-w-[2.5rem]",
+        cellClassName: "w-10 max-w-[2.5rem]",
+        render: (o: OkrPlanningObjectiveRow) => (
+          <OkrObjectiveRowActions
+            cycleInstanceId={cycleInstanceId}
+            objectiveId={o.id}
+            objectiveStatus={o.status}
+            selectedOkrCycleId={data.selectedOkrCycleId}
+            canEditRow={Boolean(objectiveEditById[o.id])}
+            canWrite={canWrite}
+            hasNextCycle={Boolean(nextOkrCycleId)}
+            pending={pending}
+            startTransition={startTransition}
+            router={router}
+            onAfterShift={() => router.refresh()}
+          />
+        ),
+      },
+    ];
+  }, [
+    data.initiatives.length,
+    cycleInstanceId,
+    data.selectedOkrCycleId,
+    canWrite,
+    objectiveEditById,
+    nextOkrCycleId,
+    pending,
+    router,
+    startTransition,
+  ]);
 
   return (
     <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
@@ -577,12 +733,19 @@ export function OkrPlanningWorkspace({
               OKR-Zeitraum wählst du oben per Pfeiltasten — der gewählte Zeitraum gilt für Anlage und Übersicht.
             </p>
 
-            {data.selectedOkrCycleId && canWrite ? (
+            {data.selectedOkrCycleId && canWrite && objectiveOwnerChoices.length === 0 ? (
+              <p className="mt-4 text-xs text-amber-800">
+                Objective anlegen ist derzeit nicht möglich: für deine Rolle sind keine zulässigen Objective-Owner-Einträge ermittelbar. Bitte Zugriffssteuerung prüfen (
+                <span className="font-mono">okr.objective.update.own</span> oder <span className="font-mono">.all</span>).
+              </p>
+            ) : null}
+            {data.selectedOkrCycleId && canWrite && objectiveOwnerChoices.length > 0 ? (
               <CreateOkrObjectiveForm
                 cycleInstanceId={cycleInstanceId}
                 okrCycleId={data.selectedOkrCycleId}
                 directions={data.strategicDirections}
-                responsibles={data.responsibles}
+                objectiveOwnerChoices={objectiveOwnerChoices}
+                currentMembershipId={currentMembershipId}
                 pending={pending}
                 startTransition={startTransition}
                 onSuccess={refresh}
@@ -629,10 +792,14 @@ export function OkrPlanningWorkspace({
                   okrCycleEndDate={selectedOkrCycleEndDate}
                   directions={data.strategicDirections}
                   responsibles={data.responsibles}
+                  objectiveOwnerChoices={objectiveOwnerChoices}
                   initiatives={data.initiatives}
                   canWrite={canWrite}
                   okrKrOwnerMustMatchObjective={data.okrKrOwnerMustMatchObjective}
                   currentMembershipId={currentMembershipId}
+                  objectiveEditById={objectiveEditById}
+                  keyResultEditById={keyResultEditById}
+                  canCreateKeyResultByObjectiveId={canCreateKeyResultByObjectiveId}
                   pending={pending}
                   startTransition={startTransition}
                   onMutationSuccess={refresh}
@@ -650,17 +817,37 @@ function CreateOkrObjectiveForm(props: {
   cycleInstanceId: string;
   okrCycleId: string;
   directions: Array<{ id: string; title: string }>;
-  responsibles: OkrResponsibleOption[];
+  objectiveOwnerChoices: OkrResponsibleOption[];
+  currentMembershipId: string;
   pending: boolean;
   startTransition: (cb: () => void) => void;
   onSuccess: () => void;
 }) {
-  const { cycleInstanceId, okrCycleId, directions, responsibles, pending, startTransition, onSuccess } = props;
+  const {
+    cycleInstanceId,
+    okrCycleId,
+    directions,
+    objectiveOwnerChoices,
+    currentMembershipId,
+    pending,
+    startTransition,
+    onSuccess,
+  } = props;
+  const defaultOwnerValue =
+    objectiveOwnerChoices.find((r) => r.membershipId === currentMembershipId)?.membershipId ??
+    objectiveOwnerChoices[0]?.membershipId ??
+    "";
+  const ownerOptionsLimited =
+    objectiveOwnerChoices.length > 0 &&
+    objectiveOwnerChoices.every((r) => r.membershipId === currentMembershipId);
   const [newObjectiveTitle, setNewObjectiveTitle] = useState("");
+  const [newObjectiveDescription, setNewObjectiveDescription] = useState("");
   const [newObjectiveDirectionId, setNewObjectiveDirectionId] = useState("");
   const createObjectiveCanSubmit =
     directions.length > 0 &&
+    objectiveOwnerChoices.length > 0 &&
     newObjectiveTitle.trim().length > 0 &&
+    newObjectiveDescription.trim().length > 0 &&
     newObjectiveDirectionId.trim().length > 0;
 
   return (
@@ -670,7 +857,7 @@ function CreateOkrObjectiveForm(props: {
         startTransition(async () => {
           const title = String(fd.get("title") ?? "").trim();
           const strategicDirectionId = String(fd.get("strategic_direction_id") ?? "").trim();
-          const description = String(fd.get("description") ?? "").trim() || null;
+          const description = String(fd.get("description") ?? "").trim();
           const ownerRaw = String(fd.get("owner_membership_id") ?? "").trim();
           const r = await createOkrObjectiveAction({
             cycleInstanceId,
@@ -683,6 +870,7 @@ function CreateOkrObjectiveForm(props: {
           if ("error" in r && r.error) window.alert(r.error);
           else {
             setNewObjectiveTitle("");
+            setNewObjectiveDescription("");
             setNewObjectiveDirectionId("");
             onSuccess();
           }
@@ -725,27 +913,35 @@ function CreateOkrObjectiveForm(props: {
         </select>
       </label>
       <label className="block text-xs text-zinc-600">
-        Beschreibung
+        Beschreibung *
         <textarea
           name="description"
+          required
           rows={6}
+          value={newObjectiveDescription}
+          onChange={(e) => setNewObjectiveDescription(e.target.value)}
           className="mt-1 min-h-[9rem] w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
         />
       </label>
       <label className="block text-xs text-zinc-600">
-        OKR-Objective-Owner
+        OKR-Objective-Owner *
         <select
           name="owner_membership_id"
+          required
           className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          defaultValue=""
+          defaultValue={defaultOwnerValue}
         >
-          <option value="">—</option>
-          {responsibles.map((r) => (
+          {objectiveOwnerChoices.map((r) => (
             <option key={r.membershipId} value={r.membershipId}>
               {r.fullName}
             </option>
           ))}
         </select>
+        <span className="mt-1 block text-[10px] text-zinc-500">
+          {ownerOptionsLimited
+            ? "Mit deiner Rolle ist nur du als Objective-Owner wählbar."
+            : "Liste entspricht deinen OKR-Objective-Berechtigungen (z. B. nur «eigen» oder alle)."}
+        </span>
       </label>
       <button
         type="submit"
@@ -764,10 +960,14 @@ function OkrObjectiveExpandedPanel(props: {
   okrCycleEndDate: string | null;
   directions: Array<{ id: string; title: string }>;
   responsibles: OkrResponsibleOption[];
+  objectiveOwnerChoices: OkrResponsibleOption[];
   initiatives: OkrPlanningInitiativeRow[];
   canWrite: boolean;
   okrKrOwnerMustMatchObjective: boolean;
   currentMembershipId: string;
+  objectiveEditById: Record<string, boolean>;
+  keyResultEditById: Record<string, boolean>;
+  canCreateKeyResultByObjectiveId: Record<string, boolean>;
   pending: boolean;
   startTransition: (cb: () => void) => void;
   onMutationSuccess: () => void;
@@ -778,28 +978,41 @@ function OkrObjectiveExpandedPanel(props: {
     okrCycleEndDate,
     directions,
     responsibles,
+    objectiveOwnerChoices,
     initiatives,
     canWrite,
     okrKrOwnerMustMatchObjective,
     currentMembershipId,
+    objectiveEditById,
+    keyResultEditById,
+    canCreateKeyResultByObjectiveId,
     pending,
     startTransition,
     onMutationSuccess,
   } = props;
 
-  const canEditObjective = canEditOkrObjectiveForUser(
-    currentMembershipId,
-    objective.ownerMembershipId
-  );
+  const ownerChoicesForPanel = useMemo(() => {
+    const byId = new Map(objectiveOwnerChoices.map((r) => [r.membershipId, r]));
+    const oid = objective.ownerMembershipId;
+    if (oid && !byId.has(oid)) {
+      const label = objective.ownerDisplayName ?? "Owner";
+      return [...objectiveOwnerChoices, { membershipId: oid, fullName: label }];
+    }
+    return objectiveOwnerChoices;
+  }, [
+    objective.ownerMembershipId,
+    objective.ownerDisplayName,
+    objectiveOwnerChoices,
+  ]);
+
+  const ownerOptionsLimited =
+    objectiveOwnerChoices.length > 0 &&
+    objectiveOwnerChoices.every((r) => r.membershipId === currentMembershipId);
+
+  const canEditObjective = Boolean(objectiveEditById[objective.id]);
   const showPanelSave =
     canEditObjective ||
-    objective.keyResults.some((kr) =>
-      canEditOkrKeyResultForUser(
-        currentMembershipId,
-        objective.ownerMembershipId,
-        kr.ownerMembershipId
-      )
-    );
+    objective.keyResults.some((kr) => Boolean(keyResultEditById[kr.id]));
 
   const krIdsJson = JSON.stringify(objective.keyResults.map((k) => k.id));
 
@@ -813,9 +1026,10 @@ function OkrObjectiveExpandedPanel(props: {
             <span className="text-amber-800">nicht gesetzt</span>
           )}
           {objective.ownerDisplayName ? ` · Owner: ${objective.ownerDisplayName}` : ""}
+          {objective.deputyDisplayName ? ` · Deputy: ${objective.deputyDisplayName}` : ""}
         </p>
       </div>
-      {canWrite && canEditObjective ? (
+      {canWrite && canEditObjective && objective.status !== "shifted" ? (
         <button
           type="button"
           className="text-xs text-red-700 hover:underline"
@@ -837,10 +1051,16 @@ function OkrObjectiveExpandedPanel(props: {
     </div>
   );
 
-  if (!canWrite) {
+  if (!canWrite || objective.status === "shifted") {
     return (
       <div className="space-y-4 border-t border-zinc-100 bg-zinc-50/50 px-1 py-4 sm:px-2">
         {headerMeta}
+        {objective.status === "shifted" ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            Dieses Objective wurde in einen späteren OKR-Zeitraum verschoben. Bearbeitung ist hier
+            deaktiviert; offene Key Results und Verknüpfungen sind im neuen Zeitraum fortgeführt.
+          </p>
+        ) : null}
         <div className="rounded-lg border border-zinc-200 bg-white p-3">
           <p className="text-sm font-semibold text-zinc-900">Key Results</p>
           <ul className="mt-2 space-y-3">
@@ -871,8 +1091,8 @@ function OkrObjectiveExpandedPanel(props: {
       {headerMeta}
       <p className="text-xs text-zinc-600">
         Objective- und Key-Result-Felder bearbeiten, dann{" "}
-        <span className="font-medium text-zinc-800">«Alles speichern»</span> (nur Bereiche, für die Sie Owner
-        sind). Pro KR die aufklappbare Zeile mit Verknüpfungen öffnen — Klick auf eine Pill speichert sofort.
+        <span className="font-medium text-zinc-800">«Alles speichern»</span> (nur wo deine OKR-Berechtigung
+        passt). Pro KR die aufklappbare Zeile mit Verknüpfungen öffnen — Klick auf eine Pill speichert sofort.
       </p>
 
       <form
@@ -891,10 +1111,10 @@ function OkrObjectiveExpandedPanel(props: {
 
         <div className="space-y-3 border-b border-zinc-100 pb-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Objective</p>
-          {!canEditObjective ? (
+            {!canEditObjective ? (
             <p className="text-xs text-zinc-600">
-              Nur der Objective-Owner kann Titel, Stoßrichtung und Owner ändern. Key Results unten ggf.
-              weiterhin bearbeitbar.
+              Objective-Köpfel sind schreibgeschützt. Key Results unten ggf. weiter bearbeitbar — je nach
+              Berechtigung.
             </p>
           ) : null}
           <label className={OKR_FORM_LABEL}>
@@ -924,20 +1144,46 @@ function OkrObjectiveExpandedPanel(props: {
             </select>
           </label>
           <label className={OKR_FORM_LABEL}>
-            Beschreibung
+            Beschreibung *
             <textarea
               name="description"
               rows={6}
+              required={canEditObjective}
               disabled={!canEditObjective}
               defaultValue={objective.description ?? ""}
               className={`${OKR_FORM_CONTROL} min-h-[9rem]`}
             />
           </label>
           <label className={OKR_FORM_LABEL}>
-            OKR-Objective-Owner
+            OKR-Objective-Owner *
             <select
               name="owner_membership_id"
-              defaultValue={objective.ownerMembershipId ?? ""}
+              defaultValue={
+                objective.ownerMembershipId ?? ownerChoicesForPanel[0]?.membershipId ?? ""
+              }
+              required={canEditObjective}
+              disabled={!canEditObjective}
+              className={OKR_FORM_CONTROL}
+            >
+              {ownerChoicesForPanel.map((r) => (
+                <option key={r.membershipId} value={r.membershipId}>
+                  {r.fullName}
+                </option>
+              ))}
+            </select>
+            {canEditObjective ? (
+              <span className="mt-1 block text-[10px] text-zinc-500">
+                {ownerOptionsLimited
+                  ? "Mit deiner Rolle ist nur du als Objective-Owner wählbar."
+                  : "Liste entspricht deinen OKR-Objective-Berechtigungen."}
+              </span>
+            ) : null}
+          </label>
+          <label className={OKR_FORM_LABEL}>
+            Stellvertretung (Deputy)
+            <select
+              name="deputy_membership_id"
+              defaultValue={objective.deputyMembershipId ?? ""}
               disabled={!canEditObjective}
               className={OKR_FORM_CONTROL}
             >
@@ -972,11 +1218,7 @@ function OkrObjectiveExpandedPanel(props: {
                   initiatives={initiatives}
                   cycleInstanceId={cycleInstanceId}
                   canWrite={canWrite}
-                  canEditThisKr={canEditOkrKeyResultForUser(
-                    currentMembershipId,
-                    objective.ownerMembershipId,
-                    kr.ownerMembershipId
-                  )}
+                  canEditThisKr={Boolean(keyResultEditById[kr.id])}
                   okrKrOwnerMustMatchObjective={okrKrOwnerMustMatchObjective}
                   responsibles={responsibles}
                   startTransition={startTransition}
@@ -999,7 +1241,7 @@ function OkrObjectiveExpandedPanel(props: {
           </div>
         ) : (
           <p className="border-t border-zinc-200 pt-5 text-xs text-zinc-500">
-            Kein Speichern möglich: Sie sind weder Objective- noch KR-Owner für diese Zeile.
+            Kein Speichern möglich: für dieses Objective/KR fehlt die passende OKR-Objekt-Berechtigung.
           </p>
         )}
       </form>
@@ -1007,7 +1249,7 @@ function OkrObjectiveExpandedPanel(props: {
       <CreateKeyResultForm
         objectiveId={objective.id}
         cycleInstanceId={cycleInstanceId}
-        canEditObjective={canEditObjective}
+        canCreateKeyResult={Boolean(canCreateKeyResultByObjectiveId[objective.id])}
         okrKrOwnerMustMatchObjective={okrKrOwnerMustMatchObjective}
         responsibles={responsibles}
         pending={pending}
@@ -1021,7 +1263,7 @@ function OkrObjectiveExpandedPanel(props: {
 function CreateKeyResultForm(props: {
   objectiveId: string;
   cycleInstanceId: string;
-  canEditObjective: boolean;
+  canCreateKeyResult: boolean;
   okrKrOwnerMustMatchObjective: boolean;
   responsibles: OkrResponsibleOption[];
   pending: boolean;
@@ -1031,7 +1273,7 @@ function CreateKeyResultForm(props: {
   const {
     objectiveId,
     cycleInstanceId,
-    canEditObjective,
+    canCreateKeyResult,
     okrKrOwnerMustMatchObjective,
     responsibles,
     pending,
@@ -1043,7 +1285,7 @@ function CreateKeyResultForm(props: {
   const showStartTarget = metricType === "numeric" || metricType === "percent";
   const showUnit = metricType === "numeric";
 
-  if (!canEditObjective) {
+  if (!canCreateKeyResult) {
     return null;
   }
 
@@ -1055,6 +1297,7 @@ function CreateKeyResultForm(props: {
         startTransition(async () => {
           const mt = normalizeKeyResultMetricType(String(fd.get("metric_type") ?? "boolean"));
           const ownerRaw = String(fd.get("create_kr_owner_membership_id") ?? "").trim();
+          const deputyRaw = String(fd.get("create_kr_deputy_membership_id") ?? "").trim();
           const r = await createKeyResultAction({
             cycleInstanceId,
             objectiveId,
@@ -1069,6 +1312,7 @@ function CreateKeyResultForm(props: {
                 ? String(fd.get("create_kr_measurement_unit") ?? "").trim() || null
                 : null,
             ownerMembershipId: okrKrOwnerMustMatchObjective ? undefined : ownerRaw || null,
+            deputyMembershipId: deputyRaw || null,
           });
           if ("error" in r && r.error) window.alert(r.error);
           else {
@@ -1101,6 +1345,17 @@ function CreateKeyResultForm(props: {
           </select>
         </label>
       ) : null}
+      <label className="mt-2 block">
+        <span className={OKR_FORM_LABEL}>Key-Result-Deputy (optional)</span>
+        <select name="create_kr_deputy_membership_id" className={OKR_FORM_CONTROL} defaultValue="">
+          <option value="">— (wie Objective-Deputy)</option>
+          {responsibles.map((r) => (
+            <option key={r.membershipId} value={r.membershipId}>
+              {r.fullName}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="mt-2 block">
         <span className={OKR_FORM_LABEL}>Titel</span>
         <input

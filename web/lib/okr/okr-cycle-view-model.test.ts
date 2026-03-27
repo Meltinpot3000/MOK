@@ -24,6 +24,8 @@ function kr(partial: Partial<OkrPlanningKeyResultRow> & { id: string; objectiveI
     updatedAt: partial.updatedAt ?? "2025-01-02T00:00:00.000Z",
     ownerMembershipId: partial.ownerMembershipId ?? null,
     ownerDisplayName: partial.ownerDisplayName ?? null,
+    deputyMembershipId: partial.deputyMembershipId ?? null,
+    deputyDisplayName: partial.deputyDisplayName ?? null,
     linkedInitiativeIds: partial.linkedInitiativeIds ?? [],
     linkedInitiativeTitles: partial.linkedInitiativeTitles ?? [],
     warningNoInitiativeLink: partial.warningNoInitiativeLink ?? false,

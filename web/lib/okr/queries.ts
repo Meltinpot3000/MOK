@@ -133,17 +133,3 @@ export async function getOkrUpdatesForKeyResult(organizationId: string, keyResul
   return data ?? [];
 }
 
-export async function getOkrReviews(organizationId: string, cycleInstanceId: string) {
-  const supabase = await createSupabaseServerClient();
-  const { data } = await supabase
-    .schema("app")
-    .from("okr_reviews")
-    .select(
-      "id, okr_cycle_id, review_type, summary, successes, problems, lessons_learned, next_actions, updated_at"
-    )
-    .eq("organization_id", organizationId)
-    .eq("cycle_instance_id", cycleInstanceId)
-    .order("updated_at", { ascending: false });
-
-  return data ?? [];
-}

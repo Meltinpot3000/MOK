@@ -1,4 +1,5 @@
 import {
+  SIDEBAR_ITEMS,
   SIDEBAR_ITEM_IDS,
   type SidebarItemId,
   type SidebarPermissionMap,
@@ -7,7 +8,7 @@ import type { CeoAccessContext } from "@/lib/ceo/queries";
 import { getAuthenticatedUserId, getRankedCeoAccessContexts } from "@/lib/ceo/queries";
 import { getSidebarPermissionsForMembership } from "@/lib/rbac/sidebar-access";
 
-/** Zaehlt Leserechte; Dashboard-Zugang wird bei der Shell-Wahl stark bevorzugt (Login-Ziel ist /dashboard). */
+/** Zaehlt Leserechte; Dashboard-Zugang wird bei der Shell-Wahl zwischen Mitgliedschaften bevorzugt. */
 function appShellPermissionScore(permissions: SidebarPermissionMap): number {
   const readCount = SIDEBAR_ITEM_IDS.filter((id) => permissions[id]?.read).length;
   const dashboardRead = permissions.dashboard?.read ? 1 : 0;
@@ -15,31 +16,18 @@ function appShellPermissionScore(permissions: SidebarPermissionMap): number {
 }
 
 /**
- * Wenn irgendein Nav-Punkt lesbar ist, aber nicht das Dashboard: Leserecht fuer Dashboard ergänzen,
- * damit Layout und Zielroute nach Login konsistent sind (sonst Layout ok, Seite -> no-access).
+ * Nur wenn kein einziger Sidebar-Punkt lesbar ist: Dashboard-Lesen ergänzen, damit die Shell
+ * nutzbar bleibt (z. B. Rolle ohne nav.*). Sonst bleiben Berechtigungen unverändert — kein
+ * künstliches Dashboard bei reinem OKR- o. a. Zugriff.
  */
-function ensureDashboardReadableIfAnyNavRead(
-  permissions: SidebarPermissionMap
-): SidebarPermissionMap {
+function ensureMinimumShellPermissions(permissions: SidebarPermissionMap): SidebarPermissionMap {
   const hasAnyRead = SIDEBAR_ITEM_IDS.some((id) => permissions[id]?.read);
-  if (!hasAnyRead || permissions.dashboard?.read) {
+  if (hasAnyRead) {
     return permissions;
   }
   return {
     ...permissions,
-    dashboard: { read: true, write: permissions.dashboard.write },
-  };
-}
-
-/** Jede aktive Mitgliedschaft darf die Shell nutzen: mindestens Dashboard-Lesen (z. B. team_member ohne nav.*). */
-function ensureMinimumShellPermissions(permissions: SidebarPermissionMap): SidebarPermissionMap {
-  const step = ensureDashboardReadableIfAnyNavRead(permissions);
-  if (step.dashboard?.read) {
-    return step;
-  }
-  return {
-    ...step,
-    dashboard: { read: true, write: step.dashboard.write },
+    dashboard: { read: true, write: permissions.dashboard?.write ?? false },
   };
 }
 
@@ -73,6 +61,20 @@ export async function getAppShellAccess(userId: string): Promise<{
     access: best.access,
     permissions: ensureMinimumShellPermissions(best.permissions),
   };
+}
+
+/** Erste sinnvolle Route nach Login (ohne kuenstliches Dashboard, wenn andere Bereiche frei sind). */
+export async function getPostLoginRedirectPath(userId: string): Promise<string> {
+  const shell = await getAppShellAccess(userId);
+  if (!shell) return "/no-access";
+  const p = shell.permissions;
+  if (p.dashboard?.read) return "/dashboard";
+  for (const item of SIDEBAR_ITEMS) {
+    if (p[item.id]?.read) {
+      return item.href;
+    }
+  }
+  return "/no-access";
 }
 
 export async function getSidebarAccessContext(itemId: SidebarItemId) {

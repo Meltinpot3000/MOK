@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOkrCycles } from "@/lib/okr/queries";
+import { pickDefaultOkrCycle } from "@/lib/okr/pick-default-okr-cycle";
 import {
   resolveStrategicDirectionForInitiative,
   type ReviewCycleAnnualTargetRow,
@@ -113,6 +114,8 @@ export type OkrPlanningKeyResultRow = {
   updatedAt: string | null;
   ownerMembershipId: string | null;
   ownerDisplayName: string | null;
+  deputyMembershipId: string | null;
+  deputyDisplayName: string | null;
   linkedInitiativeIds: string[];
   linkedInitiativeTitles: string[];
   warningNoInitiativeLink: boolean;
@@ -126,6 +129,8 @@ export type OkrPlanningObjectiveRow = {
   progressPercent: number;
   ownerMembershipId: string | null;
   ownerDisplayName: string | null;
+  deputyMembershipId: string | null;
+  deputyDisplayName: string | null;
   leadingStrategicDirectionId: string | null;
   leadingStrategicDirectionTitle: string | null;
   keyResults: OkrPlanningKeyResultRow[];
@@ -175,13 +180,6 @@ export type OkrPlanningWorkspaceData = {
   /** Organisationsregel: kein separater KR-Owner in der Planung; wird an Objective-Owner gebunden. */
   okrKrOwnerMustMatchObjective: boolean;
 };
-
-function pickDefaultOkrCycle(cycles: OkrCycleOption[]): string | null {
-  if (cycles.length === 0) return null;
-  const active = cycles.filter((c) => c.status === "active");
-  const pool = active.length > 0 ? active : cycles;
-  return [...pool].sort((a, b) => Date.parse(b.start_date) - Date.parse(a.start_date))[0]?.id ?? null;
-}
 
 export async function getOkrPlanningWorkspaceData(
   organizationId: string,
@@ -265,7 +263,9 @@ export async function getOkrPlanningWorkspaceData(
       ? supabase
           .schema("app")
           .from("objectives")
-          .select("id, title, description, status, progress_percent, okr_cycle_id, owner_membership_id")
+          .select(
+            "id, title, description, status, progress_percent, okr_cycle_id, owner_membership_id, deputy_membership_id"
+          )
           .eq("organization_id", organizationId)
           .eq("cycle_instance_id", cycleInstanceId)
           .eq("okr_cycle_id", selectedOkrCycleId)
@@ -342,6 +342,7 @@ export async function getOkrPlanningWorkspaceData(
     progress_percent: number | null;
     okr_cycle_id: string | null;
     owner_membership_id: string | null;
+    deputy_membership_id: string | null;
   }>;
   const objectiveIds = objectives.map((o) => o.id);
 
@@ -369,6 +370,7 @@ export async function getOkrPlanningWorkspaceData(
     due_date: string | null;
     updated_at: string | null;
     owner_membership_id: string | null;
+    deputy_membership_id: string | null;
   }> = [];
 
   if (objectiveIds.length > 0) {
@@ -376,7 +378,7 @@ export async function getOkrPlanningWorkspaceData(
       .schema("app")
       .from("key_results")
       .select(
-        "id, objective_id, title, status, metric_type, start_value, target_value, current_value, measurement_unit, due_date, updated_at, owner_membership_id"
+        "id, objective_id, title, status, metric_type, start_value, target_value, current_value, measurement_unit, due_date, updated_at, owner_membership_id, deputy_membership_id"
       )
       .eq("organization_id", organizationId)
       .in("objective_id", objectiveIds)
@@ -449,6 +451,7 @@ export async function getOkrPlanningWorkspaceData(
     const krs = (keyResultsByObjective.get(obj.id) ?? []).map((kr) => {
       const iids = krToInitiatives.get(kr.id) ?? [];
       const krOwner = kr.owner_membership_id;
+      const krDeputy = kr.deputy_membership_id;
       return {
         id: kr.id,
         objectiveId: kr.objective_id,
@@ -463,11 +466,14 @@ export async function getOkrPlanningWorkspaceData(
         updatedAt: kr.updated_at,
         ownerMembershipId: krOwner,
         ownerDisplayName: krOwner ? ownerByMembership.get(krOwner) ?? null : null,
+        deputyMembershipId: krDeputy,
+        deputyDisplayName: krDeputy ? ownerByMembership.get(krDeputy) ?? null : null,
         linkedInitiativeIds: iids,
         linkedInitiativeTitles: iids.map((id) => initiativeTitleById.get(id) ?? id),
         warningNoInitiativeLink: keyResultWarningNoInitiativeLink(kr.id, initiativeKrLinks),
       };
     });
+    const objDeputy = obj.deputy_membership_id;
     return {
       id: obj.id,
       title: obj.title,
@@ -478,6 +484,8 @@ export async function getOkrPlanningWorkspaceData(
       ownerDisplayName: obj.owner_membership_id
         ? ownerByMembership.get(obj.owner_membership_id) ?? null
         : null,
+      deputyMembershipId: objDeputy,
+      deputyDisplayName: objDeputy ? ownerByMembership.get(objDeputy) ?? null : null,
       leadingStrategicDirectionId: dirId,
       leadingStrategicDirectionTitle: dirId ? directionTitleById.get(dirId) ?? null : null,
       keyResults: krs,

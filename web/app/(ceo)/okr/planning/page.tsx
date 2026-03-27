@@ -2,8 +2,14 @@ import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
+import {
+  filterPlanningObjectivesForRead,
+  loadPlanningReadBulkContext,
+} from "@/lib/okr/okr-tracking-filter";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace";
+import { buildOkrPlanningEditFlags } from "@/app/(ceo)/okr/planning/build-okr-planning-edit-flags";
+import { filterResponsiblesForOkrObjectiveOwnerSelect } from "@/lib/okr/okr-planning-owner-choices";
 
 type PageProps = {
   searchParams: Promise<{ okrCycle?: string }>;
@@ -30,11 +36,28 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const preferredOkrCycle = params.okrCycle?.trim() || null;
 
-  const workspace = await getOkrPlanningWorkspaceData(
+  const workspaceRaw = await getOkrPlanningWorkspaceData(
     context.organizationId,
     cycle.id,
     preferredOkrCycle
   );
+
+  const inCycleOkrObjectiveCountBeforeReadFilter = workspaceRaw.okrObjectives.length;
+  const planningBulk = await loadPlanningReadBulkContext(
+    context.membershipId,
+    workspaceRaw.okrObjectives
+  );
+  const workspace = {
+    ...workspaceRaw,
+    okrObjectives: filterPlanningObjectivesForRead(workspaceRaw.okrObjectives, planningBulk),
+  };
+
+  const editFlags = await buildOkrPlanningEditFlags(context.membershipId, workspace);
+  const objectiveOwnerChoices = await filterResponsiblesForOkrObjectiveOwnerSelect({
+    organizationId: context.organizationId,
+    currentMembershipId: context.membershipId,
+    responsibles: workspace.responsibles,
+  });
 
   return (
     <section className="space-y-4">
@@ -61,6 +84,11 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
         cycleInstanceId={cycle.id}
         canWrite={pageAccess.canWrite}
         currentMembershipId={context.membershipId}
+        objectiveOwnerChoices={objectiveOwnerChoices}
+        objectiveEditById={editFlags.objectiveEditById}
+        keyResultEditById={editFlags.keyResultEditById}
+        canCreateKeyResultByObjectiveId={editFlags.canCreateKeyResultByObjectiveId}
+        inCycleOkrObjectiveCountBeforeReadFilter={inCycleOkrObjectiveCountBeforeReadFilter}
       />
     </section>
   );

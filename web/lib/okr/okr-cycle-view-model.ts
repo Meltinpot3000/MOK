@@ -69,6 +69,8 @@ export type OkrKeyResultView = {
   lastActivityAt: string | null;
   effectiveOwnerMembershipId: string | null;
   effectiveOwnerDisplayName: string | null;
+  effectiveDeputyMembershipId: string | null;
+  effectiveDeputyDisplayName: string | null;
   confidenceLevel: number | null;
   warnings: OkrWarningKind[];
 };
@@ -139,6 +141,8 @@ export function buildOkrKeyResultView(
   kr: OkrPlanningKeyResultRow,
   objectiveOwnerMembershipId: string | null,
   objectiveOwnerDisplayName: string | null,
+  objectiveDeputyMembershipId: string | null,
+  objectiveDeputyDisplayName: string | null,
   updatesDescending: OkrUpdateRow[],
   okrCycleDates: OkrCycleDateWindow | null,
   nowMs: number = Date.now()
@@ -163,6 +167,10 @@ export function buildOkrKeyResultView(
   const effectiveOwnerDisplayName = kr.ownerMembershipId
     ? kr.ownerDisplayName
     : objectiveOwnerDisplayName;
+  const effectiveDeputyMembershipId = kr.deputyMembershipId ?? objectiveDeputyMembershipId ?? null;
+  const effectiveDeputyDisplayName = kr.deputyMembershipId
+    ? kr.deputyDisplayName
+    : objectiveDeputyDisplayName;
 
   const confidenceLevel =
     latestConf?.confidence_level != null ? Number(latestConf.confidence_level) : null;
@@ -197,6 +205,8 @@ export function buildOkrKeyResultView(
     lastActivityAt,
     effectiveOwnerMembershipId,
     effectiveOwnerDisplayName,
+    effectiveDeputyMembershipId,
+    effectiveDeputyDisplayName,
     confidenceLevel,
     warnings,
   };
@@ -218,6 +228,8 @@ export function buildOkrObjectiveView(
       kr,
       objective.ownerMembershipId,
       objective.ownerDisplayName,
+      objective.deputyMembershipId ?? null,
+      objective.deputyDisplayName ?? null,
       sorted,
       okrCycleDates,
       nowMs

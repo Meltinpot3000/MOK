@@ -6,7 +6,6 @@ import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
 import { OkrDashboardClient } from "@/components/ceo/okr/OkrDashboardClient";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
-import { OkrWarningBadge } from "@/components/ceo/okr/OkrWarningBadge";
 
 function pageHeader() {
   return (
@@ -86,7 +85,6 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     );
   }
 
-  const alignmentRows = objectiveViews.filter((ov) => ov.warnings.length > 0);
   const updatesByKeyResultId = updatesRecordForObjectiveViews(objectiveViews, ctx.updatesByKeyResultId);
 
   return (
@@ -101,31 +99,6 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
         selectedOkrCycleLabel={selectedCycle?.name ?? workspace.selectedOkrCycleId}
         updatesByKeyResultId={updatesByKeyResultId}
       />
-
-      <section className="brand-card p-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Alignment / Warnungen</h2>
-        {alignmentRows.length === 0 ? (
-          <p className="mt-2 text-sm text-zinc-600">Keine zentralen Warnungen für OKR-Objectives.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {alignmentRows.map((ov) => (
-              <li key={ov.objective.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
-                <span className="font-medium text-zinc-900">{ov.objective.title}</span>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {ov.warnings.map((w) => (
-                    <OkrWarningBadge key={w} kind={w} />
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {kpis.initiativesWithoutKr > 0 ? (
-          <p className="mt-4 text-sm text-amber-800">
-            {kpis.initiativesWithoutKr} Initiative(n) ohne Key-Result-Verknüpfung (siehe Planung).
-          </p>
-        ) : null}
-      </section>
     </div>
   );
 }

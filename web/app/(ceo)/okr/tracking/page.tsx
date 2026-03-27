@@ -6,6 +6,11 @@ import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrTrackingView } from "@/components/ceo/okr/OkrTrackingView";
+import {
+  buildKeyResultUpdateFlagsForTracking,
+  filterObjectiveViewsForTrackingRead,
+  loadTrackingBulkContext,
+} from "@/lib/okr/okr-tracking-filter";
 
 type PageProps = {
   searchParams: Promise<{ okrCycle?: string }>;
@@ -38,10 +43,10 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
       : null;
 
   const myMembershipId = context.membershipId;
-  const objectiveViews = ctx.objectiveViews.filter((ov) => {
-    if (ov.objective.ownerMembershipId === myMembershipId) return true;
-    return ov.keyResults.some((kv) => kv.effectiveOwnerMembershipId === myMembershipId);
-  });
+  const inCycleObjectiveViews = ctx.objectiveViews;
+  const trackingBulk = await loadTrackingBulkContext(myMembershipId, inCycleObjectiveViews);
+  const objectiveViews = filterObjectiveViewsForTrackingRead(inCycleObjectiveViews, trackingBulk);
+  const keyResultCanUpdateById = buildKeyResultUpdateFlagsForTracking(objectiveViews, trackingBulk);
 
   const updatesByKeyResultId = updatesRecordForObjectiveViews(objectiveViews, ctx.updatesByKeyResultId);
 
@@ -67,8 +72,10 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
           okrCycleEndDate={okrCycleEndDate}
           canWriteArea={pageAccess.canWrite}
           currentMembershipId={context.membershipId}
+          inCycleObjectiveCount={inCycleObjectiveViews.length}
           objectiveViews={objectiveViews}
           updatesByKeyResultId={updatesByKeyResultId}
+          keyResultCanUpdateById={keyResultCanUpdateById}
         />
       </Suspense>
     </section>

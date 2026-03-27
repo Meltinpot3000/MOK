@@ -20,7 +20,8 @@ function loadLocalEnv(filePath) {
 
 const rootEnv = loadLocalEnv(resolve(process.cwd(), ".env"));
 const localEnv = loadLocalEnv(resolve(process.cwd(), ".env.local"));
-const merged = { ...rootEnv, ...localEnv };
+const webLocalEnv = loadLocalEnv(resolve(process.cwd(), "web", ".env.local"));
+const merged = { ...rootEnv, ...localEnv, ...webLocalEnv };
 // Pooler zuerst: IPv4 / Session-Pooler; sonst direkte DB-URL (oft nur IPv6).
 const databaseUrl =
   process.env.SUPABASE_POOLER_DB_URL ||

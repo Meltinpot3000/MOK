@@ -15,6 +15,7 @@ import {
   trySendInviteEmailViaSupabase,
   toQrDataUrl,
 } from "@/lib/invitations";
+import { InvitationsClosedTable } from "@/components/invitations/InvitationsClosedTable";
 import { InvitationsMembershipTable } from "@/components/invitations/InvitationsMembershipTable";
 import { InvitationsPendingTable } from "@/components/invitations/InvitationsPendingTable";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
@@ -266,6 +267,9 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       };
     })
   );
+
+  const pendingInvitationViews = invitationViews.filter((v) => v.status === "pending");
+  const closedInvitationViews = invitationViews.filter((v) => v.status !== "pending");
 
   async function saveMembershipRow(formData: FormData) {
     "use server";
@@ -743,15 +747,19 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       </section>
 
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Offene und versendete Benutzerzugaenge</h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Offene Einladungen</h2>
+        <p className="mt-1 text-sm text-zinc-600">
+          Nur Einladungen mit Status «Offen». Abgeschlossene, abgelaufene oder widerrufene Eintraege stehen im
+          Archiv-Abschnitt darunter.
+        </p>
         {serviceRoleConfigured ? (
-          <p className="mt-1 text-sm text-zinc-600">
+          <p className="mt-2 text-sm text-zinc-600">
             «Widerrufen» setzt die Einladung auf widerrufen, entfernt die Mandanten-Mitgliedschaft (und Rollen) fuer
             diese E-Mail und loescht den Supabase-Auth-Account, sofern der betroffene Nutzer in keiner anderen
             Organisation mehr eingetragen ist.
           </p>
         ) : (
-          <p className="mt-1 text-sm text-amber-900">
+          <p className="mt-2 text-sm text-amber-900">
             Ohne konfigurierte Service-Role kann «Widerrufen» nur die Einladung in der Datenbank schliessen — keine
             automatische Bereinigung von Mitgliedschaft oder Auth-User. Für eine vollstaendige Aufraeumung bitte{" "}
             <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">SUPABASE_SERVICE_ROLE_KEY</code> setzen.
@@ -759,7 +767,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         )}
         <div className="mt-4 overflow-x-auto">
           <InvitationsPendingTable
-            invitationViews={invitationViews}
+            invitationViews={pendingInvitationViews}
             canWrite={canWrite}
             serviceRoleConfigured={serviceRoleConfigured}
             resendInvitation={resendInvitation}
@@ -769,7 +777,22 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         {invitationViews.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzerzugaenge vorhanden.</p>
         ) : null}
+        {invitationViews.length > 0 && pendingInvitationViews.length === 0 ? (
+          <p className="mt-3 text-sm text-zinc-500">Keine offenen Einladungen.</p>
+        ) : null}
       </section>
+
+      {closedInvitationViews.length > 0 ? (
+        <section className="brand-card p-6">
+          <h2 className="text-lg font-semibold text-zinc-900">Abgeschlossen / Archiv</h2>
+          <p className="mt-1 text-sm text-zinc-600">
+            Einladungen, die abgeschlossen, abgelaufen oder widerrufen wurden — ohne Anmeldelink und Aktionen.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <InvitationsClosedTable invitationViews={closedInvitationViews} />
+          </div>
+        </section>
+      ) : null}
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
           Diese Rolle hat nur Leserechte fuer Benutzer.

@@ -8,7 +8,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { getSupabasePublicConfigError } from "@/lib/supabase/public-config";
 
 function safeNextPath(raw: string | null): string {
-  return raw && raw.startsWith("/") ? raw : "/dashboard";
+  return raw && raw.startsWith("/") ? raw : "/";
 }
 
 export default function LoginPage() {
@@ -20,7 +20,7 @@ export default function LoginPage() {
   const [magicLoading, setMagicLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [magicSent, setMagicSent] = useState(false);
-  const [nextPath, setNextPath] = useState("/dashboard");
+  const [nextPath, setNextPath] = useState("/");
   /** Session ohne explizites ?next= — keine automatische Weiterleitung (sonst Schleife mit /no-access). */
   const [openSession, setOpenSession] = useState<Session | null>(null);
 
@@ -48,8 +48,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Nur bei explizitem Ziel weiterleiten (z. B. Einladung). Ohne ?next= nicht nach /dashboard schicken,
-      // sonst: Kein-Organisationszugang -> /no-access -> «anderes Konto» -> /login -> wieder /dashboard.
+      // Nur bei explizitem Ziel weiterleiten (z. B. Einladung). Ohne ?next= nicht automatisch zur Startseite —
+      // sonst Schleife bei fehlendem Organisationszugang.
       if (nextRaw && nextRaw.startsWith("/")) {
         router.replace(nextRaw);
         router.refresh();
@@ -89,16 +89,18 @@ export default function LoginPage() {
       password,
     });
 
-    setLoading(false);
-
     if (signInError) {
+      setLoading(false);
       setError(signInError.message);
       return;
     }
 
+    // Voller Seitenwechsel: Server (/, Shell) sieht die frisch gesetzten Auth-Cookies —
+    // Server-Actions direkt nach signIn laufen oft noch ohne Session und liefern fälschlich /login.
     const params = new URLSearchParams(window.location.search);
-    router.replace(safeNextPath(params.get("next")));
-    router.refresh();
+    const nextRaw = params.get("next");
+    const target = nextRaw && nextRaw.startsWith("/") ? nextRaw : "/";
+    window.location.assign(target);
   }
 
   async function handleMagicLink() {
@@ -167,8 +169,8 @@ export default function LoginPage() {
               <Link href="/logout" className="font-medium text-amber-900 underline underline-offset-2">
                 Abmelden
               </Link>
-              <Link href="/dashboard" className="font-medium text-amber-900 underline underline-offset-2">
-                Zum Dashboard
+              <Link href="/" className="font-medium text-amber-900 underline underline-offset-2">
+                Zur App
               </Link>
             </p>
           </div>

@@ -291,7 +291,9 @@ async function findAuthUserIdCaseInsensitive(
  * Legt sofort eine aktive Mitgliedschaft und rbac.member_roles an, sobald der Auth-User zur
  * Einladungs-E-Mail existiert (z. B. direkt nach inviteUserByEmail oder bei bestehendem Konto).
  * Nutzt den Service-Role-Client, damit keine admin.manage_roles beim Einladenden nötig sind.
- * Die Zeile in member_invitations bleibt «pending», bis der Nutzer /invite/accept aufruft.
+ * Offene Einladungen (status pending) fuer dieselbe Org/E-Mail werden danach auf «accepted» gesetzt,
+ * damit die Admin-Liste mit dem tatsaechlich provisionierten Zugang uebereinstimmt (auch wenn der
+ * Nutzer nie /invite/accept aufruft).
  */
 export async function provisionMembershipFromInvitationForEmail(params: {
   organizationId: string;
@@ -340,10 +342,28 @@ export async function provisionMembershipFromInvitationForEmail(params: {
     return;
   }
 
-  await admin.schema("rbac").from("member_roles").upsert(
+  const { error: rolesErr } = await admin.schema("rbac").from("member_roles").upsert(
     params.roleRows.map((row) => ({ membership_id: membership.id, role_id: row.id })),
     { onConflict: "membership_id,role_id" }
   );
+
+  if (rolesErr) {
+    return;
+  }
+
+  const normalizedEmail = params.invitedEmail.trim().toLowerCase();
+  const acceptedAt = new Date().toISOString();
+  await admin
+    .schema("app")
+    .from("member_invitations")
+    .update({
+      status: "accepted",
+      accepted_by_user_id: userId,
+      accepted_at: acceptedAt,
+    })
+    .eq("organization_id", params.organizationId)
+    .eq("status", "pending")
+    .ilike("invited_email", normalizedEmail);
 }
 
 /**

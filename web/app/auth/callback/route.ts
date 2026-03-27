@@ -7,9 +7,10 @@ export async function GET(request: Request) {
   const code = requestUrl.searchParams.get("code");
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type") as EmailOtpType | null;
-  const next = requestUrl.searchParams.get("next") ?? "/dashboard";
+  const nextRaw = requestUrl.searchParams.get("next");
+  /** Ohne explizites Ziel: Root — dort erfolgt Redirect auf erste erlaubte Shell-Route. */
+  const safeNext = nextRaw && nextRaw.startsWith("/") ? nextRaw : "/";
   const errorRedirect = new URL("/auth/error", requestUrl.origin);
-  const safeNext = next.startsWith("/") ? next : "/dashboard";
   const supabase = await createSupabaseRouteHandlerClient();
 
   try {

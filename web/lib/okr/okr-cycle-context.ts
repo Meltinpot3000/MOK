@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
 import { getOkrPlanningWorkspaceData, type OkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
 import { initiativeWarningNoKeyResultLink, type InitiativeKrLinkRow } from "@/lib/okr/okr-planning-view-model";
@@ -9,23 +9,12 @@ import {
   type OkrObjectiveView,
 } from "@/lib/okr/okr-cycle-view-model";
 
-export type OkrReviewRow = {
-  id: string;
-  summary: string | null;
-  successes: string | null;
-  problems: string | null;
-  lessons_learned: string | null;
-  next_actions: string | null;
-  review_type: string;
-};
-
 export type OkrCycleContext = {
   workspace: OkrPlanningWorkspaceData;
   objectiveViews: OkrObjectiveView[];
   kpis: OkrCycleKpis;
   initiativeIdsWithoutKr: string[];
   updatesByKeyResultId: Map<string, OkrUpdateRow[]>;
-  okrReview: OkrReviewRow | null;
 };
 
 function collectKeyResultIds(workspace: OkrPlanningWorkspaceData): string[] {
@@ -81,20 +70,6 @@ export async function getOkrCycleContext(
     }
   }
 
-  let okrReview: OkrReviewRow | null = null;
-  if (workspace.selectedOkrCycleId) {
-    const { data: rev } = await supabase
-      .schema("app")
-      .from("okr_reviews")
-      .select("id, summary, successes, problems, lessons_learned, next_actions, review_type")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
-      .eq("okr_cycle_id", workspace.selectedOkrCycleId)
-      .eq("review_type", "quarterly_review")
-      .maybeSingle();
-    if (rev) okrReview = rev as OkrReviewRow;
-  }
-
   const selectedCycle =
     workspace.selectedOkrCycleId != null
       ? workspace.okrCycles.find((c) => c.id === workspace.selectedOkrCycleId) ?? null
@@ -135,6 +110,5 @@ export async function getOkrCycleContext(
     kpis,
     initiativeIdsWithoutKr,
     updatesByKeyResultId,
-    okrReview,
   };
 }
