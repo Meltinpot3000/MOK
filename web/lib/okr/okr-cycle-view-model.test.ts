@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   computeCheckInFirstLastActivityAt,
+  deriveReviewStatusLinearOkrCycle,
   formatStatusDistribution,
+  OKR_LINEAR_AT_RISK_GAP_PP,
+  OKR_LINEAR_OFF_TRACK_GAP_PP,
   worstReviewStatus,
 } from "./okr-cycle-view-model";
 import type { OkrPlanningKeyResultRow } from "./planning-data";
@@ -62,5 +65,43 @@ describe("okr-cycle-view-model", () => {
     expect(
       formatStatusDistribution({ on_track: 2, at_risk: 1, off_track: 0 })
     ).toBe("2 on track · 1 at risk");
+  });
+
+  describe("deriveReviewStatusLinearOkrCycle", () => {
+    const start = "2025-01-01T00:00:00.000Z";
+    const end = "2025-04-11T00:00:00.000Z";
+    const half =
+      Date.parse(start) + Math.floor((Date.parse(end) - Date.parse(start)) / 2); // exakt 50 % Zeit
+
+    it("on_track wenn Rückstand ≤ at-risk-Schwelle", () => {
+      const e = 50;
+      const p = e - OKR_LINEAR_AT_RISK_GAP_PP; // 40
+      expect(deriveReviewStatusLinearOkrCycle(p, start, end, half)).toBe("on_track");
+    });
+
+    it("at_risk wenn Rückstand > 10 pp und ≤ 30 pp", () => {
+      const p = 50 - OKR_LINEAR_AT_RISK_GAP_PP - 1; // 39, Rückstand 11
+      expect(deriveReviewStatusLinearOkrCycle(p, start, end, half)).toBe("at_risk");
+    });
+
+    it("off_track wenn Rückstand > 30 pp", () => {
+      const p = 50 - OKR_LINEAR_OFF_TRACK_GAP_PP - 1; // 19, Rückstand 31
+      expect(deriveReviewStatusLinearOkrCycle(p, start, end, half)).toBe("off_track");
+    });
+
+    it("vor Zyklusbeginn: erwartet 0 % — hoher Fortschritt trotzdem on_track", () => {
+      const before = new Date("2024-12-15T00:00:00.000Z").getTime();
+      expect(deriveReviewStatusLinearOkrCycle(0, start, end, before)).toBe("on_track");
+    });
+
+    it("nach Zyklusende: erwartet 100 %", () => {
+      const after = new Date("2025-05-01T00:00:00.000Z").getTime();
+      expect(deriveReviewStatusLinearOkrCycle(85, start, end, after)).toBe("at_risk");
+      expect(deriveReviewStatusLinearOkrCycle(65, start, end, after)).toBe("off_track");
+    });
+
+    it("ungültiges Fenster → on_track", () => {
+      expect(deriveReviewStatusLinearOkrCycle(0, "x", end, half)).toBe("on_track");
+    });
   });
 });

@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
+import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
+import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrTrackingView } from "@/components/ceo/okr/OkrTrackingView";
 
 type PageProps = {
@@ -19,9 +21,10 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card p-6">
+      <section className="brand-card space-y-2 p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
         <h1 className="text-xl font-semibold text-zinc-900">OKR-Tracking</h1>
-        <p className="mt-2 text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+        <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
       </section>
     );
   }
@@ -34,14 +37,24 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
       ? (ctx.workspace.okrCycles.find((c) => c.id === selectedCycleId)?.end_date ?? null)
       : null;
 
+  const myMembershipId = context.membershipId;
+  const objectiveViews = ctx.objectiveViews.filter((ov) => {
+    if (ov.objective.ownerMembershipId === myMembershipId) return true;
+    return ov.keyResults.some((kv) => kv.effectiveOwnerMembershipId === myMembershipId);
+  });
+
+  const updatesByKeyResultId = updatesRecordForObjectiveViews(objectiveViews, ctx.updatesByKeyResultId);
+
   return (
     <section className="space-y-4">
-      <header className="brand-card p-6">
-        <h1 className="text-2xl font-semibold text-zinc-900">OKR-Tracking</h1>
+      <article className="brand-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Tracking</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Check-ins, Filter und Detailansicht — Zyklus {cycle.name}
+          Tracke deine OKR-Fortschritte und füge wichtige Updates hinzu.
         </p>
-      </header>
+        <p className="mt-2 text-xs text-zinc-500">Planungszyklus: {cycle.name}</p>
+      </article>
 
       {!pageAccess.canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">Lesemodus: keine Check-ins oder KR-Edits.</p>
@@ -52,8 +65,10 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
           cycleInstanceId={cycle.id}
           okrCycleId={ctx.workspace.selectedOkrCycleId}
           okrCycleEndDate={okrCycleEndDate}
-          canWrite={pageAccess.canWrite}
-          objectiveViews={ctx.objectiveViews}
+          canWriteArea={pageAccess.canWrite}
+          currentMembershipId={context.membershipId}
+          objectiveViews={objectiveViews}
+          updatesByKeyResultId={updatesByKeyResultId}
         />
       </Suspense>
     </section>

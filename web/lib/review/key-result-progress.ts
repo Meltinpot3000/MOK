@@ -17,6 +17,7 @@ export type OkrUpdateRow = {
   progress_value: number | null;
   created_at: string;
   confidence_level?: number | null;
+  comment?: string | null;
 };
 
 export type ReviewStatus = "on_track" | "at_risk" | "off_track";

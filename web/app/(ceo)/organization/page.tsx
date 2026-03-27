@@ -86,11 +86,24 @@ export default async function OrganizationPage() {
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
 
-  const [units, unitTypes, activeCycle] = await Promise.all([
+  const [units, unitTypes, activeCycle, orgSettingsRow] = await Promise.all([
     getOrganizationUnits(context.organizationId),
     getOrganizationUnitTypes(),
     getActivePlanningCycle(context.organizationId),
+    (async () => {
+      const supabase = await createSupabaseServerClient();
+      const { data } = await supabase
+        .schema("app")
+        .from("organizations")
+        .select("okr_kr_owner_must_match_objective")
+        .eq("id", context.organizationId)
+        .maybeSingle();
+      return data;
+    })(),
   ]);
+  const okrKrOwnerMustMatchObjective = Boolean(
+    (orgSettingsRow as { okr_kr_owner_must_match_objective?: boolean } | null)?.okr_kr_owner_must_match_objective,
+  );
 
   async function createOrganizationUnit(formData: FormData) {
     "use server";
@@ -222,6 +235,28 @@ export default async function OrganizationPage() {
     redirect("/organization");
   }
 
+  async function updateOkrKrOwnerPolicyAction(formData: FormData) {
+    "use server";
+    const localContext = await requireWriteAccess();
+    const raw = formData.get("okr_kr_owner_must_match_objective");
+    const enabled = raw === "on" || raw === "true";
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase
+      .schema("app")
+      .from("organizations")
+      .update({ okr_kr_owner_must_match_objective: enabled })
+      .eq("id", localContext.organizationId);
+    if (error) {
+      console.error("[updateOkrKrOwnerPolicyAction]", error.message);
+      redirect("/organization");
+    }
+    revalidatePath("/organization");
+    revalidatePath("/okr/planning");
+    revalidatePath("/okr/tracking");
+    revalidatePath("/okr-workspace");
+    redirect("/organization");
+  }
+
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
@@ -233,6 +268,45 @@ export default async function OrganizationPage() {
       </header>
 
       <OrganizationTabs />
+
+      <section className="brand-card p-6">
+        <h2 className="text-lg font-semibold text-zinc-900">OKR / Zielvereinbarungen</h2>
+        <p className="mt-1 text-sm text-zinc-600">
+          Legt fest, ob Key-Result-Verantwortliche in der OKR-Planung separat gewählt werden oder immer dem
+          Objective-Owner entsprechen.
+        </p>
+        {canWrite ? (
+          <form action={updateOkrKrOwnerPolicyAction} className="mt-4 space-y-3">
+            <label className="flex items-start gap-2 text-sm text-zinc-800">
+              <input
+                type="checkbox"
+                name="okr_kr_owner_must_match_objective"
+                defaultChecked={okrKrOwnerMustMatchObjective}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium">Key-Result-Owner entspricht immer dem Objective-Owner</span>
+                <span className="mt-0.5 block text-xs text-zinc-600">
+                  Wenn aktiv, wird in der OKR-Planung kein separates Feld für den KR-Owner angezeigt; beim Speichern
+                  wird der Objective-Owner übernommen.
+                </span>
+              </span>
+            </label>
+            <button type="submit" className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white">
+              OKR-Regel speichern
+            </button>
+          </form>
+        ) : (
+          <p className="mt-3 text-sm text-zinc-600">
+            Aktuell:{" "}
+            <span className="font-medium">
+              {okrKrOwnerMustMatchObjective
+                ? "KR-Owner entspricht dem Objective-Owner"
+                : "KR-Owner kann separat gesetzt werden"}
+            </span>
+          </p>
+        )}
+      </section>
 
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Organisationseinheit anlegen</h2>

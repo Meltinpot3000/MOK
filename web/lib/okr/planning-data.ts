@@ -172,6 +172,8 @@ export type OkrPlanningWorkspaceData = {
   responsibles: OkrResponsibleOption[];
   initiatives: OkrPlanningInitiativeRow[];
   okrObjectives: OkrPlanningObjectiveRow[];
+  /** Organisationsregel: kein separater KR-Owner in der Planung; wird an Objective-Owner gebunden. */
+  okrKrOwnerMustMatchObjective: boolean;
 };
 
 function pickDefaultOkrCycle(cycles: OkrCycleOption[]): string | null {
@@ -224,6 +226,7 @@ export async function getOkrPlanningWorkspaceData(
     targetsResult,
     objectivesResult,
     dirObjLinksResult,
+    orgSettingsResult,
   ] = await Promise.all([
     supabase
       .schema("app")
@@ -266,7 +269,7 @@ export async function getOkrPlanningWorkspaceData(
           .eq("organization_id", organizationId)
           .eq("cycle_instance_id", cycleInstanceId)
           .eq("okr_cycle_id", selectedOkrCycleId)
-          .order("created_at", { ascending: false })
+          .order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as const, error: null }),
     selectedOkrCycleId
       ? supabase
@@ -276,7 +279,19 @@ export async function getOkrPlanningWorkspaceData(
           .eq("organization_id", organizationId)
           .eq("cycle_instance_id", cycleInstanceId)
       : Promise.resolve({ data: [] as const, error: null }),
+    supabase
+      .schema("app")
+      .from("organizations")
+      .select("okr_kr_owner_must_match_objective")
+      .eq("id", organizationId)
+      .maybeSingle(),
   ]);
+
+  const orgSettingsRow = orgSettingsResult.data as
+    | { okr_kr_owner_must_match_objective?: boolean }
+    | null
+    | undefined;
+  const okrKrOwnerMustMatchObjective = Boolean(orgSettingsRow?.okr_kr_owner_must_match_objective);
 
   const directions = (directionsResult.data ?? []) as Array<{ id: string; title: string }>;
   const directionTitleById = new Map(directions.map((d) => [d.id, d.title]));
@@ -364,7 +379,9 @@ export async function getOkrPlanningWorkspaceData(
         "id, objective_id, title, status, metric_type, start_value, target_value, current_value, measurement_unit, due_date, updated_at, owner_membership_id"
       )
       .eq("organization_id", organizationId)
-      .in("objective_id", objectiveIds);
+      .in("objective_id", objectiveIds)
+      .order("objective_id", { ascending: true })
+      .order("created_at", { ascending: true });
     keyResults = (krRes.data ?? []) as typeof keyResults;
   }
 
@@ -481,5 +498,6 @@ export async function getOkrPlanningWorkspaceData(
     responsibles,
     initiatives,
     okrObjectives,
+    okrKrOwnerMustMatchObjective,
   };
 }

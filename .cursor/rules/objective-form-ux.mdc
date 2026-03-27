@@ -1,0 +1,16 @@
+---
+description: Enforce objective form UX and validation standards
+globs: web/**/*.tsx
+alwaysApply: false
+---
+
+# Objective Form UX Standards
+
+- Every form field must have a visible heading label above the input (do not rely on placeholder only).
+- Use the existing screen pattern for labels and spacing:
+  - Label: `text-xs text-zinc-600`
+  - Input spacing: `mt-1 w-full ...`
+- Primary save buttons (for example `Objective speichern`) stay disabled until all required fields are valid.
+- Keep HTML `required` attributes and add client-side submit gating (`canSubmit`) for immediate UX feedback.
+- Numeric score fields must define `min` and `max` and clamp typed values to valid bounds.
+- For `importance_score`, enforce strict range `1..5`.

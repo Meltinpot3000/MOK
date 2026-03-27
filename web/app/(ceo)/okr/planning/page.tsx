@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
+import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace";
 
 type PageProps = {
@@ -18,9 +19,10 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card p-6">
+      <section className="brand-card space-y-2 p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
         <h1 className="text-xl font-semibold text-zinc-900">OKR-Planung</h1>
-        <p className="mt-2 text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
+        <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
       </section>
     );
   }
@@ -40,10 +42,13 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Planung</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Execution-Kontext und OKR-Builder mit Stoßrichtung, Initiative–Key-Result-Links und Ownern.
+          Erstelle OKRs und verknüpfe sie mit strategischen Zielen der Organisation.
         </p>
-        <p className="mt-1 text-xs text-zinc-500">Strategie-/Review-Zyklus: {cycle.name}</p>
       </article>
+
+      {workspace.okrCycles.length > 0 ? (
+        <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />
+      ) : null}
 
       {!pageAccess.canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
@@ -55,6 +60,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
         data={workspace}
         cycleInstanceId={cycle.id}
         canWrite={pageAccess.canWrite}
+        currentMembershipId={context.membershipId}
       />
     </section>
   );

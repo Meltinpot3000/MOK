@@ -106,3 +106,42 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
 
   return null;
 }
+
+/**
+ * Aktiver Sidebar-Link inkl. Unterpfaden (z. B. alle /okr/* fuer «OKR Zyklus»).
+ * Ausnahme: «Dashboard» nur exakt /dashboard — Zyklen nutzen den eigenen Eintrag unter «Zyklen».
+ */
+export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boolean {
+  if (item.id === "dashboard") {
+    return pathname === "/dashboard";
+  }
+
+  if (item.id === "strategy-cycle") {
+    return (
+      pathname === item.href ||
+      pathname === "/strategy-matrix" ||
+      pathname.startsWith(`${item.href}/`)
+    );
+  }
+
+  if (item.id === "okr-workspace") {
+    return pathname === "/okr" || pathname.startsWith("/okr/");
+  }
+
+  if (item.id === "organization") {
+    return (
+      pathname === "/organization" ||
+      pathname.startsWith("/organization/") ||
+      pathname === "/responsibles" ||
+      pathname === "/industries" ||
+      pathname === "/business-models" ||
+      pathname === "/operating-models"
+    );
+  }
+
+  if (item.id === "planning-cycles") {
+    return pathname === item.href || pathname.startsWith(`${item.href}/`);
+  }
+
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}

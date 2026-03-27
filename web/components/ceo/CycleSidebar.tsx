@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { PlanningCycle, TenantBranding } from "@/lib/ceo/queries";
-import { SIDEBAR_ITEMS, type SidebarPermissionMap } from "@/lib/sidebar-access";
+import {
+  SIDEBAR_ITEMS,
+  isSidebarNavItemActive,
+  type SidebarPermissionMap,
+} from "@/lib/sidebar-access";
 import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
 import { SidebarAccountMenu } from "@/components/ceo/SidebarAccountMenu";
 
@@ -59,7 +63,6 @@ export function CycleSidebar({
         : Number(brandingConfig.logo_position_y ?? 50)
     )
   );
-  const isDashboardRoot = pathname === "/dashboard";
   const topLevelCycles = cycles.filter((cycle) => (cycle.level_no ?? 1) === 1);
   const topLevelScope = topLevelCycles.some((cycle) => cycle.is_active_scheme)
     ? topLevelCycles.filter((cycle) => cycle.is_active_scheme)
@@ -144,7 +147,11 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1">
           {phase1Items.map((item) => (
-            <Link key={item.href} href={item.href} className={cycleLinkClass(pathname === item.href || (item.href === "/dashboard" && isDashboardRoot))}>
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
+            >
               {item.label}
             </Link>
           ))}
@@ -157,7 +164,11 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1">
           {phase0Items.map((item) => (
-            <Link key={item.id} href={item.href} className={cycleLinkClass(pathname === item.href)}>
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
+            >
               {item.label}
             </Link>
           ))}
@@ -171,7 +182,11 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1 pb-2">
           {cycleItems.map((item) => (
-            <Link key={item.id} href={item.href} className={cycleLinkClass(pathname === item.href)}>
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
+            >
               {item.label}
             </Link>
           ))}
@@ -204,7 +219,11 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1">
           {adminItems.map((item) => (
-            <Link key={item.id} href={item.href} className={cycleLinkClass(pathname === item.href)}>
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
+            >
               {item.label}
             </Link>
           ))}

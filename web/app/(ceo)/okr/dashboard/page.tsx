@@ -3,24 +3,26 @@ import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
-import { OkrKpiBar } from "@/components/ceo/okr/OkrKpiBar";
-import { OkrKeyResultsTable } from "@/components/ceo/okr/OkrKeyResultsTable";
-import { OkrProgressBar } from "@/components/ceo/okr/OkrProgressBar";
-import { OkrStatusBadge } from "@/components/ceo/okr/OkrStatusBadge";
+import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
+import { OkrDashboardClient } from "@/components/ceo/okr/OkrDashboardClient";
+import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrWarningBadge } from "@/components/ceo/okr/OkrWarningBadge";
+
+function pageHeader() {
+  return (
+    <article className="brand-card p-6">
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+      <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Dashboard</h1>
+      <p className="mt-1 text-sm text-zinc-600">
+        Gesamtblick auf aktuelle, vergangene und zukünftige OKR-Zyklen
+      </p>
+    </article>
+  );
+}
 
 type PageProps = {
   searchParams: Promise<{ okrCycle?: string }>;
 };
-
-function formatDeDate(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
-  } catch {
-    return iso;
-  }
-}
 
 export default async function OkrDashboardPage({ searchParams }: PageProps) {
   const pageAccess = await getSidebarAccessContext("okr-workspace");
@@ -32,9 +34,11 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card p-6">
-        <h1 className="text-xl font-semibold text-zinc-900">OKR-Dashboard</h1>
-        <p className="mt-2 text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+      <section className="space-y-4">
+        {pageHeader()}
+        <div className="brand-card p-6">
+          <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+        </div>
       </section>
     );
   }
@@ -44,14 +48,22 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   const { workspace, objectiveViews, kpis } = ctx;
   const selectedCycle = workspace.okrCycles.find((c) => c.id === workspace.selectedOkrCycleId);
 
+  const cycleStrip =
+    workspace.okrCycles.length > 0 ? (
+      <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />
+    ) : null;
+
   if (!workspace.selectedOkrCycleId) {
     return (
-      <section className="brand-card space-y-2 p-6">
-        <h1 className="text-xl font-semibold text-zinc-900">OKR-Dashboard</h1>
-        <p className="text-sm text-zinc-600">Kein OKR-Zeitraum verfügbar oder auswählbar.</p>
-        <Link href="/okr/planning" className="text-sm text-zinc-800 underline">
-          zur Planung
-        </Link>
+      <section className="space-y-4">
+        {pageHeader()}
+        {cycleStrip}
+        <div className="brand-card space-y-2 p-6">
+          <p className="text-sm text-zinc-600">Kein OKR-Zeitraum verfügbar oder auswählbar.</p>
+          <Link href="/okr/planning" className="text-sm text-zinc-800 underline">
+            Zur Planung
+          </Link>
+        </div>
       </section>
     );
   }
@@ -59,15 +71,14 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   if (objectiveViews.length === 0) {
     return (
       <section className="space-y-4">
-        <header className="brand-card p-6">
-          <h1 className="text-2xl font-semibold text-zinc-900">OKR-Dashboard</h1>
-          <p className="mt-1 text-sm text-zinc-600">
-            Zeitraum: {selectedCycle?.name ?? workspace.selectedOkrCycleId} · Zyklus {cycle.name}
-          </p>
-        </header>
+        {pageHeader()}
+        {cycleStrip}
         <div className="brand-card p-6 text-sm text-zinc-600">
           <p>Keine OKR-Objectives in diesem Zeitraum.</p>
-          <Link href="/okr/planning" className="mt-2 inline-block text-zinc-800 underline">
+          <p className="mt-1 text-xs text-zinc-500">
+            Zeitraum: {selectedCycle?.name ?? workspace.selectedOkrCycleId}
+          </p>
+          <Link href="/okr/planning" className="mt-3 inline-block text-zinc-800 underline">
             In der Planung anlegen
           </Link>
         </div>
@@ -76,57 +87,23 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   }
 
   const alignmentRows = objectiveViews.filter((ov) => ov.warnings.length > 0);
+  const updatesByKeyResultId = updatesRecordForObjectiveViews(objectiveViews, ctx.updatesByKeyResultId);
 
   return (
     <div className="space-y-4">
-      <header className="brand-card p-6">
-        <h1 className="text-2xl font-semibold text-zinc-900">OKR-Dashboard</h1>
-        <p className="mt-1 text-sm text-zinc-600">
-          Zeitraum: {selectedCycle?.name ?? ""} · Strategiezyklus: {cycle.name}
-        </p>
-        <p className="mt-2 text-xs text-zinc-500">
-          OKR-Objective-Fortschritt = MVP-Durchschnitt der KR-Progress (keine finale Governance-Logik).
-        </p>
-      </header>
+      {pageHeader()}
+      {cycleStrip}
 
-      <OkrKpiBar kpis={kpis} />
-
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {objectiveViews.map((ov) => (
-          <Link
-            key={ov.objective.id}
-            href={`/okr/tracking?objective=${ov.objective.id}`}
-            className="brand-card block p-4 transition-shadow hover:shadow-md"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-sm font-semibold text-zinc-900">{ov.objective.title}</h2>
-              <OkrStatusBadge status={ov.rollupStatus} />
-            </div>
-            <p className="mt-1 text-xs text-zinc-600">
-              Owner: {ov.objective.ownerDisplayName ?? "—"} · {ov.objective.keyResults.length} KR · Letzte Aktivität:{" "}
-              {formatDeDate(ov.lastActivityAt)}
-            </p>
-            <div className="mt-2">
-              <OkrProgressBar value={ov.rollupProgressPercent} />
-            </div>
-            {ov.warnings.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {ov.warnings.map((w) => (
-                  <OkrWarningBadge key={w} kind={w} />
-                ))}
-              </div>
-            ) : null}
-          </Link>
-        ))}
-      </section>
-
-      <section className="brand-card overflow-x-auto p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Key Results</h2>
-        <OkrKeyResultsTable objectiveViews={objectiveViews} />
-      </section>
+      <OkrDashboardClient
+        kpis={kpis}
+        objectiveViews={objectiveViews}
+        okrCycleId={workspace.selectedOkrCycleId}
+        selectedOkrCycleLabel={selectedCycle?.name ?? workspace.selectedOkrCycleId}
+        updatesByKeyResultId={updatesByKeyResultId}
+      />
 
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Alignment / Warnungen</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Alignment / Warnungen</h2>
         {alignmentRows.length === 0 ? (
           <p className="mt-2 text-sm text-zinc-600">Keine zentralen Warnungen für OKR-Objectives.</p>
         ) : (

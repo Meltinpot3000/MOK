@@ -55,7 +55,7 @@ export async function getOkrCycleContext(
     const { data: updatesRaw } = await supabase
       .schema("app")
       .from("okr_updates")
-      .select("key_result_id, progress_value, confidence_level, created_at")
+      .select("key_result_id, progress_value, confidence_level, comment, created_at")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .in("key_result_id", keyResultIds)
@@ -65,6 +65,7 @@ export async function getOkrCycleContext(
       key_result_id: string;
       progress_value: number | null;
       confidence_level: number | null;
+      comment: string | null;
       created_at: string;
     }>;
 
@@ -74,6 +75,7 @@ export async function getOkrCycleContext(
         progress_value: row.progress_value,
         confidence_level: row.confidence_level,
         created_at: row.created_at,
+        comment: row.comment,
       });
       updatesByKeyResultId.set(row.key_result_id, list);
     }
@@ -93,8 +95,20 @@ export async function getOkrCycleContext(
     if (rev) okrReview = rev as OkrReviewRow;
   }
 
+  const selectedCycle =
+    workspace.selectedOkrCycleId != null
+      ? workspace.okrCycles.find((c) => c.id === workspace.selectedOkrCycleId) ?? null
+      : null;
+  const okrCycleDates =
+    selectedCycle?.start_date &&
+    selectedCycle?.end_date &&
+    !Number.isNaN(Date.parse(selectedCycle.start_date)) &&
+    !Number.isNaN(Date.parse(selectedCycle.end_date))
+      ? { start_date: selectedCycle.start_date, end_date: selectedCycle.end_date }
+      : null;
+
   const objectiveViews = workspace.okrObjectives.map((obj) =>
-    buildOkrObjectiveView(obj, updatesByKeyResultId)
+    buildOkrObjectiveView(obj, updatesByKeyResultId, okrCycleDates)
   );
 
   let initiativeKrLinks: InitiativeKrLinkRow[] = [];

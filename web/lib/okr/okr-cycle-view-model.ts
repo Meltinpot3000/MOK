@@ -6,7 +6,6 @@
 import {
   computeKeyResultProgress,
   computeKeyResultTrend,
-  deriveKeyResultReviewStatus,
   type KeyResultRow,
   type OkrUpdateRow,
   type ReviewStatus,
@@ -15,6 +14,39 @@ import {
 import type { OkrPlanningKeyResultRow, OkrPlanningObjectiveRow } from "@/lib/okr/planning-data";
 
 export const OKR_STALE_CHECKIN_DAYS = 30;
+
+/** Rückstand vs. linearem Zeitfortschritt im OKR-Zyklus (Prozentpunkte). */
+export const OKR_LINEAR_AT_RISK_GAP_PP = 10;
+export const OKR_LINEAR_OFF_TRACK_GAP_PP = 30;
+
+export type OkrCycleDateWindow = {
+  start_date: string;
+  end_date: string;
+};
+
+/**
+ * Erwarteter Fortschritt = (abgelaufene Zykluszeit / Gesamt) × 100 %.
+ * at risk: (E − Fortschritt) > 10 pp · off track: > 30 pp.
+ */
+export function deriveReviewStatusLinearOkrCycle(
+  progress: number,
+  cycleStartIso: string,
+  cycleEndIso: string,
+  nowMs: number = Date.now()
+): ReviewStatus {
+  const start = Date.parse(cycleStartIso);
+  const end = Date.parse(cycleEndIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return "on_track";
+  }
+  const clampedNow = Math.min(Math.max(nowMs, start), end);
+  const lz = end - start;
+  const expectedProgress = ((clampedNow - start) / lz) * 100;
+  const delta = expectedProgress - progress;
+  if (delta > OKR_LINEAR_OFF_TRACK_GAP_PP) return "off_track";
+  if (delta > OKR_LINEAR_AT_RISK_GAP_PP) return "at_risk";
+  return "on_track";
+}
 
 export type OkrWarningKind =
   | "no_direction"
@@ -26,7 +58,10 @@ export type OkrWarningKind =
 
 export type OkrKeyResultView = {
   keyResult: OkrPlanningKeyResultRow;
+  /** Anzeige/Rollup: letzter Check-in-Fortschritt (0–100), sonst berechnet aus Metrik (current_value). */
   progress: number;
+  /** Nur Metrik (KR-Felder), unabhängig vom letzten Check-in. */
+  metricProgress: number;
   trend: Trend;
   reviewStatus: ReviewStatus;
   lastCheckInAt: string | null;
@@ -105,12 +140,22 @@ export function buildOkrKeyResultView(
   objectiveOwnerMembershipId: string | null,
   objectiveOwnerDisplayName: string | null,
   updatesDescending: OkrUpdateRow[],
+  okrCycleDates: OkrCycleDateWindow | null,
   nowMs: number = Date.now()
 ): OkrKeyResultView {
   const row = krToKeyResultRow(kr);
-  const progress = computeKeyResultProgress(row);
+  const metricProgress = computeKeyResultProgress(row);
+  const latestConf = updatesDescending[0];
+  const latestPv = latestConf?.progress_value;
+  const progress =
+    latestPv != null && Number.isFinite(Number(latestPv))
+      ? Math.min(100, Math.max(0, Number(latestPv)))
+      : metricProgress;
   const trend = computeKeyResultTrend(row, updatesDescending);
-  const reviewStatus = deriveKeyResultReviewStatus(progress, trend, kr.dueDate, undefined);
+  const reviewStatus =
+    okrCycleDates != null
+      ? deriveReviewStatusLinearOkrCycle(progress, okrCycleDates.start_date, okrCycleDates.end_date, nowMs)
+      : "on_track";
   const lastCheckInAt = updatesDescending[0]?.created_at ?? null;
   const lastActivityAt = lastCheckInAt ?? kr.updatedAt;
 
@@ -119,7 +164,6 @@ export function buildOkrKeyResultView(
     ? kr.ownerDisplayName
     : objectiveOwnerDisplayName;
 
-  const latestConf = updatesDescending[0];
   const confidenceLevel =
     latestConf?.confidence_level != null ? Number(latestConf.confidence_level) : null;
 
@@ -146,6 +190,7 @@ export function buildOkrKeyResultView(
   return {
     keyResult: kr,
     progress,
+    metricProgress,
     trend,
     reviewStatus,
     lastCheckInAt,
@@ -160,6 +205,7 @@ export function buildOkrKeyResultView(
 export function buildOkrObjectiveView(
   objective: OkrPlanningObjectiveRow,
   updatesByKrId: Map<string, OkrUpdateRow[]>,
+  okrCycleDates: OkrCycleDateWindow | null,
   nowMs: number = Date.now()
 ): OkrObjectiveView {
   const lastCheckInByKrId = new Map<string, string | null>();
@@ -173,6 +219,7 @@ export function buildOkrObjectiveView(
       objective.ownerMembershipId,
       objective.ownerDisplayName,
       sorted,
+      okrCycleDates,
       nowMs
     );
   });
