@@ -1,6 +1,13 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 
+/** Membership-UUIDs case-insensitive vergleichen (Client vs. DB). */
+function normalizeMembershipUuid(id: string | null): string | null {
+  if (!id) return null;
+  const t = id.trim();
+  return t.length ? t.toLowerCase() : null;
+}
+
 export type OkrAction = "read" | "update";
 
 /** Relationsstufe ohne globales „all“ (das wird nur über Permission-Codes abgebildet). */
@@ -54,13 +61,18 @@ export async function isDepartmentHeadOf(params: {
 }): Promise<boolean> {
   if (!params.subordinateMembershipId) return false;
   const supabase = await createSupabaseServerClient();
+  const subId = normalizeMembershipUuid(params.subordinateMembershipId);
+  if (!subId) return false;
   const { data } = await supabase
     .schema("app")
     .from("organization_memberships")
     .select("reports_to_membership_id")
-    .eq("id", params.subordinateMembershipId)
+    .eq("id", subId)
     .maybeSingle();
-  return data?.reports_to_membership_id === params.managerMembershipId;
+  return (
+    normalizeMembershipUuid(data?.reports_to_membership_id as string | null) ===
+    normalizeMembershipUuid(params.managerMembershipId)
+  );
 }
 
 /** Phase A: nur direkte Führungslinie (kein rekursives CTE). */
@@ -69,16 +81,12 @@ export async function getObjectiveRelation(params: {
   objectiveOwnerMembershipId: string | null;
   objectiveDeputyMembershipId: string | null;
 }): Promise<OkrObjectRelation> {
-  if (
-    params.objectiveOwnerMembershipId &&
-    params.objectiveOwnerMembershipId === params.currentMembershipId
-  ) {
+  const mid = normalizeMembershipUuid(params.currentMembershipId);
+  if (!mid) return "none";
+  if (normalizeMembershipUuid(params.objectiveOwnerMembershipId) === mid) {
     return "owner";
   }
-  if (
-    params.objectiveDeputyMembershipId &&
-    params.objectiveDeputyMembershipId === params.currentMembershipId
-  ) {
+  if (normalizeMembershipUuid(params.objectiveDeputyMembershipId) === mid) {
     return "deputy";
   }
   if (
@@ -105,8 +113,9 @@ export async function getKeyResultRelation(params: {
   const effectiveDeputy =
     params.keyResultDeputyMembershipId ?? params.objectiveDeputyMembershipId ?? null;
 
-  if (effectiveOwner && effectiveOwner === params.currentMembershipId) return "owner";
-  if (effectiveDeputy && effectiveDeputy === params.currentMembershipId) return "deputy";
+  const mid = normalizeMembershipUuid(params.currentMembershipId);
+  if (normalizeMembershipUuid(effectiveOwner) === mid) return "owner";
+  if (normalizeMembershipUuid(effectiveDeputy) === mid) return "deputy";
   if (
     effectiveOwner &&
     (await isDepartmentHeadOf({
@@ -187,9 +196,11 @@ export async function loadOkrBulkAccessContext(params: {
       .select("id, reports_to_membership_id")
       .in("id", ids);
     for (const row of data ?? []) {
+      const id = normalizeMembershipUuid(row.id as string);
+      if (!id) continue;
       reportsToByMembershipId.set(
-        row.id as string,
-        (row.reports_to_membership_id as string | null) ?? null
+        id,
+        normalizeMembershipUuid((row.reports_to_membership_id as string | null) ?? null)
       );
     }
   }
@@ -204,11 +215,15 @@ export function objectiveRelationFromBulk(
   ctx: OkrBulkAccessContext,
   objective: Pick<OkrObjectiveAccessRow, "owner_membership_id" | "deputy_membership_id">
 ): OkrObjectRelation {
-  const mid = ctx.currentMembershipId;
-  if (objective.owner_membership_id === mid) return "owner";
-  if (objective.deputy_membership_id === mid) return "deputy";
-  const ownerId = objective.owner_membership_id;
-  if (ownerId && ctx.reportsToByMembershipId.get(ownerId) === mid) return "department";
+  const mid = normalizeMembershipUuid(ctx.currentMembershipId);
+  if (!mid) return "none";
+  if (normalizeMembershipUuid(objective.owner_membership_id) === mid) return "owner";
+  if (normalizeMembershipUuid(objective.deputy_membership_id) === mid) return "deputy";
+  const ownerId = normalizeMembershipUuid(objective.owner_membership_id);
+  if (ownerId) {
+    const reportsTo = ctx.reportsToByMembershipId.get(ownerId);
+    if (normalizeMembershipUuid(reportsTo) === mid) return "department";
+  }
   return "none";
 }
 
@@ -282,12 +297,6 @@ export function collectMembershipIdsForOkrBulk(objectives: OkrObjectiveAccessRow
   return ids;
 }
 
-function normalizeMembershipUuid(id: string | null): string | null {
-  if (!id) return null;
-  const t = id.trim();
-  return t.length ? t.toLowerCase() : null;
-}
-
 /** Create Objective: nav/RLS write + (update.all oder self-owner mit update.own). */
 export function canCreateOkrObjective(params: {
   permissionCodes: Set<string>;
@@ -308,7 +317,8 @@ export function canCreateOkrObjective(params: {
 }
 
 /**
- * Create KR (nach Modul-Write): update.all oder (KR-Owner = current + update.own + Parent per canAccessObjective update).
+ * Create KR (nach Modul-Write): update.all oder Parent als KR-Editor (vgl. canCreateKeyResultOnObjectiveFromBulk),
+ * plus plausibler KR-Owner (eigene Mitgliedschaft oder Objective-Owner, z. B. Mandantenregel / Stellvertretung).
  */
 export async function canCreateOkrKeyResult(params: {
   currentMembershipId: string;
@@ -317,16 +327,33 @@ export async function canCreateOkrKeyResult(params: {
 }): Promise<boolean> {
   const permissionCodes = await getPermissionCodesForMembership(params.currentMembershipId);
   if (permissionCodes.has("okr.key_result.update.all")) return true;
-  if (!params.requestedKrOwnerMembershipId) return false;
-  if (
-    params.requestedKrOwnerMembershipId === params.currentMembershipId &&
-    permissionCodes.has("okr.key_result.update.own")
-  ) {
-    return canAccessObjective({
-      currentMembershipId: params.currentMembershipId,
-      action: "update",
-      objective: params.parentObjective,
-    });
+
+  const ctx = await loadOkrBulkAccessContext({
+    currentMembershipId: params.currentMembershipId,
+    referencedMembershipIds: [
+      params.parentObjective.owner_membership_id,
+      params.parentObjective.deputy_membership_id,
+    ].filter(Boolean) as string[],
+  });
+  if (!canCreateKeyResultOnObjectiveFromBulk(ctx, params.parentObjective)) {
+    return false;
+  }
+
+  const req = normalizeMembershipUuid(params.requestedKrOwnerMembershipId);
+  if (!req) return false;
+
+  const cur = normalizeMembershipUuid(params.currentMembershipId);
+  const objOwn = normalizeMembershipUuid(params.parentObjective.owner_membership_id);
+
+  if (cur && req === cur && permissionCodes.has("okr.key_result.update.own")) {
+    return true;
+  }
+  if (objOwn && req === objOwn) {
+    return (
+      permissionCodes.has("okr.key_result.update.deputy") ||
+      permissionCodes.has("okr.key_result.update.department") ||
+      permissionCodes.has("okr.key_result.update.own")
+    );
   }
   return false;
 }

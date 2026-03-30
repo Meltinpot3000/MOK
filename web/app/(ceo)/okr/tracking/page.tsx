@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
-import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { getOkrWorkspaceEffectiveCanWrite, getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
@@ -20,6 +20,8 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
   const pageAccess = await getSidebarAccessContext("okr-workspace");
   if (pageAccess.state === "unauthenticated") redirect("/login");
   if (pageAccess.state === "forbidden") redirect("/no-access");
+
+  const canWriteOkrArea = await getOkrWorkspaceEffectiveCanWrite(pageAccess);
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
@@ -70,7 +72,7 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
           cycleInstanceId={cycle.id}
           okrCycleId={ctx.workspace.selectedOkrCycleId}
           okrCycleEndDate={okrCycleEndDate}
-          canWriteArea={pageAccess.canWrite}
+          canWriteArea={canWriteOkrArea}
           currentMembershipId={context.membershipId}
           inCycleObjectiveCount={inCycleObjectiveViews.length}
           objectiveViews={objectiveViews}

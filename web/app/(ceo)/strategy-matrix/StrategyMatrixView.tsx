@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
@@ -236,12 +237,18 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                       </div>
                       <button type="submit" disabled={!canWrite} className="brand-btn px-2 py-1 text-xs">Header speichern</button>
                     </form>
-                    <form action={removeChallengeFromDashboard} className="mt-1">
+                    <ConfirmBeforeSubmitForm
+                      action={removeChallengeFromDashboard}
+                      className="mt-1"
+                      title="Herausforderung aus dem Dashboard entfernen?"
+                      description="Die Spalte wird aus dieser Matrix genommen; vorhandene Bewertungen in Zellen können entfallen."
+                      confirmLabel="Entfernen"
+                    >
                       <input type="hidden" name="challenge_id" value={challenge.id} />
                       <button type="submit" disabled={!canWrite} className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 disabled:opacity-50">
                         Aus Dashboard entfernen
                       </button>
-                    </form>
+                    </ConfirmBeforeSubmitForm>
                   </th>
                 ))}
                 <th className="py-2 pr-3 min-w-[320px]">Jahresziel (rechts)</th>
@@ -318,12 +325,18 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                         </div>
                         <button type="submit" disabled={!canWrite} className="brand-btn px-2 py-1 text-xs">Zeile speichern</button>
                       </form>
-                      <form action={removeDirectionFromDashboard} className="mt-1">
+                      <ConfirmBeforeSubmitForm
+                        action={removeDirectionFromDashboard}
+                        className="mt-1"
+                        title="Stoßrichtung aus dem Dashboard entfernen?"
+                        description="Die Zeile wird aus dieser Matrix genommen; Zellenbewertungen zu dieser Richtung können entfallen."
+                        confirmLabel="Entfernen"
+                      >
                         <input type="hidden" name="direction_id" value={direction.id} />
                         <button type="submit" disabled={!canWrite} className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 disabled:opacity-50">
                           Aus Dashboard entfernen
                         </button>
-                      </form>
+                      </ConfirmBeforeSubmitForm>
                       <form action={addComment} className="mt-2 space-y-1">
                         <input type="hidden" name="object_type" value="direction" />
                         <input type="hidden" name="object_id" value={direction.id} />
@@ -364,13 +377,18 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                               </button>
                             </form>
                             {cell ? (
-                              <form action={deleteCell}>
+                              <ConfirmBeforeSubmitForm
+                                action={deleteCell}
+                                title="Matrix-Beziehung löschen?"
+                                description="Die Zuordnung zwischen dieser Stoßrichtung und dieser Herausforderung inkl. Notizen wird entfernt."
+                                confirmLabel="Löschen"
+                              >
                                 <input type="hidden" name="direction_id" value={direction.id} />
                                 <input type="hidden" name="challenge_id" value={challenge.id} />
                                 <button type="submit" disabled={!canWrite} className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 disabled:opacity-50">
                                   Beziehung loeschen
                                 </button>
-                              </form>
+                              </ConfirmBeforeSubmitForm>
                             ) : null}
                             {cell ? (
                               <form action={addComment} className="space-y-1">

@@ -13,6 +13,7 @@ import {
 } from "@/lib/strategy-cycle/matrix-link-count-tone";
 import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
 import { CoverageStrengthPillButton } from "./CoverageStrengthPillButton";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 
@@ -355,12 +356,14 @@ export function StrategicDirectionsTable({
                   ? Number(direction.priority).toFixed(2)
                   : "—"}
               </span>
-              <form action={actions.deleteStrategicDirectionInCycle} className="inline">
-                <input
-                  type="hidden"
-                  name="strategic_direction_id"
-                  value={direction.id}
-                />
+              <ConfirmBeforeSubmitForm
+                action={actions.deleteStrategicDirectionInCycle}
+                className="inline"
+                title="Strategische Stoßrichtung löschen?"
+                description="Die Stoßrichtung wird aus diesem Planungszyklus entfernt."
+                confirmLabel="Löschen"
+              >
+                <input type="hidden" name="strategic_direction_id" value={direction.id} />
                 <button
                   type="submit"
                   disabled={!canWrite}
@@ -368,7 +371,7 @@ export function StrategicDirectionsTable({
                 >
                   Loeschen
                 </button>
-              </form>
+              </ConfirmBeforeSubmitForm>
             </div>
 
             <form

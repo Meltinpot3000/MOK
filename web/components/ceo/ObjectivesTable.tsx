@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { formatCreatorLabel } from "@/lib/creator/format";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
@@ -247,12 +248,14 @@ export function ObjectivesTable({
         return (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <form action={actions.deleteObjectiveInCycle} className="inline">
-                <input
-                  type="hidden"
-                  name="objective_id"
-                  value={objective.id}
-                />
+              <ConfirmBeforeSubmitForm
+                action={actions.deleteObjectiveInCycle}
+                className="inline"
+                title="Objective löschen?"
+                description="Das Objective wird aus diesem Planungszyklus entfernt. Verknüpfungen und Bewertungen können verloren gehen."
+                confirmLabel="Löschen"
+              >
+                <input type="hidden" name="objective_id" value={objective.id} />
                 <button
                   type="submit"
                   disabled={!canWrite}
@@ -260,7 +263,7 @@ export function ObjectivesTable({
                 >
                   Loeschen
                 </button>
-              </form>
+              </ConfirmBeforeSubmitForm>
             </div>
 
             <form

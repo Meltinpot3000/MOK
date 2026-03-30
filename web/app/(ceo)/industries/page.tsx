@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import {
   createIndustry,
   linkIndustryToOrganizationUnit,
@@ -139,10 +140,14 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
                       {orgUnits.map((unit) => {
                         const isLinked = (linkedUnitsByIndustry.get(industry.id) ?? []).includes(unit.id);
                         return (
-                          <form
+                          <ConfirmBeforeSubmitForm
                             key={`${industry.id}-${unit.id}`}
                             action={isLinked ? unlinkIndustryFromOrganizationUnit : linkIndustryToOrganizationUnit}
                             className="inline-flex"
+                            requireConfirm={isLinked}
+                            title="Organisationseinheit entfernen?"
+                            description={`Die Verknüpfung zu „${unit.code}“ wird aufgehoben.`}
+                            confirmLabel="Entfernen"
                           >
                             <input type="hidden" name="industry_id" value={industry.id} />
                             <input type="hidden" name="organization_unit_id" value={unit.id} />
@@ -157,7 +162,7 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
                             >
                               {isLinked ? `Entfernen: ${unit.code}` : `${unit.code} - ${unit.name}`}
                             </button>
-                          </form>
+                          </ConfirmBeforeSubmitForm>
                         );
                       })}
                     </div>

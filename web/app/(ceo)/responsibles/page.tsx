@@ -5,6 +5,7 @@ import { ResponsibleAssignmentPanels } from "@/components/ceo/ResponsibleAssignm
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
 import { ResponsibleCreateForm } from "@/components/ceo/ResponsibleCreateForm";
 import { ResponsibleRowEditForm } from "@/components/ceo/ResponsibleRowEditForm";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   getOrganizationUnits,
@@ -542,10 +543,13 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
                       <span className="text-xs text-zinc-500">Keine Organisationszuordnung vorhanden.</span>
                     ) : (
                       (assignmentsByResponsible.get(responsible.id) ?? []).map((assignment) => (
-                        <form
+                        <ConfirmBeforeSubmitForm
                           key={assignment.id}
                           action={removeResponsibleAssignment}
                           className="inline-flex items-center gap-2"
+                          title="Zuordnung entfernen?"
+                          description="Die Verknüpfung dieses Verantwortlichen mit der Organisationseinheit wird aufgehoben."
+                          confirmLabel="Entfernen"
                         >
                           <input type="hidden" name="assignment_id" value={assignment.id} />
                           <span className="rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">
@@ -562,7 +566,7 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
                           >
                             Entfernen
                           </button>
-                        </form>
+                        </ConfirmBeforeSubmitForm>
                       ))
                     )}
                   </div>

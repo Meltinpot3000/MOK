@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
-import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { getOkrWorkspaceEffectiveCanWrite, getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
 import {
   filterPlanningObjectivesForRead,
@@ -19,6 +19,8 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   const pageAccess = await getSidebarAccessContext("okr-workspace");
   if (pageAccess.state === "unauthenticated") redirect("/login");
   if (pageAccess.state === "forbidden") redirect("/no-access");
+
+  const canWriteOkrArea = await getOkrWorkspaceEffectiveCanWrite(pageAccess);
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
@@ -73,7 +75,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
         <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />
       ) : null}
 
-      {!pageAccess.canWrite ? (
+      {!canWriteOkrArea ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
           Leserechte: Bearbeitung ist deaktiviert.
         </p>
@@ -82,7 +84,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
       <OkrPlanningWorkspace
         data={workspace}
         cycleInstanceId={cycle.id}
-        canWrite={pageAccess.canWrite}
+        canWrite={canWriteOkrArea}
         currentMembershipId={context.membershipId}
         objectiveOwnerChoices={objectiveOwnerChoices}
         objectiveEditById={editFlags.objectiveEditById}

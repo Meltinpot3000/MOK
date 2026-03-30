@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import {
   createBusinessModel,
   linkBusinessModelToOrganizationUnit,
@@ -211,10 +212,14 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         {industries.map((industry) => {
                           const isLinked = linkedIds.has(industry.id);
                           return (
-                            <form
+                            <ConfirmBeforeSubmitForm
                               key={`${model.id}-${industry.id}`}
                               action={isLinked ? unlinkBusinessModelFromIndustry : linkBusinessModelToIndustry}
                               className="inline-flex"
+                              requireConfirm={isLinked}
+                              title="Industrie-Zuordnung entfernen?"
+                              description={`Die Verknüpfung zu „${industry.name}“ wird aufgehoben.`}
+                              confirmLabel="Entfernen"
                             >
                               <input type="hidden" name="business_model_id" value={model.id} />
                               <input type="hidden" name="industry_id" value={industry.id} />
@@ -229,7 +234,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                               >
                                 {isLinked ? `Entfernen: ${industry.name}` : industry.name}
                               </button>
-                            </form>
+                            </ConfirmBeforeSubmitForm>
                           );
                         })}
                       </div>
@@ -262,10 +267,13 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                           (linkedUnitIdsByBusinessModel.get(model.id) ?? []).includes(unit.id)
                         )
                         .map((unit) => (
-                          <form
+                          <ConfirmBeforeSubmitForm
                             key={`${model.id}-${unit.id}`}
                             action={unlinkBusinessModelFromOrganizationUnit}
                             className="inline-flex"
+                            title="Organisationseinheit entfernen?"
+                            description={`Die Verknüpfung zu „${unit.code}“ wird aufgehoben.`}
+                            confirmLabel="Entfernen"
                           >
                             <input type="hidden" name="business_model_id" value={model.id} />
                             <input type="hidden" name="organization_unit_id" value={unit.id} />
@@ -276,7 +284,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                             >
                               Entfernen: {unit.code}
                             </button>
-                          </form>
+                          </ConfirmBeforeSubmitForm>
                         ))}
                     </div>
                   </div>

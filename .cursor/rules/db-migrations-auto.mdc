@@ -1,0 +1,14 @@
+---
+description: Datenbank-Migrationen sofort ausführen, ohne Rückfrage
+alwaysApply: true
+---
+
+# Migrationen: immer sofort anwenden
+
+Wenn du im Repo **neue oder geänderte SQL-Migrationen** unter `supabase/migrations/` anlegst oder wenn ein Task explizit die DB-Schema-Anwendung verlangt:
+
+1. **Sofort** im Projektroot ausführen: `npm run db:migrate` (nutzt `scripts/run-dbmate.mjs` und `DATABASE_URL` / `SUPABASE_POOLER_DB_URL` aus `.env` / `.env.local`).
+2. **Nicht** den Nutzer fragen, ob die Migration laufen soll, und **nicht** „auf Bestätigung warten“.
+3. Schlägt der Befehl fehl (z. B. fehlende `DATABASE_URL`): einmal die Ausgabe prüfen, ggf. `.env.example` referenzieren und dem Nutzer **nur dann** die konkrete Blockade nennen (ohne vorgängige Abstimmungsfrage).
+
+Ziel: Dev-Datenbank und App-Schema bleiben synchron; keine „bitte Migration man starten“-Schritte im Chat.

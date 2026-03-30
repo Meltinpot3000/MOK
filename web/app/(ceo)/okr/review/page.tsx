@@ -3,7 +3,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
-import { listOkrReviewSessionsForCycle } from "@/lib/okr/review-sessions";
+import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
+import {
+  listOkrReviewSessionsForCycle,
+  listOkrReviewSessionTasks,
+} from "@/lib/okr/review-sessions";
+import { getOkrReviewSessionCheckInTracking } from "@/lib/okr/review-session-tracking";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrReviewSessionWorkspace } from "@/components/ceo/okr/OkrReviewSessionWorkspace";
@@ -55,6 +60,41 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
   const selectedSessionId =
     sessionParam && sessions.some((s) => s.id === sessionParam) ? sessionParam : null;
 
+  const selectedSession =
+    selectedSessionId != null ? sessions.find((s) => s.id === selectedSessionId) ?? null : null;
+
+  const updatesByKrId = updatesRecordForObjectiveViews(
+    ctx.objectiveViews,
+    ctx.updatesByKeyResultId
+  );
+
+  let sessionCheckInTracking: Awaited<ReturnType<typeof getOkrReviewSessionCheckInTracking>> | null =
+    null;
+  let sessionTasks: Awaited<ReturnType<typeof listOkrReviewSessionTasks>> = [];
+
+  const activeOkrCycleId = ctx.workspace.selectedOkrCycleId;
+  if (selectedSession && activeOkrCycleId && selectedSession.status === "scheduled") {
+    /** Kein scheduled_at: das ist oft der zukünftige Meeting-Termin und schließt frühere Check-ins fälschlich aus. */
+    const baselineRaw =
+      selectedSession.check_in_tracking_baseline_at?.trim() ||
+      selectedSession.updated_at ||
+      selectedSession.created_at ||
+      null;
+    sessionCheckInTracking = await getOkrReviewSessionCheckInTracking({
+      organizationId: context.organizationId,
+      cycleInstanceId: cycle.id,
+      okrCycleId: activeOkrCycleId,
+      baselineAt: baselineRaw,
+    });
+  }
+
+  if (
+    selectedSession &&
+    (selectedSession.status === "in_progress" || selectedSession.status === "completed")
+  ) {
+    sessionTasks = await listOkrReviewSessionTasks(selectedSession.id);
+  }
+
   const searchParamsObj: Record<string, string> = {};
   if (okrCycleParam) searchParamsObj.okrCycle = okrCycleParam;
   const searchQuery = new URLSearchParams(searchParamsObj).toString();
@@ -105,7 +145,11 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
           canManageSessions={canManageSessions}
           canAssignFacilitator={canAssignFacilitator}
           kpis={ctx.kpis}
-          objectiveViews={ctx.objectiveViews}        />
+          objectiveViews={ctx.objectiveViews}
+          updatesByKrId={updatesByKrId}
+          sessionCheckInTracking={sessionCheckInTracking}
+          sessionTasks={sessionTasks}
+        />
       )}
     </section>
   );

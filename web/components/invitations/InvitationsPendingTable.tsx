@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
 import { memberInvitationStatusLabelDe } from "@/lib/member-invitation-status";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
@@ -170,7 +171,12 @@ export function InvitationsPendingTable({
                     Erneut senden
                   </button>
                 </form>
-                <form action={revokeInvitation}>
+                <ConfirmBeforeSubmitForm
+                  action={revokeInvitation}
+                  title="Einladung widerrufen?"
+                  description="Die Einladung wird geschlossen und die vorbereitete Mitgliedschaft bzw. Rollen werden entfernt, soweit technisch möglich."
+                  confirmLabel="Widerrufen"
+                >
                   <input type="hidden" name="invite_id" value={invite.id} />
                   <button
                     type="submit"
@@ -179,7 +185,7 @@ export function InvitationsPendingTable({
                   >
                     Widerrufen
                   </button>
-                </form>
+                </ConfirmBeforeSubmitForm>
               </div>
             </td>
           </tr>

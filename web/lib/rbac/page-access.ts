@@ -7,6 +7,7 @@ import {
 import type { CeoAccessContext } from "@/lib/ceo/queries";
 import { getAuthenticatedUserId, getRankedCeoAccessContexts } from "@/lib/ceo/queries";
 import { getSidebarPermissionsForMembership } from "@/lib/rbac/sidebar-access";
+import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 
 /** Zaehlt Leserechte; Dashboard-Zugang wird bei der Shell-Wahl zwischen Mitgliedschaften bevorzugt. */
 function appShellPermissionScore(permissions: SidebarPermissionMap): number {
@@ -99,4 +100,13 @@ export async function getSidebarAccessContext(itemId: SidebarItemId) {
     permissions: shell.permissions,
     canWrite: itemPermission.write,
   };
+}
+
+/** OKR-Arbeitsbereich: Sidebar-Schreiben oder Modulrecht `okr.write` (z. B. Teammitglied). */
+export async function getOkrWorkspaceEffectiveCanWrite(
+  page: Extract<Awaited<ReturnType<typeof getSidebarAccessContext>>, { state: "ok" }>
+): Promise<boolean> {
+  if (page.canWrite) return true;
+  const codes = await getPermissionCodesForMembership(page.access.membershipId);
+  return codes.has("okr.write");
 }

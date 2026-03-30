@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -56,6 +57,7 @@ export function CoverageStrengthPillButton({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [fixedPos, setFixedPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [isPending, setIsPending] = useState(false);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const [optimistic, setOptimistic] = useState<{
     linked: boolean;
     level: ContributionLevel | null;
@@ -131,9 +133,7 @@ export function CoverageStrengthPillButton({
     }
   };
 
-  const runUnlink = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const executeUnlink = async () => {
     if (!canWrite || isPending) return;
     const fd = new FormData();
     fd.set(entityKey, entityValue);
@@ -148,6 +148,12 @@ export function CoverageStrengthPillButton({
     } finally {
       setIsPending(false);
     }
+  };
+
+  const requestUnlink = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setUnlinkConfirmOpen(true);
   };
 
   const openPicker = () => {
@@ -190,7 +196,7 @@ export function CoverageStrengthPillButton({
           type="button"
           title="Abwaehlen (Verknuepfung entfernen)"
           className="rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium leading-none text-red-700 hover:bg-red-50"
-          onClick={runUnlink}
+          onClick={requestUnlink}
         >
           Abwaehlen
         </button>
@@ -233,7 +239,7 @@ export function CoverageStrengthPillButton({
         {displayLinked && !unlinkInPickerOnly ? (
           <button
             type="button"
-            onClick={runUnlink}
+            onClick={requestUnlink}
             disabled={!canWrite || isPending}
             className="shrink-0 self-end rounded px-0.5 pb-0.5 text-base leading-none text-red-600 hover:bg-red-100/80 disabled:opacity-50"
             title="Verknuepfung entfernen"
@@ -262,6 +268,19 @@ export function CoverageStrengthPillButton({
               </div>
             )
         : null}
+      {unlinkConfirmOpen ? (
+        <ConfirmDialog
+          title="Verknüpfung entfernen?"
+          description="Die Abdeckungs-Verknüpfung wird aufgehoben."
+          confirmLabel="Entfernen"
+          pending={isPending}
+          onCancel={() => setUnlinkConfirmOpen(false)}
+          onConfirm={() => {
+            setUnlinkConfirmOpen(false);
+            void executeUnlink();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

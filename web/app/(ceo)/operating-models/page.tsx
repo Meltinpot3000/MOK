@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import {
   createOperatingModel,
   linkOperatingModelToBusinessModel,
@@ -177,10 +178,14 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                           {industries.map((industry) => {
                             const isLinked = industryIds.has(industry.id);
                             return (
-                              <form
+                              <ConfirmBeforeSubmitForm
                                 key={`${model.id}-industry-${industry.id}`}
                                 action={isLinked ? unlinkOperatingModelFromIndustry : linkOperatingModelToIndustry}
                                 className="inline-flex"
+                                requireConfirm={isLinked}
+                                title="Industrie-Zuordnung entfernen?"
+                                description={`Die Verknüpfung zu „${industry.name}“ wird aufgehoben.`}
+                                confirmLabel="Entfernen"
                               >
                                 <input type="hidden" name="operating_model_id" value={model.id} />
                                 <input type="hidden" name="industry_id" value={industry.id} />
@@ -195,7 +200,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                                 >
                                   {isLinked ? `Entfernen: ${industry.name}` : industry.name}
                                 </button>
-                              </form>
+                              </ConfirmBeforeSubmitForm>
                             );
                           })}
                         </div>
@@ -206,10 +211,14 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                           {businessModels.map((bm) => {
                             const isLinked = bmIds.has(bm.id);
                             return (
-                              <form
+                              <ConfirmBeforeSubmitForm
                                 key={`${model.id}-bm-${bm.id}`}
                                 action={isLinked ? unlinkOperatingModelFromBusinessModel : linkOperatingModelToBusinessModel}
                                 className="inline-flex"
+                                requireConfirm={isLinked}
+                                title="Geschäftsmodell-Zuordnung entfernen?"
+                                description={`Die Verknüpfung zu „${bm.name}“ wird aufgehoben.`}
+                                confirmLabel="Entfernen"
                               >
                                 <input type="hidden" name="operating_model_id" value={model.id} />
                                 <input type="hidden" name="business_model_id" value={bm.id} />
@@ -224,7 +233,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                                 >
                                   {isLinked ? `Entfernen: ${bm.name}` : `${bm.name} (v${bm.version_no})`}
                                 </button>
-                              </form>
+                              </ConfirmBeforeSubmitForm>
                             );
                           })}
                         </div>

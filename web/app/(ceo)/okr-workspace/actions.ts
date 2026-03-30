@@ -5,6 +5,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPhase0Context } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOrgOkrSettings } from "@/lib/okr/org-okr-settings";
+import { isMissingReviewSessionMigrationColumns } from "@/lib/okr/review-sessions";
+import { planOkrReviewOwnerNotifications } from "@/lib/okr/review-session-notifications";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 import {
   canAccessKeyResult,
@@ -67,7 +69,12 @@ async function assertMembershipInOrg(
 
 async function requireOkrWrite() {
   const pageAccess = await getSidebarAccessContext("okr-workspace");
-  if (pageAccess.state !== "ok" || !pageAccess.canWrite) {
+  if (pageAccess.state !== "ok") {
+    return { error: "Keine Schreibberechtigung für den OKR-Arbeitsbereich." as const };
+  }
+  const permissionCodes = await getPermissionCodesForMembership(pageAccess.access.membershipId);
+  const moduleOkrWrite = permissionCodes.has("okr.write");
+  if (!pageAccess.canWrite && !moduleOkrWrite) {
     return { error: "Keine Schreibberechtigung für den OKR-Arbeitsbereich." as const };
   }
   const context = await getPhase0Context();
@@ -422,7 +429,12 @@ export async function updateOkrObjectiveAction(input: {
 
   if (deputyId === null && input.deputyMembershipId !== undefined) {
     if (!permissionCodesForClear.has("okr.objective.update.all")) {
-      return { error: "Deputy entfernen ist nur mit okr.objective.update.all erlaubt." };
+      const mid = auth.context.membershipId;
+      const isOwner = existingObj.owner_membership_id === mid;
+      const wasDeputy = existingObj.deputy_membership_id === mid;
+      if (!isOwner && !wasDeputy) {
+        return { error: "Deputy entfernen ist nur mit okr.objective.update.all erlaubt." };
+      }
     }
   }
 
@@ -571,15 +583,18 @@ export async function createKeyResultAction(input: {
   const { okrKrOwnerMustMatchObjective } = await getOrgOkrSettings(auth.context.organizationId);
   let krOwnerId: string | null = null;
   if (okrKrOwnerMustMatchObjective) {
-    krOwnerId = obj.owner_membership_id;
+    krOwnerId = obj.owner_membership_id ?? null;
   } else if (input.ownerMembershipId) {
-    const memOk = await assertMembershipInOrg(
-      supabase,
-      auth.context.organizationId,
-      input.ownerMembershipId
-    );
-    if (!memOk) return { error: "Ungültiger Owner (Membership)." };
-    krOwnerId = input.ownerMembershipId;
+    const raw = String(input.ownerMembershipId).trim();
+    if (raw) {
+      const memOk = await assertMembershipInOrg(supabase, auth.context.organizationId, raw);
+      if (!memOk) return { error: "Ungültiger Owner (Membership)." };
+      krOwnerId = raw;
+    }
+  }
+  /** Ohne UI-Owner: wie fachlich üblich Objective-Owner (sonst bleibt null → canCreateOkrKeyResult lehnt ab). */
+  if (!krOwnerId) {
+    krOwnerId = obj.owner_membership_id ?? null;
   }
 
   if (!(await canCreateOkrKeyResult({
@@ -748,7 +763,14 @@ export async function updateKeyResultAction(input: {
 
   if (deputyPatch === null && input.deputyMembershipId !== undefined) {
     if (!krPermissionCodes.has("okr.key_result.update.all")) {
-      return { error: "KR-Deputy entfernen ist nur mit okr.key_result.update.all erlaubt." };
+      const mid = auth.context.membershipId;
+      const effOwner =
+        krRow.owner_membership_id ?? objectiveRow.owner_membership_id ?? null;
+      const isEffOwner = effOwner === mid;
+      const wasKrDeputy = krRow.deputy_membership_id === mid;
+      if (!isEffOwner && !wasKrDeputy) {
+        return { error: "KR-Deputy entfernen ist nur mit okr.key_result.update.all erlaubt." };
+      }
     }
   }
 
@@ -1294,14 +1316,24 @@ export async function createOkrCheckInAction(input: {
   cycleInstanceId: string;
   keyResultId: string;
   okrCycleId: string;
-  /** Subjektiver Fortschritt 0–100 oder null wenn nicht angegeben */
+  /** Subjektiver Fortschritt 0–100 (Pflicht) */
   progressValue: number | null;
-  /** Subjektive Confidence 1–10 (unabhängig von Metrik) */
+  /** Subjektive Zuversicht 1–10 (Pflicht) */
   confidenceLevel: number;
+  /** Kurzkommentar (Pflicht) */
   comment?: string | null;
 }) {
   const auth = await requireOkrWrite();
   if ("error" in auth) return auth;
+
+  const commentTrimmed = (input.comment ?? "").trim();
+  if (!commentTrimmed) {
+    return { error: "Kommentar ist Pflicht." };
+  }
+  if (input.progressValue == null || !Number.isFinite(Number(input.progressValue))) {
+    return { error: "Fortschritt (0–100 %) ist Pflicht." };
+  }
+  const progressClamped = Math.min(100, Math.max(0, Number(input.progressValue)));
 
   const supabase = await createSupabaseServerClient();
   const ok = await assertOkrCycle(
@@ -1356,19 +1388,15 @@ export async function createOkrCheckInAction(input: {
   }
 
   const conf = Math.min(10, Math.max(1, Math.round(input.confidenceLevel)));
-  let progressStored: number | null = null;
-  if (input.progressValue != null && Number.isFinite(Number(input.progressValue))) {
-    progressStored = Math.min(100, Math.max(0, Number(input.progressValue)));
-  }
 
   const { error: insErr } = await supabase.schema("app").from("okr_updates").insert({
     organization_id: auth.context.organizationId,
     cycle_instance_id: input.cycleInstanceId,
     okr_cycle_id: input.okrCycleId,
     key_result_id: input.keyResultId,
-    progress_value: progressStored,
+    progress_value: progressClamped,
     confidence_level: conf,
-    comment: input.comment?.trim() || null,
+    comment: commentTrimmed,
     created_by_membership_id: auth.context.membershipId,
   });
 
@@ -1482,10 +1510,10 @@ async function assertOkrReviewSessionEditAllowed(
 export async function createOkrReviewSessionAction(input: {
   cycleInstanceId: string;
   okrCycleId: string;
-  title?: string;
+  title: string;
   sessionType: OkrReviewSessionType;
-  scheduledAtIso?: string | null;
-  facilitatorMembershipId?: string | null;
+  scheduledAtIso: string;
+  facilitatorMembershipId: string;
 }) {
   const pageAccess = await getSidebarAccessContext("okr-workspace");
   if (pageAccess.state !== "ok") {
@@ -1508,19 +1536,36 @@ export async function createOkrReviewSessionAction(input: {
   );
   if (!ok) return { error: "Ungültiger OKR-Zeitraum." as const };
 
-  let facilitator: string | null = null;
-  const rawFacilitator = input.facilitatorMembershipId?.trim();
-  if (rawFacilitator) {
-    if (!codes.has("okr.review.facilitator.assign")) {
-      return { error: "Facilitator beim Anlegen erfordert okr.review.facilitator.assign." as const };
-    }
-    const memOk = await assertMembershipInOrg(supabase, context.organizationId, rawFacilitator);
-    if (!memOk) return { error: "Facilitator nicht in dieser Organisation." as const };
-    facilitator = rawFacilitator;
+  const title = input.title.trim();
+  if (!title) {
+    return { error: "Titel ist erforderlich." as const };
   }
 
-  const title = input.title?.trim() || "Review";
-  const scheduledAt = input.scheduledAtIso?.trim() || null;
+  const scheduledRaw = input.scheduledAtIso.trim();
+  if (!scheduledRaw) {
+    return { error: "Termin ist erforderlich." as const };
+  }
+  const scheduledParsed = new Date(scheduledRaw);
+  if (Number.isNaN(scheduledParsed.getTime())) {
+    return { error: "Ungültiger Termin." as const };
+  }
+  const scheduledAt = scheduledParsed.toISOString();
+
+  const rawFacilitator = input.facilitatorMembershipId.trim();
+  if (!rawFacilitator) {
+    return { error: "Facilitator ist erforderlich." as const };
+  }
+  const memOkFac = await assertMembershipInOrg(supabase, context.organizationId, rawFacilitator);
+  if (!memOkFac) {
+    return { error: "Facilitator nicht in dieser Organisation." as const };
+  }
+  if (rawFacilitator !== context.membershipId && !codes.has("okr.review.facilitator.assign")) {
+    return {
+      error:
+        "Einen anderen Facilitator zu wählen erfordert die Berechtigung okr.review.facilitator.assign." as const,
+    };
+  }
+  const facilitator = rawFacilitator;
 
   const { data, error } = await supabase
     .schema("app")
@@ -1564,14 +1609,31 @@ export async function updateOkrReviewSessionAction(input: {
   if (!context) return { error: "Nicht authentifiziert." as const };
 
   const supabase = await createSupabaseServerClient();
-  const { data: row, error: loadErr } = await supabase
+  const sessionRowSelectFull =
+    "id, organization_id, cycle_instance_id, okr_cycle_id, facilitator_membership_id, status, check_in_tracking_baseline_at, started_at";
+  const sessionRowSelectLegacy =
+    "id, organization_id, cycle_instance_id, okr_cycle_id, facilitator_membership_id, status";
+
+  let rowLoad = await supabase
     .schema("app")
     .from("okr_review_sessions")
-    .select(
-      "id, organization_id, cycle_instance_id, okr_cycle_id, facilitator_membership_id, status"
-    )
+    .select(sessionRowSelectFull)
     .eq("id", input.sessionId)
     .maybeSingle();
+
+  if (
+    rowLoad.error &&
+    isMissingReviewSessionMigrationColumns(String(rowLoad.error.message ?? ""))
+  ) {
+    rowLoad = await supabase
+      .schema("app")
+      .from("okr_review_sessions")
+      .select(sessionRowSelectLegacy)
+      .eq("id", input.sessionId)
+      .maybeSingle();
+  }
+
+  const { data: row, error: loadErr } = rowLoad;
 
   if (loadErr) return { error: loadErr.message };
   if (!row || row.organization_id !== context.organizationId) {
@@ -1607,11 +1669,20 @@ export async function updateOkrReviewSessionAction(input: {
     if (!allowed) return { error: "Keine Berechtigung: diese Session bearbeiten." as const };
   }
 
+  const prevStatus = String(row.status);
   const patch: Record<string, unknown> = {};
   if (!assignOnly) {
     if (input.title !== undefined) patch.title = input.title.trim();
     if (input.sessionType !== undefined) patch.session_type = input.sessionType;
-    if (input.status !== undefined) patch.status = input.status;
+    if (input.status !== undefined) {
+      patch.status = input.status;
+      if (input.status === "scheduled" && prevStatus !== "scheduled") {
+        patch.check_in_tracking_baseline_at = new Date().toISOString();
+      }
+      if (input.status === "in_progress" && prevStatus !== "in_progress") {
+        patch.started_at = new Date().toISOString();
+      }
+    }
     if (input.scheduledAtIso !== undefined) {
       patch.scheduled_at = input.scheduledAtIso?.trim() || null;
     }
@@ -1637,11 +1708,264 @@ export async function updateOkrReviewSessionAction(input: {
     return {};
   }
 
-  const { error } = await supabase
+  let { error: updErr } = await supabase
     .schema("app")
     .from("okr_review_sessions")
     .update(patch)
     .eq("id", input.sessionId);
+
+  if (
+    updErr &&
+    isMissingReviewSessionMigrationColumns(String(updErr.message ?? "")) &&
+    ("check_in_tracking_baseline_at" in patch || "started_at" in patch)
+  ) {
+    const retryPatch = { ...patch };
+    delete retryPatch.check_in_tracking_baseline_at;
+    delete retryPatch.started_at;
+    if (Object.keys(retryPatch).length > 0) {
+      const second = await supabase
+        .schema("app")
+        .from("okr_review_sessions")
+        .update(retryPatch)
+        .eq("id", input.sessionId);
+      updErr = second.error;
+    } else {
+      updErr = null;
+    }
+  }
+
+  if (updErr) return { error: updErr.message };
+
+  const newStatus = input.status !== undefined ? input.status : prevStatus;
+  if (newStatus === "scheduled" && prevStatus !== "scheduled") {
+    const orgSettings = await getOrgOkrSettings(context.organizationId);
+    if (orgSettings.okrReviewNotifyOwnersOnSchedule) {
+      await planOkrReviewOwnerNotifications({
+        sessionId: input.sessionId,
+        organizationId: context.organizationId,
+        cycleInstanceId: row.cycle_instance_id as string,
+        okrCycleId: row.okr_cycle_id as string,
+      });
+    }
+  }
+
+  revalidateOkrPaths();
+  return {};
+}
+
+function parseReviewTaskDueAtIso(
+  raw: string | undefined,
+  emptyMessage: string
+): { ok: true; iso: string } | { ok: false; error: string } {
+  const t = raw?.trim() ?? "";
+  if (!t) return { ok: false, error: emptyMessage };
+  const ms = Date.parse(t);
+  if (Number.isNaN(ms)) return { ok: false, error: "Ungültiger Termin." as const };
+  return { ok: true, iso: new Date(ms).toISOString() };
+}
+
+export async function createOkrReviewSessionTaskAction(input: {
+  sessionId: string;
+  title: string;
+  assigneeMembershipId: string;
+  /** ISO-String (z. B. aus datetime-local via `Date`/`toISOString`). */
+  dueAtIso: string;
+}) {
+  const pageAccess = await getSidebarAccessContext("okr-workspace");
+  if (pageAccess.state !== "ok") {
+    return { error: "Kein Zugriff auf den OKR-Arbeitsbereich." as const };
+  }
+  const context = await getPhase0Context();
+  if (!context) return { error: "Nicht authentifiziert." as const };
+
+  const title = input.title.trim();
+  if (!title) return { error: "Titel ist erforderlich." as const };
+  const assigneeRaw = input.assigneeMembershipId.trim();
+  if (!assigneeRaw) return { error: "Verantwortliche Person ist erforderlich." as const };
+  const dueParse = parseReviewTaskDueAtIso(input.dueAtIso, "Termin ist erforderlich.");
+  if (!dueParse.ok) return { error: dueParse.error };
+
+  const supabase = await createSupabaseServerClient();
+  const assigneeOk = await assertMembershipInOrg(supabase, context.organizationId, assigneeRaw);
+  if (!assigneeOk) return { error: "Ungültige Verantwortliche (Membership)." as const };
+  const { data: session, error: sErr } = await supabase
+    .schema("app")
+    .from("okr_review_sessions")
+    .select("id, organization_id, facilitator_membership_id, status")
+    .eq("id", input.sessionId)
+    .maybeSingle();
+
+  if (sErr) return { error: sErr.message };
+  if (!session || session.organization_id !== context.organizationId) {
+    return { error: "Review-Session nicht gefunden." as const };
+  }
+  const st = String(session.status);
+  if (st !== "in_progress" && st !== "completed") {
+    return { error: "Aufgaben nur während oder nach der Session." as const };
+  }
+
+  const allowed = await assertOkrReviewSessionEditAllowed(context.membershipId, {
+    facilitator_membership_id: (session.facilitator_membership_id as string | null),
+  });
+  if (!allowed) return { error: "Keine Berechtigung: diese Session bearbeiten." as const };
+
+  const { data: sortRows } = await supabase
+    .schema("app")
+    .from("okr_review_session_tasks")
+    .select("sort_order")
+    .eq("okr_review_session_id", input.sessionId)
+    .order("sort_order", { ascending: false })
+    .limit(1);
+
+  const maxOrder = sortRows?.[0]
+    ? (sortRows[0] as { sort_order: number }).sort_order
+    : undefined;
+  const nextOrder = typeof maxOrder === "number" ? maxOrder + 1 : 0;
+
+  const { data: ins, error: insErr } = await supabase
+    .schema("app")
+    .from("okr_review_session_tasks")
+    .insert({
+      organization_id: context.organizationId,
+      okr_review_session_id: input.sessionId,
+      title,
+      sort_order: nextOrder,
+      created_by_membership_id: context.membershipId,
+      assignee_membership_id: assigneeRaw,
+      due_at: dueParse.iso,
+    })
+    .select("id")
+    .single();
+
+  if (insErr) {
+    const insMsg = String(insErr.message ?? "");
+    if (
+      insMsg.includes("assignee_membership_id") ||
+      (insMsg.includes("column") && insMsg.toLowerCase().includes("assignee"))
+    ) {
+      return {
+        error:
+          "Datenbank: Spalte Verantwortliche fehlt — bitte Migration 0112 anwenden (npm run db:migrate)." as const,
+      };
+    }
+    if (insMsg.includes("due_at") || (insMsg.includes("column") && insMsg.toLowerCase().includes("due"))) {
+      return {
+        error:
+          "Datenbank: Spalte Termin (due_at) fehlt — bitte Migration 0113 anwenden (npm run db:migrate)." as const,
+      };
+    }
+    return { error: insErr.message };
+  }
+  revalidateOkrPaths();
+  return { taskId: (ins as { id: string }).id };
+}
+
+export async function updateOkrReviewSessionTaskAction(input: {
+  taskId: string;
+  title?: string;
+  isDone?: boolean;
+  dueAtIso?: string;
+}) {
+  const pageAccess = await getSidebarAccessContext("okr-workspace");
+  if (pageAccess.state !== "ok") {
+    return { error: "Kein Zugriff auf den OKR-Arbeitsbereich." as const };
+  }
+  const context = await getPhase0Context();
+  if (!context) return { error: "Nicht authentifiziert." as const };
+
+  const supabase = await createSupabaseServerClient();
+  const { data: task, error: tErr } = await supabase
+    .schema("app")
+    .from("okr_review_session_tasks")
+    .select("id, organization_id, okr_review_session_id")
+    .eq("id", input.taskId)
+    .maybeSingle();
+
+  if (tErr) return { error: tErr.message };
+  if (!task || task.organization_id !== context.organizationId) {
+    return { error: "Aufgabe nicht gefunden." as const };
+  }
+
+  const { data: session } = await supabase
+    .schema("app")
+    .from("okr_review_sessions")
+    .select("facilitator_membership_id, status")
+    .eq("id", task.okr_review_session_id)
+    .maybeSingle();
+
+  if (!session) return { error: "Review-Session nicht gefunden." as const };
+  const st = String(session.status);
+  if (st !== "in_progress" && st !== "completed") {
+    return { error: "Aufgaben nur während oder nach der Session." as const };
+  }
+
+  const allowed = await assertOkrReviewSessionEditAllowed(context.membershipId, {
+    facilitator_membership_id: (session.facilitator_membership_id as string | null),
+  });
+  if (!allowed) return { error: "Keine Berechtigung: diese Session bearbeiten." as const };
+
+  const patch: Record<string, unknown> = {};
+  if (input.title !== undefined) patch.title = input.title.trim();
+  if (input.isDone !== undefined) patch.is_done = input.isDone;
+  if (input.dueAtIso !== undefined) {
+    const d = parseReviewTaskDueAtIso(input.dueAtIso, "Termin ist erforderlich.");
+    if (!d.ok) return { error: d.error };
+    patch.due_at = d.iso;
+  }
+
+  if (Object.keys(patch).length === 0) return {};
+
+  const { error } = await supabase
+    .schema("app")
+    .from("okr_review_session_tasks")
+    .update(patch)
+    .eq("id", input.taskId);
+
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function deleteOkrReviewSessionTaskAction(input: { taskId: string }) {
+  const pageAccess = await getSidebarAccessContext("okr-workspace");
+  if (pageAccess.state !== "ok") {
+    return { error: "Kein Zugriff auf den OKR-Arbeitsbereich." as const };
+  }
+  const context = await getPhase0Context();
+  if (!context) return { error: "Nicht authentifiziert." as const };
+
+  const supabase = await createSupabaseServerClient();
+  const { data: task, error: tErr } = await supabase
+    .schema("app")
+    .from("okr_review_session_tasks")
+    .select("id, organization_id, okr_review_session_id")
+    .eq("id", input.taskId)
+    .maybeSingle();
+
+  if (tErr) return { error: tErr.message };
+  if (!task || task.organization_id !== context.organizationId) {
+    return { error: "Aufgabe nicht gefunden." as const };
+  }
+
+  const { data: session } = await supabase
+    .schema("app")
+    .from("okr_review_sessions")
+    .select("facilitator_membership_id, status")
+    .eq("id", task.okr_review_session_id)
+    .maybeSingle();
+
+  if (!session) return { error: "Review-Session nicht gefunden." as const };
+  const st = String(session.status);
+  if (st !== "in_progress" && st !== "completed") {
+    return { error: "Aufgaben nur während oder nach der Session." as const };
+  }
+
+  const allowed = await assertOkrReviewSessionEditAllowed(context.membershipId, {
+    facilitator_membership_id: (session.facilitator_membership_id as string | null),
+  });
+  if (!allowed) return { error: "Keine Berechtigung: diese Session bearbeiten." as const };
+
+  const { error } = await supabase.schema("app").from("okr_review_session_tasks").delete().eq("id", input.taskId);
 
   if (error) return { error: error.message };
   revalidateOkrPaths();
@@ -1672,8 +1996,12 @@ export async function deleteOkrReviewSessionAction(input: { sessionId: string })
   if (!row || row.organization_id !== context.organizationId) {
     return { error: "Review-Session nicht gefunden." as const };
   }
-  if (row.status !== "draft") {
-    return { error: "Nur Sessions im Status Entwurf können gelöscht werden." as const };
+  const status = String(row.status);
+  if (status === "in_progress" || status === "completed") {
+    return {
+      error:
+        "Löschen nur möglich, solange die Review nicht gestartet oder abgeschlossen ist (z. B. Entwurf oder geplant)." as const,
+    };
   }
 
   const { error } = await supabase.schema("app").from("okr_review_sessions").delete().eq("id", input.sessionId);

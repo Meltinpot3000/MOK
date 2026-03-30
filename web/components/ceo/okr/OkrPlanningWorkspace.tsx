@@ -15,6 +15,7 @@ import {
   pillLinked,
   pillNeutral,
 } from "@/components/ceo/ExpandableTable";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   createKeyResultAction,
   createOkrObjectiveAction,
@@ -115,6 +116,7 @@ function KeyResultPlanningKrOneLineRow({
   const ctl = OKR_KR_COMPACT_CONTROL;
   const linkedN = kr.linkedInitiativeIds.length;
   const krFieldsDisabled = !canWrite || !canEditThisKr;
+  const [krDeleteOpen, setKrDeleteOpen] = useState(false);
 
   return (
     <>
@@ -235,19 +237,29 @@ function KeyResultPlanningKrOneLineRow({
             type="button"
             disabled={!canWrite || !canEditThisKr}
             className="whitespace-nowrap text-[11px] text-red-700 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => {
-              if (!window.confirm("Key Result löschen?")) return;
-              startTransition(async () => {
-                const r = await deleteKeyResultAction({ keyResultId: kr.id });
-                if ("error" in r && r.error) window.alert(r.error);
-                else onMutationSuccess();
-              });
-            }}
+            onClick={() => setKrDeleteOpen(true)}
           >
             Löschen
           </button>
         </div>
       </div>
+
+      {krDeleteOpen ? (
+        <ConfirmDialog
+          title="Key Result löschen?"
+          description="Das Key Result wird dauerhaft entfernt. Verknüpfungen zu Initiativen gehen verloren."
+          confirmLabel="Löschen"
+          onCancel={() => setKrDeleteOpen(false)}
+          onConfirm={() => {
+            setKrDeleteOpen(false);
+            startTransition(async () => {
+              const r = await deleteKeyResultAction({ keyResultId: kr.id });
+              if ("error" in r && r.error) window.alert(r.error);
+              else onMutationSuccess();
+            });
+          }}
+        />
+      ) : null}
 
       <KrPlanningInitiativesDetails
         autoOpen={kr.warningNoInitiativeLink}
@@ -345,6 +357,7 @@ function KrInitiativePillButton({
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [optimisticLinked, setOptimisticLinked] = useState<boolean | null>(null);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const displayLinked = optimisticLinked !== null ? optimisticLinked : isLinked;
 
   useEffect(() => {
@@ -353,7 +366,7 @@ function KrInitiativePillButton({
     }
   }, [isLinked, optimisticLinked]);
 
-  const handleClick = async () => {
+  const runToggle = async () => {
     if (!canWrite || isPending) return;
     setOptimisticLinked(!isLinked);
     setIsPending(true);
@@ -387,19 +400,42 @@ function KrInitiativePillButton({
     }
   };
 
+  const handleClick = async () => {
+    if (!canWrite || isPending) return;
+    if (isLinked) {
+      setUnlinkConfirmOpen(true);
+      return;
+    }
+    await runToggle();
+  };
+
   const className = displayLinked ? pillLinked() : pillNeutral();
 
   return (
-    <button
-      type="button"
-      onClick={() => void handleClick()}
-      disabled={!canWrite || isPending}
-      className={`max-w-full break-words text-left ${className} flex items-center gap-1.5 ${isPending ? "opacity-70" : ""}`}
-      title={title}
-    >
-      {children}
-      {displayLinked ? <span className="ml-0.5 shrink-0 text-red-600">×</span> : null}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        disabled={!canWrite || isPending}
+        className={`max-w-full break-words text-left ${className} flex items-center gap-1.5 ${isPending ? "opacity-70" : ""}`}
+        title={title}
+      >
+        {children}
+        {displayLinked ? <span className="ml-0.5 shrink-0 text-red-600">×</span> : null}
+      </button>
+      {unlinkConfirmOpen ? (
+        <ConfirmDialog
+          title="Initiative vom Key Result trennen?"
+          description="Die Verknüpfung zwischen diesem Key Result und der Initiative wird aufgehoben."
+          confirmLabel="Trennen"
+          onCancel={() => setUnlinkConfirmOpen(false)}
+          onConfirm={() => {
+            setUnlinkConfirmOpen(false);
+            void runToggle();
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -465,6 +501,7 @@ function OkrObjectiveRowActions({
   router: ReturnType<typeof useRouter>;
   onAfterShift: () => void;
 }) {
+  const [shiftConfirmOpen, setShiftConfirmOpen] = useState(false);
   const allowed =
     canWrite &&
     canEditRow &&
@@ -476,48 +513,60 @@ function OkrObjectiveRowActions({
     return <span className="inline-block w-8" aria-hidden />;
   }
 
+  const runShiftToNextCycle = () => {
+    startTransition(async () => {
+      const r = await shiftOkrObjectiveToNextCycleAction({
+        cycleInstanceId,
+        objectiveId,
+        fromOkrCycleId: selectedOkrCycleId!,
+      });
+      if (r && "error" in r && r.error) window.alert(r.error);
+      else if (r && "newOkrCycleId" in r && r.newOkrCycleId) {
+        router.push(`/okr/planning?okrCycle=${encodeURIComponent(r.newOkrCycleId)}`);
+        onAfterShift();
+      }
+    });
+  };
+
   return (
-    <details className="relative">
-      <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-transparent text-zinc-600 hover:border-zinc-200 hover:bg-zinc-100 [&::-webkit-details-marker]:hidden">
-        <span className="sr-only">Aktionen zu Objective</span>
-        <span className="select-none text-lg leading-none" aria-hidden>
-          ⋮
-        </span>
-      </summary>
-      <div className="absolute right-0 z-20 mt-1 min-w-[14rem] rounded-md border border-zinc-200 bg-white py-1 shadow-md">
-        <button
-          type="button"
-          disabled={pending}
-          className="w-full px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-          onClick={(e) => {
-            e.preventDefault();
-            const det = e.currentTarget.closest("details") as HTMLDetailsElement | null;
-            if (det) det.open = false;
-            if (
-              !window.confirm(
-                "Offene Key Results (Fortschritt unter 100 %) werden in den nächsten OKR-Zeitraum kopiert; Initiative-Verknüpfungen werden den Kopien zugeordnet. Das Objective hier wird als «Verschoben» markiert. Fortfahren?",
-              )
-            ) {
-              return;
-            }
-            startTransition(async () => {
-              const r = await shiftOkrObjectiveToNextCycleAction({
-                cycleInstanceId,
-                objectiveId,
-                fromOkrCycleId: selectedOkrCycleId!,
-              });
-              if (r && "error" in r && r.error) window.alert(r.error);
-              else if (r && "newOkrCycleId" in r && r.newOkrCycleId) {
-                router.push(`/okr/planning?okrCycle=${encodeURIComponent(r.newOkrCycleId)}`);
-                onAfterShift();
-              }
-            });
+    <>
+      <details className="relative">
+        <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-transparent text-zinc-600 hover:border-zinc-200 hover:bg-zinc-100 [&::-webkit-details-marker]:hidden">
+          <span className="sr-only">Aktionen zu Objective</span>
+          <span className="select-none text-lg leading-none" aria-hidden>
+            ⋮
+          </span>
+        </summary>
+        <div className="absolute right-0 z-20 mt-1 min-w-[14rem] rounded-md border border-zinc-200 bg-white py-1 shadow-md">
+          <button
+            type="button"
+            disabled={pending}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+            onClick={(e) => {
+              e.preventDefault();
+              const det = e.currentTarget.closest("details") as HTMLDetailsElement | null;
+              if (det) det.open = false;
+              setShiftConfirmOpen(true);
+            }}
+          >
+            OKR-Objective in den nächsten Zyklus verschieben
+          </button>
+        </div>
+      </details>
+      {shiftConfirmOpen ? (
+        <ConfirmDialog
+          title="Objective in den nächsten Zyklus verschieben?"
+          description="Offene Key Results (Fortschritt unter 100 %) werden in den nächsten OKR-Zeitraum kopiert; Initiative-Verknüpfungen werden den Kopien zugeordnet. Das Objective hier wird als «Verschoben» markiert."
+          confirmLabel="Verschieben"
+          pending={pending}
+          onCancel={() => setShiftConfirmOpen(false)}
+          onConfirm={() => {
+            setShiftConfirmOpen(false);
+            runShiftToNextCycle();
           }}
-        >
-          OKR-Objective in den nächsten Zyklus verschieben
-        </button>
-      </div>
-    </details>
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -991,6 +1040,8 @@ function OkrObjectiveExpandedPanel(props: {
     onMutationSuccess,
   } = props;
 
+  const [objectiveDeleteOpen, setObjectiveDeleteOpen] = useState(false);
+
   const ownerChoicesForPanel = useMemo(() => {
     const byId = new Map(objectiveOwnerChoices.map((r) => [r.membershipId, r]));
     const oid = objective.ownerMembershipId;
@@ -1033,17 +1084,7 @@ function OkrObjectiveExpandedPanel(props: {
         <button
           type="button"
           className="text-xs text-red-700 hover:underline"
-          onClick={() => {
-            if (!window.confirm("OKR-Objective wirklich löschen?")) return;
-            startTransition(async () => {
-              const r = await deleteOkrObjectiveAction({
-                cycleInstanceId,
-                objectiveId: objective.id,
-              });
-              if ("error" in r && r.error) window.alert(r.error);
-              else onMutationSuccess();
-            });
-          }}
+          onClick={() => setObjectiveDeleteOpen(true)}
         >
           Objective löschen
         </button>
@@ -1256,6 +1297,26 @@ function OkrObjectiveExpandedPanel(props: {
         startTransition={startTransition}
         onSuccess={onMutationSuccess}
       />
+      {objectiveDeleteOpen ? (
+        <ConfirmDialog
+          title="OKR-Objective wirklich löschen?"
+          description="Das Objective und seine Key Results werden aus diesem Zeitraum entfernt, sofern die Datenbank das zulässt."
+          confirmLabel="Löschen"
+          pending={pending}
+          onCancel={() => setObjectiveDeleteOpen(false)}
+          onConfirm={() => {
+            setObjectiveDeleteOpen(false);
+            startTransition(async () => {
+              const r = await deleteOkrObjectiveAction({
+                cycleInstanceId,
+                objectiveId: objective.id,
+              });
+              if ("error" in r && r.error) window.alert(r.error);
+              else onMutationSuccess();
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 export function EntityPillButton({
   entityKey,
@@ -32,6 +32,7 @@ export function EntityPillButton({
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [optimisticLinked, setOptimisticLinked] = useState<boolean | null>(null);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const displayLinked = optimisticLinked !== null ? optimisticLinked : isLinked;
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export function EntityPillButton({
     }
   }, [isLinked, optimisticLinked]);
 
-  const handleClick = async () => {
+  const executeToggle = async () => {
     if (!canWrite || isPending) return;
     const fd = new FormData();
     fd.set(entityKey, entityValue);
@@ -57,18 +58,41 @@ export function EntityPillButton({
     }
   };
 
+  const handleClick = async () => {
+    if (!canWrite || isPending) return;
+    if (isLinked) {
+      setUnlinkConfirmOpen(true);
+      return;
+    }
+    await executeToggle();
+  };
+
   const className = displayLinked ? linkedClassName : unlinkedClassName;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={!canWrite || isPending}
-      className={`flex items-center gap-1.5 ${className} ${isPending ? "opacity-70" : ""}`}
-      title={title}
-    >
-      {children}
-      {displayLinked && <span className="ml-0.5 text-red-600">×</span>}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        disabled={!canWrite || isPending}
+        className={`flex items-center gap-1.5 ${className} ${isPending ? "opacity-70" : ""}`}
+        title={title}
+      >
+        {children}
+        {displayLinked && <span className="ml-0.5 text-red-600">×</span>}
+      </button>
+      {unlinkConfirmOpen ? (
+        <ConfirmDialog
+          title="Verknüpfung entfernen?"
+          description="Die Zuordnung wird aufgehoben."
+          confirmLabel="Entfernen"
+          onCancel={() => setUnlinkConfirmOpen(false)}
+          onConfirm={() => {
+            setUnlinkConfirmOpen(false);
+            void executeToggle();
+          }}
+        />
+      ) : null}
+    </>
   );
 }

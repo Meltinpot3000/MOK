@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useEffect, useState } from "react";
 import type { VisualizationEdge, VisualizationNode } from "@/components/analysis-visualization/types";
 
@@ -33,6 +34,7 @@ export function DetailPanel({
   const [editComment, setEditComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!selectedEdge) return;
@@ -45,6 +47,7 @@ export function DetailPanel({
   const tri = selectedEdge?.triScores ?? null;
 
   return (
+    <>
     <aside
       className={`space-y-3 rounded-md border border-zinc-200 bg-white p-3 shadow-sm ${
         mode === "overlay" ? "max-w-[360px]" : ""
@@ -216,21 +219,7 @@ export function DetailPanel({
               <button
                 type="button"
                 disabled={!canWrite || busy}
-                onClick={async () => {
-                  if (!selectedEdge) return;
-                  const ok = window.confirm("Verbindung wirklich loeschen?");
-                  if (!ok) return;
-                  setBusy(true);
-                  setStatus("Loesche...");
-                  try {
-                    await onDeleteEdge(selectedEdge);
-                    setStatus("Verbindung geloescht.");
-                  } catch {
-                    setStatus("Loeschen fehlgeschlagen.");
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onClick={() => setDeleteConfirmOpen(true)}
                 className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700"
               >
                 Loeschen
@@ -240,5 +229,31 @@ export function DetailPanel({
         </div>
       ) : null}
     </aside>
+    {deleteConfirmOpen && selectedEdge ? (
+      <ConfirmDialog
+        title="Verbindung löschen?"
+        description="Die Verbindung wird dauerhaft entfernt."
+        confirmLabel="Löschen"
+        pending={busy}
+        onCancel={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          const edge = selectedEdge;
+          setDeleteConfirmOpen(false);
+          void (async () => {
+            setBusy(true);
+            setStatus("Loesche...");
+            try {
+              await onDeleteEdge(edge);
+              setStatus("Verbindung geloescht.");
+            } catch {
+              setStatus("Loeschen fehlgeschlagen.");
+            } finally {
+              setBusy(false);
+            }
+          })();
+        }}
+      />
+    ) : null}
+    </>
   );
 }

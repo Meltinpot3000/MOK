@@ -133,4 +133,15 @@ describe("okr-object-access", () => {
       canCreateKeyResultOnObjectiveFromBulk(bulkOwn, { owner_membership_id: "other", deputy_membership_id: null })
     ).toBe(false);
   });
+
+  it("canCreateKeyResultOnObjectiveFromBulk: owner UUID casing matches session", () => {
+    const mid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const bulkOwn = ctx(["okr.objective.update.own"], mid);
+    expect(
+      canCreateKeyResultOnObjectiveFromBulk(bulkOwn, {
+        owner_membership_id: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+        deputy_membership_id: null,
+      })
+    ).toBe(true);
+  });
 });

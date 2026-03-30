@@ -1,5 +1,6 @@
 import type { OrganizationUnit, OrganizationUnitType } from "@/lib/phase0/queries";
 import { OrganizationUnitEditForm } from "@/components/ceo/OrganizationUnitEditForm";
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 
 type OrganizationUnitNodeProps = {
   unit: OrganizationUnit;
@@ -89,7 +90,12 @@ export function OrganizationUnitNode({
             </button>
           </form>
 
-          <form action={archiveAction}>
+          <ConfirmBeforeSubmitForm
+            action={archiveAction}
+            title="Organisationseinheit archivieren?"
+            description={`Die Einheit „${unit.code} – ${unit.name}“ wird archiviert und in der Regel aus aktiven Auswahlen genommen.`}
+            confirmLabel="Archivieren"
+          >
             <input type="hidden" name="id" value={unit.id} />
             <button
               type="submit"
@@ -98,7 +104,7 @@ export function OrganizationUnitNode({
             >
               Archivieren
             </button>
-          </form>
+          </ConfirmBeforeSubmitForm>
         </div>
       </div>
 

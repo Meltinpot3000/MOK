@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
@@ -70,8 +70,6 @@ export function OkrTrackingView({
   const [checkInFor, setCheckInFor] = useState<{
     keyResultId: string;
     title: string;
-    defaultProgress: number;
-    defaultConfidence: number;
   } | null>(null);
 
   const tableColumns: ColumnDef<OkrObjectiveView>[] = useMemo(
@@ -206,11 +204,6 @@ export function OkrTrackingView({
                                 setCheckInFor({
                                   keyResultId: kv.keyResult.id,
                                   title: kv.keyResult.title,
-                                  defaultProgress: Math.min(100, Math.max(0, Math.round(kv.progress))),
-                                  defaultConfidence:
-                                    kv.confidenceLevel != null && Number.isFinite(Number(kv.confidenceLevel))
-                                      ? Math.min(10, Math.max(1, Math.round(Number(kv.confidenceLevel))))
-                                      : 5,
                                 })
                               }
                               className="shrink-0 rounded-md bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-zinc-800"
@@ -276,8 +269,6 @@ export function OkrTrackingView({
         <CompactCheckInModal
           titleShort={checkInFor.title.length > 48 ? `${checkInFor.title.slice(0, 45)}…` : checkInFor.title}
           keyResultId={checkInFor.keyResultId}
-          defaultProgress={checkInFor.defaultProgress}
-          defaultConfidence={checkInFor.defaultConfidence}
           cycleInstanceId={cycleInstanceId}
           okrCycleId={okrCycleId}
           onClose={() => setCheckInFor(null)}
@@ -296,8 +287,6 @@ export function OkrTrackingView({
 function CompactCheckInModal(props: {
   titleShort: string;
   keyResultId: string;
-  defaultProgress: number;
-  defaultConfidence: number;
   cycleInstanceId: string;
   okrCycleId: string;
   onClose: () => void;
@@ -305,6 +294,25 @@ function CompactCheckInModal(props: {
   startTransition: (fn: () => void) => void;
   onSaved: () => void;
 }) {
+  const [progress, setProgress] = useState("");
+  const [confidence, setConfidence] = useState("");
+  const [comment, setComment] = useState("");
+
+  useEffect(() => {
+    setProgress("");
+    setConfidence("");
+    setComment("");
+  }, [props.keyResultId]);
+
+  const progressNum = progress.trim() === "" ? NaN : Number(progress);
+  const progressOk = Number.isFinite(progressNum) && progressNum >= 0 && progressNum <= 100;
+  const confidenceOk = confidence !== "" && Number.isFinite(Number(confidence));
+  const confidenceLevel = confidenceOk
+    ? Math.min(10, Math.max(1, Math.round(Number(confidence))))
+    : 5;
+  const commentOk = comment.trim().length > 0;
+  const canSubmit = progressOk && confidenceOk && commentOk && !props.pending;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center"
@@ -318,24 +326,15 @@ function CompactCheckInModal(props: {
         </h2>
         <p className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500">{props.titleShort}</p>
         <p className="mt-2 text-[11px] leading-snug text-zinc-600">
-          Fortschritt und Zuversicht für dieses Key Result eintragen — dauert nur einen Moment.
+          Fortschritt (%), Zuversicht (1–10) und Kommentar sind Pflicht — alle Felder ausfüllen, dann
+          speichern.
         </p>
         <form
-          key={props.keyResultId}
           className="mt-3 space-y-2.5"
           onSubmit={(e) => {
             e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            const confRaw = fd.get("confidence_level");
-            const confidenceLevel =
-              confRaw != null && String(confRaw).trim() !== ""
-                ? Math.min(10, Math.max(1, Math.round(Number(confRaw))))
-                : 5;
-            const pRaw = fd.get("progress_percent");
-            const progressValue =
-              pRaw != null && String(pRaw).trim() !== "" && Number.isFinite(Number(pRaw))
-                ? Number(pRaw)
-                : null;
+            if (!canSubmit) return;
+            const progressValue = Math.min(100, Math.max(0, Math.round(progressNum)));
             props.startTransition(async () => {
               const r = await createOkrCheckInAction({
                 cycleInstanceId: props.cycleInstanceId,
@@ -343,7 +342,7 @@ function CompactCheckInModal(props: {
                 keyResultId: props.keyResultId,
                 progressValue,
                 confidenceLevel,
-                comment: String(fd.get("comment") ?? "").trim() || null,
+                comment: comment.trim(),
               });
               if ("error" in r && r.error) window.alert(r.error);
               else props.onSaved();
@@ -352,25 +351,33 @@ function CompactCheckInModal(props: {
         >
           <div className="flex gap-2">
             <label className="flex-1 text-[11px] font-medium text-zinc-600">
-              Fortschritt (0–100&nbsp;%)
+              Fortschritt (0–100&nbsp;%) <span className="text-red-600">*</span>
               <input
                 name="progress_percent"
                 type="number"
                 min={0}
                 max={100}
-                required
-                defaultValue={props.defaultProgress}
+                inputMode="numeric"
+                autoComplete="off"
+                value={progress}
+                onChange={(e) => setProgress(e.target.value)}
                 placeholder="z. B. 65"
-                className="mt-0.5 w-full rounded border border-zinc-200 px-2 py-1.5 text-sm tabular-nums"
+                aria-invalid={progress !== "" && !progressOk}
+                className="mt-0.5 w-full rounded border border-zinc-200 px-2 py-1.5 text-sm tabular-nums aria-invalid:border-red-300"
               />
             </label>
-            <label className="w-28 shrink-0 text-[11px] font-medium text-zinc-600">
-              Zuversicht (1–10)
+            <label className="w-[8.5rem] shrink-0 text-[11px] font-medium text-zinc-600">
+              Zuversicht (1–10) <span className="text-red-600">*</span>
               <select
                 name="confidence_level"
-                defaultValue={String(props.defaultConfidence)}
-                className="mt-0.5 w-full rounded border border-zinc-200 bg-white px-1 py-1.5 text-sm"
+                value={confidence}
+                onChange={(e) => setConfidence(e.target.value)}
+                aria-invalid={confidence === ""}
+                className="mt-0.5 w-full rounded border border-zinc-200 bg-white px-1 py-1.5 text-sm aria-invalid:border-red-300"
               >
+                <option value="" disabled>
+                  Bitte wählen
+                </option>
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
                   <option key={n} value={String(n)}>
                     {n}
@@ -380,12 +387,16 @@ function CompactCheckInModal(props: {
             </label>
           </div>
           <label className="block text-[11px] font-medium text-zinc-600">
-            Kommentar <span className="font-normal text-zinc-400">(optional)</span>
+            Kommentar <span className="text-red-600">*</span>
             <textarea
               name="comment"
               rows={2}
+              required
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
               placeholder="Kontext oder nächste Schritte …"
-              className="mt-0.5 w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-xs"
+              aria-invalid={comment !== "" && !commentOk}
+              className="mt-0.5 w-full resize-none rounded border border-zinc-200 px-2 py-1.5 text-xs aria-invalid:border-red-300"
             />
           </label>
           <div className="flex justify-end gap-2 pt-1">
@@ -398,8 +409,8 @@ function CompactCheckInModal(props: {
             </button>
             <button
               type="submit"
-              disabled={props.pending}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              disabled={!canSubmit}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               Speichern
             </button>

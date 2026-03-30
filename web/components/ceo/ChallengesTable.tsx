@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 
@@ -195,15 +196,14 @@ export function ChallengesTable({
                 Challenge-Score:{" "}
                 {Number(challenge.challenge_score ?? 0).toFixed(2)}
               </span>
-              <form
+              <ConfirmBeforeSubmitForm
                 action={actions.deleteStrategicChallengeInCycle}
                 className="inline"
+                title="Strategische Herausforderung löschen?"
+                description="Der Eintrag wird aus diesem Planungszyklus entfernt."
+                confirmLabel="Löschen"
               >
-                <input
-                  type="hidden"
-                  name="strategic_challenge_id"
-                  value={challenge.id}
-                />
+                <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
                 <button
                   type="submit"
                   disabled={!canWrite}
@@ -211,7 +211,7 @@ export function ChallengesTable({
                 >
                   Loeschen
                 </button>
-              </form>
+              </ConfirmBeforeSubmitForm>
             </div>
 
             <form

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { ExpandableTable } from "./ExpandableTable";
 import { LiveRangeInput } from "./LiveRangeInput";
 import { AiWaitOverlay } from "./AiWaitOverlay";
@@ -335,7 +336,12 @@ export function AnalysisEntriesTable({
                     : "Als Herausforderung uebernehmen"}
                 </button>
               </form>
-              <form action={deleteAnalysisEntry}>
+              <ConfirmBeforeSubmitForm
+                action={deleteAnalysisEntry}
+                title="Analyse-Eintrag löschen?"
+                description="Der Eintrag wird dauerhaft entfernt."
+                confirmLabel="Löschen"
+              >
                 <input type="hidden" name="analysis_entry_id" value={entry.id} />
                 <input type="hidden" name="analysis_type" value={analysisType} />
                 <button
@@ -345,7 +351,7 @@ export function AnalysisEntriesTable({
                 >
                   Loeschen
                 </button>
-              </form>
+              </ConfirmBeforeSubmitForm>
               <span className="text-xs text-zinc-500">
                 Aktualisiert: {updatedAtLabel || "-"}
               </span>

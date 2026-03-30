@@ -74,20 +74,25 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
           const { data } = await supabase
             .schema("app")
             .from("organizations")
-            .select("okr_kr_owner_must_match_objective")
+            .select("okr_kr_owner_must_match_objective, okr_review_notify_owners_on_schedule")
             .eq("id", access.organizationId)
             .maybeSingle();
-          return Boolean(
-            (data as { okr_kr_owner_must_match_objective?: boolean } | null)
-              ?.okr_kr_owner_must_match_objective
-          );
+          const row = data as {
+            okr_kr_owner_must_match_objective?: boolean;
+            okr_review_notify_owners_on_schedule?: boolean;
+          } | null;
+          return {
+            okrKrOwnerMustMatchObjective: Boolean(row?.okr_kr_owner_must_match_objective),
+            okrReviewNotifyOwnersOnSchedule: Boolean(row?.okr_review_notify_owners_on_schedule),
+          };
         })()
-      : Promise.resolve(false);
+      : Promise.resolve({
+          okrKrOwnerMustMatchObjective: false,
+          okrReviewNotifyOwnersOnSchedule: false,
+        });
 
-  const [okrData, okrKrOwnerMustMatchObjective] = await Promise.all([
-    okrMatrixPromise,
-    orgRulesPromise,
-  ]);
+  const [okrData, orgRules] = await Promise.all([okrMatrixPromise, orgRulesPromise]);
+  const { okrKrOwnerMustMatchObjective, okrReviewNotifyOwnersOnSchedule } = orgRules;
 
   async function saveAccessMatrix(formData: FormData) {
     "use server";
@@ -207,14 +212,19 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
       redirect("/no-access");
     }
 
-    const raw = formData.get("okr_kr_owner_must_match_objective");
-    const enabled = raw === "on" || raw === "true";
+    const rawKr = formData.get("okr_kr_owner_must_match_objective");
+    const krOwnerMatch = rawKr === "on" || rawKr === "true";
+    const rawNotify = formData.get("okr_review_notify_owners_on_schedule");
+    const notifyOwnersOnSchedule = rawNotify === "on" || rawNotify === "true";
 
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase
       .schema("app")
       .from("organizations")
-      .update({ okr_kr_owner_must_match_objective: enabled })
+      .update({
+        okr_kr_owner_must_match_objective: krOwnerMatch,
+        okr_review_notify_owners_on_schedule: notifyOwnersOnSchedule,
+      })
       .eq("id", localContext.organizationId);
 
     if (error) {
@@ -402,8 +412,26 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
                     </span>
                   </span>
                 </label>
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="okr_review_notify_owners_on_schedule"
+                    value="true"
+                    defaultChecked={okrReviewNotifyOwnersOnSchedule}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">
+                      OKR-Owner bei geplanter Review-Session benachrichtigen
+                    </span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      Nach „Planen“ im OKR-Review-Workspace (Versand folgt, sobald ein E-Mail-Provider
+                      angebunden ist).
+                    </span>
+                  </span>
+                </label>
                 <button type="submit" className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white">
-                  Mandantenregel speichern
+                  Mandantenregeln speichern
                 </button>
               </form>
             )}
