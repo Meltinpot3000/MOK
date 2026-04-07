@@ -11,6 +11,9 @@ import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace"
 import { buildOkrPlanningEditFlags } from "@/app/(ceo)/okr/planning/build-okr-planning-edit-flags";
 import { filterResponsiblesForOkrObjectiveOwnerSelect } from "@/lib/okr/okr-planning-owner-choices";
 
+/** Frische Workspace-Daten nach Server-Mutationen (`router.refresh()`). */
+export const dynamic = "force-dynamic";
+
 type PageProps = {
   searchParams: Promise<{ okrCycle?: string }>;
 };

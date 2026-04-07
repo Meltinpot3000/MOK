@@ -1,6 +1,6 @@
 /**
  * Pure helpers for OKR cycle screens (KPIs, check-in-first "Last Update", rollup status, warnings).
- * OKR-Objective progress as simple average of KR progress is UI/MVP-only — not governance.
+ * Objective-Rollup = Durchschnitt der KR-Fortschritte (Check-in bevorzugt, sonst Metrik) — kein separates DB-Feld.
  */
 
 import {

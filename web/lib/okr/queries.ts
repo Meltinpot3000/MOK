@@ -92,7 +92,7 @@ export async function getObjectivesForCycle(organizationId: string, cycleInstanc
   const { data } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, title, description, status, progress_percent, confidence_level, okr_cycle_id, created_at")
+    .select("id, title, description, status, confidence_level, okr_cycle_id, created_at")
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
     .order("created_at", { ascending: true });

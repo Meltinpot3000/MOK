@@ -167,7 +167,7 @@ export function OkrTrackingView({
                   </div>
                 ) : null}
 
-                <div className="mt-3 rounded-md border border-zinc-200/80 bg-white px-2 py-2">
+                <div className="mt-3">
                   <OkrRollupSparkline points={rollupPoints} />
                 </div>
 

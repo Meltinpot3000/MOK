@@ -6,6 +6,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   link_draft_generation: "Link-Entwürfe",
   cluster_recompute: "Cluster-Neuberechnung",
   gaps_recompute: "Lücken-Neuberechnung",
+  okr_contribution_assessment: "OKR-Contribution-Bewertung",
 };
 
 export function getJobTypeLabel(jobType: string): string {

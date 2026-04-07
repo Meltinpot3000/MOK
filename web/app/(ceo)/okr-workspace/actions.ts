@@ -16,6 +16,13 @@ import {
 } from "@/lib/okr/okr-object-access";
 import { getOkrCycleInstanceScopeIds, getOkrCycles } from "@/lib/okr/queries";
 import { resolveNextOkrCycleId } from "@/lib/okr/okr-cycle-nav";
+import { scheduleOkrContributionAssessmentJob } from "@/lib/okr/contribution-assessment-schedule";
+import { fetchOkrContributionTargetsForObjective } from "@/lib/okr/contribution-assessment-triggers";
+import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
+import {
+  normalizeOkrContributionTier,
+  type OkrContributionTier,
+} from "@/lib/strategy-cycle/coverage-level";
 
 const OKR_APP_PATHS = [
   "/okr-workspace",
@@ -394,6 +401,14 @@ export async function createOkrObjectiveAction(input: {
   }
 
   revalidateOkrPaths();
+  await scheduleOkrContributionAssessmentJob({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    okrObjectiveId: inserted.id,
+    membershipId: auth.context.membershipId,
+    trigger: "okr_objective_create",
+  });
   return { id: inserted.id };
 }
 
@@ -428,7 +443,7 @@ export async function updateOkrObjectiveAction(input: {
   const { data: existingObj } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, okr_cycle_id, owner_membership_id, deputy_membership_id, status")
+    .select("id, okr_cycle_id, owner_membership_id, deputy_membership_id, status, title, description")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
     .eq("cycle_instance_id", input.cycleInstanceId)
@@ -656,7 +671,7 @@ export async function createKeyResultAction(input: {
   const { data: obj } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, okr_cycle_id, owner_membership_id, deputy_membership_id, status")
+    .select("id, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id, status")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
     .eq("cycle_instance_id", input.cycleInstanceId)
@@ -741,6 +756,16 @@ export async function createKeyResultAction(input: {
 
   if (error || !inserted?.id) return { error: error?.message ?? "Key Result konnte nicht angelegt werden." };
   revalidateOkrPaths();
+  if (obj?.cycle_instance_id) {
+    await scheduleOkrContributionAssessmentJob({
+      supabase,
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: obj.cycle_instance_id,
+      okrObjectiveId: input.objectiveId,
+      membershipId: auth.context.membershipId,
+      trigger: "key_result_create",
+    });
+  }
   return { id: inserted.id };
 }
 
@@ -767,7 +792,9 @@ export async function updateKeyResultAction(input: {
   const { data: krContext } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
+    .select(
+      "id, okr_objective_id, owner_membership_id, deputy_membership_id, title, metric_type, start_value, target_value, measurement_unit, status"
+    )
     .eq("id", input.keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
@@ -777,7 +804,7 @@ export async function updateKeyResultAction(input: {
   const { data: objOwnRow } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, owner_membership_id, deputy_membership_id, status")
+    .select("id, owner_membership_id, deputy_membership_id, status, cycle_instance_id")
     .eq("id", krContext.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
@@ -921,7 +948,7 @@ export async function deleteKeyResultAction(input: { keyResultId: string }) {
   const { data: objRow } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, owner_membership_id, deputy_membership_id, status")
+    .select("id, owner_membership_id, deputy_membership_id, status, cycle_instance_id")
     .eq("id", krRow.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
@@ -955,6 +982,16 @@ export async function deleteKeyResultAction(input: { keyResultId: string }) {
 
   if (error) return { error: error.message };
   revalidateOkrPaths();
+  if (objRow.cycle_instance_id) {
+    await scheduleOkrContributionAssessmentJob({
+      supabase,
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: objRow.cycle_instance_id,
+      okrObjectiveId: krRow.okr_objective_id,
+      membershipId: auth.context.membershipId,
+      trigger: "key_result_delete",
+    });
+  }
   return {};
 }
 
@@ -1044,6 +1081,14 @@ export async function setKeyResultInitiativeLinksAction(input: {
   }
 
   revalidateOkrPaths();
+  await scheduleOkrContributionAssessmentJob({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    okrObjectiveId: kr.okr_objective_id,
+    membershipId: auth.context.membershipId,
+    trigger: "initiative_links_replace",
+  });
   return {};
 }
 
@@ -1169,6 +1214,14 @@ export async function linkKeyResultInitiativeAction(input: {
   }
 
   revalidateOkrPaths();
+  await scheduleOkrContributionAssessmentJob({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId,
+    okrObjectiveId: krPerm.okr_objective_id,
+    membershipId: auth.context.membershipId,
+    trigger: "initiative_link_add",
+  });
   return {};
 }
 
@@ -1243,6 +1296,14 @@ export async function unlinkKeyResultInitiativeAction(input: {
 
   if (error) return { error: error.message };
   revalidateOkrPaths();
+  await scheduleOkrContributionAssessmentJob({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId,
+    okrObjectiveId: krPerm.okr_objective_id,
+    membershipId: auth.context.membershipId,
+    trigger: "initiative_link_remove",
+  });
   return {};
 }
 
@@ -1250,6 +1311,163 @@ function formDataOptionalNumber(entry: FormDataEntryValue | null): number | null
   if (entry == null || entry === "") return null;
   const n = Number(entry);
   return Number.isFinite(n) ? n : null;
+}
+
+async function applyOkrObjectiveUnifiedManualContributionLevel(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  membershipId: string;
+  cycleInstanceId: string;
+  okrObjectiveId: string;
+  level: OkrContributionTier | null;
+}): Promise<{ error?: string }> {
+  const { supabase, organizationId, membershipId, cycleInstanceId, okrObjectiveId, level } = input;
+
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, organization_id, status, owner_membership_id, deputy_membership_id")
+    .eq("id", okrObjectiveId)
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .maybeSingle();
+
+  if (!obj?.id) return { error: "Objective nicht gefunden." };
+  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: membershipId,
+      action: "update",
+      objective: {
+        id: obj.id,
+        owner_membership_id: obj.owner_membership_id ?? null,
+        deputy_membership_id: obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
+  }
+
+  const targets = await fetchOkrContributionTargetsForObjective(
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    okrObjectiveId
+  );
+
+  for (const t of targets) {
+    const { data: existing } = await supabase
+      .schema("app")
+      .from("okr_contribution_edges")
+      .select("id")
+      .eq("okr_objective_id", okrObjectiveId)
+      .eq("target_type", t.targetType)
+      .eq("target_id", t.targetId)
+      .maybeSingle();
+
+    if (level === null) {
+      if (existing?.id) {
+        const { error } = await supabase
+          .schema("app")
+          .from("okr_contribution_edges")
+          .update({
+            confirmed_level: null,
+            value_source: "none",
+          })
+          .eq("id", existing.id);
+        if (error) return { error: error.message };
+      }
+    } else if (existing?.id) {
+      const { error } = await supabase
+        .schema("app")
+        .from("okr_contribution_edges")
+        .update({
+          confirmed_level: level,
+          value_source: "manual",
+          llm_suggestion_dismissed: false,
+        })
+        .eq("id", existing.id);
+      if (error) return { error: error.message };
+    } else {
+      const { error } = await supabase.schema("app").from("okr_contribution_edges").insert({
+        organization_id: obj.organization_id,
+        cycle_instance_id: cycleInstanceId,
+        okr_objective_id: okrObjectiveId,
+        target_type: t.targetType,
+        target_id: t.targetId,
+        confirmed_level: level,
+        value_source: "manual",
+        llm_suggestion_dismissed: false,
+      });
+      if (error) return { error: error.message };
+    }
+  }
+
+  revalidateOkrPaths();
+  return {};
+}
+
+async function runOkrPlanningPanelContributionFollowUp(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  membershipId: string;
+  cycleInstanceId: string;
+  objectiveId: string;
+  canEditObjectiveFields: boolean;
+  formData: FormData;
+}): Promise<{ error?: string }> {
+  const { data: brandingRow } = await input.supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+  const policy = readAnalysisNetworkLlmPolicy(brandingRow?.branding_config ?? null);
+  const contribLlmOn = isLlmFeatureEnabled(policy, "okr_contribution_assessment");
+
+  if (input.canEditObjectiveFields && !contribLlmOn) {
+    if (input.formData.has("objective_contribution_level")) {
+      const raw = String(input.formData.get("objective_contribution_level") ?? "").trim();
+      if (raw !== "") {
+        let level: OkrContributionTier | null;
+        if (raw === "clear") {
+          level = null;
+        } else if (
+          raw === "low" ||
+          raw === "medium" ||
+          raw === "high" ||
+          raw === "insufficient"
+        ) {
+          level = raw;
+        } else {
+          return { error: "Ungültige Einstufung." };
+        }
+        const r = await applyOkrObjectiveUnifiedManualContributionLevel({
+          supabase: input.supabase,
+          organizationId: input.organizationId,
+          membershipId: input.membershipId,
+          cycleInstanceId: input.cycleInstanceId,
+          okrObjectiveId: input.objectiveId,
+          level,
+        });
+        if (r.error) return r;
+      }
+    }
+  }
+
+  if (contribLlmOn) {
+    await scheduleOkrContributionAssessmentJob({
+      supabase: input.supabase,
+      organizationId: input.organizationId,
+      cycleInstanceId: input.cycleInstanceId,
+      okrObjectiveId: input.objectiveId,
+      membershipId: input.membershipId,
+      trigger: "okr_planning_panel_save",
+    });
+  }
+
+  return {};
 }
 
 /**
@@ -1335,6 +1553,16 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
   const settings = await getOrgOkrSettings(auth.context.organizationId);
 
   if (krIds.length === 0) {
+    const fin = await runOkrPlanningPanelContributionFollowUp({
+      supabase,
+      organizationId: auth.context.organizationId,
+      membershipId: auth.context.membershipId,
+      cycleInstanceId,
+      objectiveId,
+      canEditObjectiveFields: canEditObj,
+      formData,
+    });
+    if (fin.error) return { error: fin.error };
     return {};
   }
 
@@ -1401,6 +1629,16 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
     if ("error" in krRes && krRes.error) return krRes;
   }
 
+  const fin = await runOkrPlanningPanelContributionFollowUp({
+    supabase,
+    organizationId: auth.context.organizationId,
+    membershipId: auth.context.membershipId,
+    cycleInstanceId,
+    objectiveId,
+    canEditObjectiveFields: canEditObj,
+    formData,
+  });
+  if (fin.error) return { error: fin.error };
   return {};
 }
 
@@ -2106,3 +2344,244 @@ export async function deleteOkrReviewSessionAction(input: { sessionId: string })
   return {};
 }
 
+export async function acceptOkrContributionEdgeAction(input: {
+  cycleInstanceId: string;
+  okrObjectiveId: string;
+  targetType: "initiative" | "strategy_objective";
+  targetId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+
+  const supabase = await createSupabaseServerClient();
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, status, owner_membership_id, deputy_membership_id")
+    .eq("id", input.okrObjectiveId)
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .maybeSingle();
+  if (!obj?.id) return { error: "Objective nicht gefunden." };
+  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      objective: {
+        id: obj.id,
+        owner_membership_id: obj.owner_membership_id ?? null,
+        deputy_membership_id: obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
+  }
+
+  const { data: edge } = await supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .select("id, llm_level")
+    .eq("okr_objective_id", input.okrObjectiveId)
+    .eq("target_type", input.targetType)
+    .eq("target_id", input.targetId)
+    .maybeSingle();
+
+  if (!edge?.id || !edge.llm_level) {
+    return { error: "Kein LLM-Vorschlag zum Übernehmen." };
+  }
+
+  const { error } = await supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .update({
+      confirmed_level: edge.llm_level,
+      value_source: "llm_accepted",
+      llm_suggestion_dismissed: false,
+    })
+    .eq("id", edge.id);
+
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function dismissOkrContributionSuggestionAction(input: {
+  cycleInstanceId: string;
+  okrObjectiveId: string;
+  targetType: "initiative" | "strategy_objective";
+  targetId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+
+  const supabase = await createSupabaseServerClient();
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, status, owner_membership_id, deputy_membership_id")
+    .eq("id", input.okrObjectiveId)
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .maybeSingle();
+  if (!obj?.id) return { error: "Objective nicht gefunden." };
+  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      objective: {
+        id: obj.id,
+        owner_membership_id: obj.owner_membership_id ?? null,
+        deputy_membership_id: obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
+  }
+
+  const { data: edge } = await supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .select("id")
+    .eq("okr_objective_id", input.okrObjectiveId)
+    .eq("target_type", input.targetType)
+    .eq("target_id", input.targetId)
+    .maybeSingle();
+
+  if (!edge?.id) return { error: "Kein Eintrag." };
+
+  const { error } = await supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .update({
+      llm_suggestion_dismissed: true,
+      llm_level: null,
+      llm_reason: null,
+      llm_assessment_run_id: null,
+    })
+    .eq("id", edge.id);
+
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function setOkrContributionManualAction(input: {
+  cycleInstanceId: string;
+  okrObjectiveId: string;
+  targetType: "initiative" | "strategy_objective";
+  targetId: string;
+  level: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+
+  const lvl = normalizeOkrContributionTier(input.level);
+  const supabase = await createSupabaseServerClient();
+
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, organization_id, status, owner_membership_id, deputy_membership_id")
+    .eq("id", input.okrObjectiveId)
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .maybeSingle();
+  if (!obj?.id) return { error: "Objective nicht gefunden." };
+  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      objective: {
+        id: obj.id,
+        owner_membership_id: obj.owner_membership_id ?? null,
+        deputy_membership_id: obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
+  }
+
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .select("id")
+    .eq("okr_objective_id", input.okrObjectiveId)
+    .eq("target_type", input.targetType)
+    .eq("target_id", input.targetId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .schema("app")
+      .from("okr_contribution_edges")
+      .update({
+        confirmed_level: lvl,
+        value_source: "manual",
+        llm_suggestion_dismissed: false,
+      })
+      .eq("id", existing.id);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase.schema("app").from("okr_contribution_edges").insert({
+      organization_id: obj.organization_id,
+      cycle_instance_id: input.cycleInstanceId,
+      okr_objective_id: input.okrObjectiveId,
+      target_type: input.targetType,
+      target_id: input.targetId,
+      confirmed_level: lvl,
+      value_source: "manual",
+      llm_suggestion_dismissed: false,
+    });
+    if (error) return { error: error.message };
+  }
+
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function recalculateOkrContributionAssessmentAction(input: {
+  cycleInstanceId: string;
+  okrObjectiveId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+
+  const supabase = await createSupabaseServerClient();
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, status, owner_membership_id, deputy_membership_id")
+    .eq("id", input.okrObjectiveId)
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .maybeSingle();
+  if (!obj?.id) return { error: "Objective nicht gefunden." };
+  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      objective: {
+        id: obj.id,
+        owner_membership_id: obj.owner_membership_id ?? null,
+        deputy_membership_id: obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
+  }
+
+  await scheduleOkrContributionAssessmentJob({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    okrObjectiveId: input.okrObjectiveId,
+    membershipId: auth.context.membershipId,
+    trigger: "manual_recalculate",
+  });
+  revalidateOkrPaths();
+  return {};
+}

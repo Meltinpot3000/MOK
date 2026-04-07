@@ -1,6 +1,14 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import type {
   OkrPlanningInitiativeRow,
@@ -9,6 +17,11 @@ import type {
   OkrPlanningWorkspaceData,
   OkrResponsibleOption,
 } from "@/lib/okr/planning-data";
+import {
+  OKR_CONTRIBUTION_TIER_META,
+  OKR_CONTRIBUTION_TIER_ORDER,
+  type OkrContributionTier,
+} from "@/lib/strategy-cycle/coverage-level";
 import {
   ExpandableTable,
   type ColumnDef,
@@ -33,6 +46,8 @@ import {
 } from "@/lib/strategy-cycle/matrix-link-count-tone";
 const OKR_FORM_LABEL = "block text-xs text-zinc-600";
 const OKR_FORM_CONTROL = "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm";
+
+export type OkrPlanningDataRefresh = () => void | Promise<void>;
 
 function okrMetricTypeLabelDe(metricType: string): string {
   switch (metricType) {
@@ -103,7 +118,7 @@ function KeyResultPlanningKrOneLineRow({
   okrKrOwnerMustMatchObjective: boolean;
   responsibles: OkrResponsibleOption[];
   startTransition: (cb: () => void) => void;
-  onMutationSuccess: () => void;
+  onMutationSuccess: OkrPlanningDataRefresh;
 }) {
   const [metricType, setMetricType] = useState<KeyResultMetricTypeUi>(() =>
     normalizeKeyResultMetricType(kr.metricType),
@@ -255,7 +270,7 @@ function KeyResultPlanningKrOneLineRow({
             startTransition(async () => {
               const r = await deleteKeyResultAction({ keyResultId: kr.id });
               if ("error" in r && r.error) window.alert(r.error);
-              else onMutationSuccess();
+              else await onMutationSuccess();
             });
           }}
         />
@@ -299,6 +314,7 @@ function KeyResultPlanningKrOneLineRow({
                   isLinked={kr.linkedInitiativeIds.includes(i.id)}
                   canWrite={canWrite && canEditThisKr}
                   title={i.title}
+                  onAfterMutate={onMutationSuccess}
                 >
                   {i.title}
                 </KrInitiativePillButton>
@@ -345,6 +361,7 @@ function KrInitiativePillButton({
   canWrite,
   children,
   title,
+  onAfterMutate,
 }: {
   cycleInstanceId: string;
   keyResultId: string;
@@ -353,6 +370,8 @@ function KrInitiativePillButton({
   canWrite: boolean;
   children: React.ReactNode;
   title?: string;
+  /** Nach erfolgreicher Verknüpfung/Entfernung: Tabelle aus Server neu laden. */
+  onAfterMutate?: OkrPlanningDataRefresh;
 }) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -394,7 +413,8 @@ function KrInitiativePillButton({
           return;
         }
       }
-      router.refresh();
+      if (onAfterMutate) await onAfterMutate();
+      else await router.refresh();
     } finally {
       setIsPending(false);
     }
@@ -499,7 +519,7 @@ function OkrObjectiveRowActions({
   pending: boolean;
   startTransition: (cb: () => void) => void;
   router: ReturnType<typeof useRouter>;
-  onAfterShift: () => void;
+  onAfterShift: OkrPlanningDataRefresh;
 }) {
   const [shiftConfirmOpen, setShiftConfirmOpen] = useState(false);
   const allowed =
@@ -523,7 +543,7 @@ function OkrObjectiveRowActions({
       if (r && "error" in r && r.error) window.alert(r.error);
       else if (r && "newOkrCycleId" in r && r.newOkrCycleId) {
         router.push(`/okr/planning?okrCycle=${encodeURIComponent(r.newOkrCycleId)}`);
-        onAfterShift();
+        await onAfterShift();
       }
     });
   };
@@ -570,6 +590,125 @@ function OkrObjectiveRowActions({
   );
 }
 
+function okrContributionTierIndex(level: OkrContributionTier | null | undefined): number {
+  if (!level) return -1;
+  return OKR_CONTRIBUTION_TIER_ORDER.indexOf(level);
+}
+
+function formatOkrContributionTierRange(levels: OkrContributionTier[]): string {
+  if (levels.length === 0) return "";
+  const idxs = levels.map((l) => OKR_CONTRIBUTION_TIER_ORDER.indexOf(l)).filter((i) => i >= 0);
+  if (idxs.length === 0) return "";
+  const min = Math.min(...idxs);
+  const max = Math.max(...idxs);
+  const low = OKR_CONTRIBUTION_TIER_ORDER[min]!;
+  const high = OKR_CONTRIBUTION_TIER_ORDER[max]!;
+  if (min === max) {
+    return `${OKR_CONTRIBUTION_TIER_META[low].emoji} ${OKR_CONTRIBUTION_TIER_META[low].labelDe}`;
+  }
+  return `${OKR_CONTRIBUTION_TIER_META[low].emoji}–${OKR_CONTRIBUTION_TIER_META[high].emoji}`;
+}
+
+/** Sortierschlüssel: schwächste Stufe (0=insufficient … 3=high), sonst 4. */
+function okrContributionColumnSortValue(o: OkrPlanningObjectiveRow): number {
+  const linked = collectLinkedInitiativesForOkrObjective(o);
+  const targets = [
+    ...linked.map((i) => ({ targetType: "initiative" as const, targetId: i.id })),
+    ...o.linkedStrategyObjectives.map((s) => ({
+      targetType: "strategy_objective" as const,
+      targetId: s.id,
+    })),
+  ];
+  if (targets.length === 0) return 4;
+
+  const edgeByKey = new Map(
+    o.contributionEdges.map((e) => [`${e.targetType}:${e.targetId}`, e] as const),
+  );
+
+  const confirmed: OkrContributionTier[] = [];
+  const suggestions: OkrContributionTier[] = [];
+  for (const t of targets) {
+    const e = edgeByKey.get(`${t.targetType}:${t.targetId}`);
+    if (e?.confirmedLevel) confirmed.push(e.confirmedLevel);
+    else if (e?.llmLevel && !e.llmSuggestionDismissed) suggestions.push(e.llmLevel);
+  }
+
+  if (confirmed.length > 0) {
+    return Math.min(...confirmed.map((l) => okrContributionTierIndex(l)).filter((i) => i >= 0));
+  }
+  if (suggestions.length > 0) {
+    return Math.min(...suggestions.map((l) => okrContributionTierIndex(l)).filter((i) => i >= 0));
+  }
+  return 4;
+}
+
+function OkrContributionTableCell({ o }: { o: OkrPlanningObjectiveRow }) {
+  const linked = collectLinkedInitiativesForOkrObjective(o);
+  const targets = [
+    ...linked.map((i) => ({ targetType: "initiative" as const, targetId: i.id })),
+    ...o.linkedStrategyObjectives.map((s) => ({
+      targetType: "strategy_objective" as const,
+      targetId: s.id,
+    })),
+  ];
+  if (targets.length === 0) {
+    return <span className="text-zinc-400">—</span>;
+  }
+
+  const edgeByKey = new Map(
+    o.contributionEdges.map((e) => [`${e.targetType}:${e.targetId}`, e] as const),
+  );
+
+  const confirmed: OkrContributionTier[] = [];
+  const suggestions: OkrContributionTier[] = [];
+  let withoutConfirmed = 0;
+  let pendingTargets = 0;
+  for (const t of targets) {
+    const e = edgeByKey.get(`${t.targetType}:${t.targetId}`);
+    if (e?.confirmedLevel) confirmed.push(e.confirmedLevel);
+    else {
+      withoutConfirmed += 1;
+      if (e?.llmLevel && !e.llmSuggestionDismissed) suggestions.push(e.llmLevel);
+      if (!e || (!e.llmLevel && !e.confirmedLevel)) pendingTargets += 1;
+    }
+  }
+
+  const confirmedStr = formatOkrContributionTierRange(confirmed);
+  const suggestionStr = formatOkrContributionTierRange(suggestions);
+
+  if (confirmed.length > 0) {
+    return (
+      <div className="space-y-0.5">
+        <span className="text-sm text-zinc-800" title="Bestätigte Einzahlungsstufe(n) je Ziel">
+          {confirmedStr}
+        </span>
+        {withoutConfirmed > 0 ? (
+          <span className="block text-[10px] text-amber-800/90">
+            {withoutConfirmed} Ziel{withoutConfirmed === 1 ? "" : "e"} ohne Bestätigung
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (suggestionStr) {
+    return (
+      <div className="space-y-0.5">
+        <span className="text-sm text-violet-900" title="Noch nicht bestätigter LLM-Vorschlag">
+          {suggestionStr}
+        </span>
+        <span className="block text-[10px] text-zinc-500">Vorschlag</span>
+      </div>
+    );
+  }
+
+  return (
+    <span className="text-sm text-zinc-400" title="Noch keine Bewertung">
+      {pendingTargets > 0 ? "offen" : "—"}
+    </span>
+  );
+}
+
 function collectLinkedInitiativesForOkrObjective(
   o: OkrPlanningObjectiveRow,
 ): Array<{ id: string; title: string }> {
@@ -584,6 +723,37 @@ function collectLinkedInitiativesForOkrObjective(
   return [...byId.entries()]
     .map(([id, title]) => ({ id, title }))
     .sort((a, b) => a.title.localeCompare(b.title, "de"));
+}
+
+function okrPlanningObjectiveHasContributionTargets(o: OkrPlanningObjectiveRow): boolean {
+  return (
+    collectLinkedInitiativesForOkrObjective(o).length > 0 || o.linkedStrategyObjectives.length > 0
+  );
+}
+
+/** Alle Ziele gleiche bestätigte Stufe → diese Stufe; sonst "" (Speichern überspringt Einstufung). */
+function objectiveContributionLevelFormDefault(o: OkrPlanningObjectiveRow): string {
+  if (!okrPlanningObjectiveHasContributionTargets(o)) return "";
+  const edgeByKey = new Map(
+    o.contributionEdges.map((e) => [`${e.targetType}:${e.targetId}`, e] as const),
+  );
+  const levels: OkrContributionTier[] = [];
+  for (const i of collectLinkedInitiativesForOkrObjective(o)) {
+    const c = edgeByKey.get(`initiative:${i.id}`)?.confirmedLevel ?? null;
+    if (c) levels.push(c);
+    else return "";
+  }
+  for (const s of o.linkedStrategyObjectives) {
+    const c = edgeByKey.get(`strategy_objective:${s.id}`)?.confirmedLevel ?? null;
+    if (c) levels.push(c);
+    else return "";
+  }
+  if (levels.length === 0) return "";
+  const first = levels[0];
+  for (let j = 1; j < levels.length; j++) {
+    if (levels[j] !== first) return "";
+  }
+  return first;
 }
 
 function buildOkrObjectiveTableColumns(
@@ -660,16 +830,17 @@ function buildOkrObjectiveTableColumns(
       },
     },
     {
+      id: "contribution",
+      label: "Einstufung",
+      headerClassName: "min-w-[7.5rem]",
+      sortValue: (o) => okrContributionColumnSortValue(o),
+      render: (o) => <OkrContributionTableCell o={o} />,
+    },
+    {
       id: "status",
       label: "Status",
       sortValue: (o) => o.status,
       render: (o) => <span className="text-zinc-700">{okrObjectiveStatusLabelDe(o.status)}</span>,
-    },
-    {
-      id: "progress",
-      label: "Fortschritt",
-      sortValue: (o) => o.progressPercent,
-      render: (o) => <span className="tabular-nums text-zinc-700">{o.progressPercent}%</span>,
     },
   ];
 }
@@ -688,7 +859,9 @@ export function OkrPlanningWorkspace({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const refresh = () => router.refresh();
+  const refresh = useCallback(async () => {
+    await router.refresh();
+  }, [router]);
   const [quickFind, setQuickFind] = useState("");
 
   const quickLower = quickFind.trim().toLowerCase();
@@ -749,7 +922,7 @@ export function OkrPlanningWorkspace({
             pending={pending}
             startTransition={startTransition}
             router={router}
-            onAfterShift={() => router.refresh()}
+            onAfterShift={refresh}
           />
         ),
       },
@@ -762,6 +935,7 @@ export function OkrPlanningWorkspace({
     objectiveEditById,
     nextOkrCycleId,
     pending,
+    refresh,
     router,
     startTransition,
   ]);
@@ -852,6 +1026,7 @@ export function OkrPlanningWorkspace({
                   pending={pending}
                   startTransition={startTransition}
                   onMutationSuccess={refresh}
+                  okrContributionAssessmentEnabled={data.okrContributionAssessmentEnabled}
                 />
               )}
             />
@@ -870,7 +1045,7 @@ function CreateOkrObjectiveForm(props: {
   currentMembershipId: string;
   pending: boolean;
   startTransition: (cb: () => void) => void;
-  onSuccess: () => void;
+  onSuccess: OkrPlanningDataRefresh;
 }) {
   const {
     cycleInstanceId,
@@ -921,7 +1096,7 @@ function CreateOkrObjectiveForm(props: {
             setNewObjectiveTitle("");
             setNewObjectiveDescription("");
             setNewObjectiveDirectionId("");
-            onSuccess();
+            await onSuccess();
           }
         });
       }}
@@ -1019,7 +1194,8 @@ function OkrObjectiveExpandedPanel(props: {
   canCreateKeyResultByObjectiveId: Record<string, boolean>;
   pending: boolean;
   startTransition: (cb: () => void) => void;
-  onMutationSuccess: () => void;
+  onMutationSuccess: OkrPlanningDataRefresh;
+  okrContributionAssessmentEnabled: boolean;
 }) {
   const {
     objective,
@@ -1038,6 +1214,7 @@ function OkrObjectiveExpandedPanel(props: {
     pending,
     startTransition,
     onMutationSuccess,
+    okrContributionAssessmentEnabled,
   } = props;
 
   const [objectiveDeleteOpen, setObjectiveDeleteOpen] = useState(false);
@@ -1142,7 +1319,7 @@ function OkrObjectiveExpandedPanel(props: {
           startTransition(async () => {
             const r = await saveOkrPlanningPanelAction(fd);
             if (r && "error" in r && r.error) window.alert(r.error);
-            else onMutationSuccess();
+            else await onMutationSuccess();
           });
         }}
       >
@@ -1236,6 +1413,48 @@ function OkrObjectiveExpandedPanel(props: {
               ))}
             </select>
           </label>
+          {!okrContributionAssessmentEnabled ? (
+            <label className={OKR_FORM_LABEL}>
+              Einstufung (Alignment)
+              <select
+                name="objective_contribution_level"
+                defaultValue={objectiveContributionLevelFormDefault(objective)}
+                disabled={
+                  !canEditObjective || !okrPlanningObjectiveHasContributionTargets(objective)
+                }
+                className={OKR_FORM_CONTROL}
+              >
+                <option value="">
+                  — unverändert
+                  {objectiveContributionLevelFormDefault(objective) === "" &&
+                  okrPlanningObjectiveHasContributionTargets(objective)
+                    ? " (z. B. gemischte Stufen)"
+                    : ""}
+                </option>
+                <option value="clear">Keine Stufe (Bestätigung entfernen)</option>
+                <option value="insufficient">
+                  {OKR_CONTRIBUTION_TIER_META.insufficient.emoji}{" "}
+                  {OKR_CONTRIBUTION_TIER_META.insufficient.labelDe}
+                </option>
+                <option value="low">{OKR_CONTRIBUTION_TIER_META.low.labelDe}</option>
+                <option value="medium">{OKR_CONTRIBUTION_TIER_META.medium.labelDe}</option>
+                <option value="high">{OKR_CONTRIBUTION_TIER_META.high.labelDe}</option>
+              </select>
+              {canEditObjective ? (
+                <span className="mt-1 block text-[10px] text-zinc-500">
+                  Gilt für alle verknüpften Initiativen und das Strategieziel; wirksam mit «Alles speichern».
+                  {!okrPlanningObjectiveHasContributionTargets(objective)
+                    ? " Sobald Treiber verknüpft sind, ist die Stufe wählbar."
+                    : null}
+                </span>
+              ) : null}
+            </label>
+          ) : (
+            <p className="text-[10px] text-zinc-500">
+              Mit aktiviertem LLM wird die Einstufung nach «Alles speichern» automatisch im Hintergrund
+              ermittelt (kurz danach in der Übersichtsspalte sichtbar).
+            </p>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -1312,7 +1531,7 @@ function OkrObjectiveExpandedPanel(props: {
                 objectiveId: objective.id,
               });
               if ("error" in r && r.error) window.alert(r.error);
-              else onMutationSuccess();
+              else await onMutationSuccess();
             });
           }}
         />
@@ -1329,7 +1548,7 @@ function CreateKeyResultForm(props: {
   responsibles: OkrResponsibleOption[];
   pending: boolean;
   startTransition: (cb: () => void) => void;
-  onSuccess: () => void;
+  onSuccess: OkrPlanningDataRefresh;
 }) {
   const {
     objectiveId,
@@ -1379,7 +1598,7 @@ function CreateKeyResultForm(props: {
           else {
             formRef.current?.reset();
             setMetricType("boolean");
-            onSuccess();
+            await onSuccess();
           }
         });
       }}

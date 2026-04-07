@@ -242,7 +242,6 @@ begin
 
   update app.okr_objectives o
   set
-    progress_percent = round((22 + abs(hashtext(o.id::text)) % 58)::numeric, 2),
     status = case
       when o.status not in ('active', 'draft') then o.status
       when abs(hashtext(o.id::text)) % 8 = 0 then 'at_risk'
@@ -252,42 +251,6 @@ begin
   where o.organization_id = v_org_id
     and o.cycle_instance_id = v_ci
     and not exists (select 1 from app.key_results k where k.okr_objective_id = o.id);
-
-  with calc as (
-    select
-      o.id as objective_id,
-      round(avg(
-        least(
-          100::numeric,
-          greatest(
-            0::numeric,
-            case coalesce(kr.metric_type, 'numeric')
-              when 'boolean' then case when coalesce(kr.current_value, 0) >= 1 then 100::numeric else 0::numeric end
-              when 'percent' then least(100::numeric, greatest(0::numeric, coalesce(kr.current_value, 0)))
-              else
-                case
-                  when kr.target_value is null or kr.start_value is null then 0::numeric
-                  when kr.target_value = kr.start_value then 100::numeric
-                  else
-                    (coalesce(kr.current_value, kr.start_value) - kr.start_value)
-                    / nullif(kr.target_value - kr.start_value, 0) * 100
-                end
-            end
-          )
-        )
-      ), 2) as pct
-    from app.key_results kr
-    join app.okr_objectives o on o.id = kr.okr_objective_id
-    where o.organization_id = v_org_id
-      and o.cycle_instance_id = v_ci
-    group by o.id
-  )
-  update app.okr_objectives o
-  set
-    progress_percent = calc.pct,
-    updated_at = now()
-  from calc
-  where o.id = calc.objective_id;
 
   insert into app.okr_updates (
     organization_id,

@@ -7,7 +7,8 @@ type LlmFeatureKey =
   | "challenge_recommendation"
   | "model_health_checks"
   | "objective_evaluation"
-  | "matrix_program_proposal";
+  | "matrix_program_proposal"
+  | "okr_contribution_assessment";
 
 export type AnalysisNetworkLlmPolicy = {
   llmEnabled: boolean;
@@ -68,6 +69,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     model_health_checks: readBoolean(featureFlagsRaw.model_health_checks, true),
     objective_evaluation: readBoolean(featureFlagsRaw.objective_evaluation, false),
     matrix_program_proposal: readBoolean(featureFlagsRaw.matrix_program_proposal, true),
+    okr_contribution_assessment: readBoolean(featureFlagsRaw.okr_contribution_assessment, false),
   };
 
   const maxOutputTokensByFeature: Record<LlmFeatureKey, number> = {
@@ -80,6 +82,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     model_health_checks: readNumber(outputByFeatureRaw.model_health_checks, 128, 64, 4096),
     objective_evaluation: readNumber(outputByFeatureRaw.objective_evaluation, 600, 64, 4096),
     matrix_program_proposal: readNumber(outputByFeatureRaw.matrix_program_proposal, 900, 64, 4096),
+    okr_contribution_assessment: readNumber(outputByFeatureRaw.okr_contribution_assessment, 520, 64, 4096),
   };
 
   return {

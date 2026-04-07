@@ -1,4 +1,5 @@
 import type { AnalysisEntryRecord, AnalysisLinkType } from "@/lib/analysis-network/types";
+import type { OkrContributionTier } from "@/lib/strategy-cycle/coverage-level";
 
 type QualityEntryInput = Pick<
   AnalysisEntryRecord,
@@ -97,6 +98,7 @@ const QUALITY_PROMPT_VERSION = "analysis-quality-v1";
 const CLUSTER_PROMPT_VERSION = "analysis-cluster-v1";
 const GAP_PROMPT_VERSION = "analysis-gap-v1";
 const GRAPH_LAYOUT_PROMPT_VERSION = "analysis-graph-layout-v1";
+const OKR_CONTRIBUTION_PROMPT_VERSION = "okr-contribution-v3";
 
 export const GEMINI_MODEL_QUALITY = process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro";
 export const GEMINI_MODEL_LINKS = process.env.ANALYSIS_LLM_MODEL_GEMINI_LINKS ?? "gemini-2.5-flash";
@@ -944,5 +946,175 @@ export async function invokeLlmForJson(
     usage: geminiRaw.usage,
     provider: "gemini",
     model: GEMINI_MODEL_ASSIST,
+  };
+}
+
+export type LlmOkrContributionAssessment = {
+  okrId: string;
+  initiativeContributions: Array<{ initiativeId: string; level: OkrContributionTier; reason: string }>;
+  strategyObjectiveContributions: Array<{ objectiveId: string; level: OkrContributionTier; reason: string }>;
+  provider: "gemini" | "groq";
+  model: string;
+  promptVersion: string;
+};
+
+function normalizeLlmContributionTier(raw: unknown): OkrContributionTier {
+  const v = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (
+    v === "insufficient" ||
+    v === "underdescribed" ||
+    v === "unzureichend" ||
+    v === "not_assessable" ||
+    v === "nicht_auswertbar" ||
+    v === "under_specified"
+  ) {
+    return "insufficient";
+  }
+  if (v === "weak" || v === "low") return "low";
+  if (v === "strong" || v === "high") return "high";
+  if (v === "medium") return "medium";
+  /** Unbekannt/leer: nicht als Einzahlungsstufe interpretierbar */
+  return "insufficient";
+}
+
+function parseOkrContributionItems(
+  rawList: unknown,
+  idKey: "initiative_id" | "objective_id",
+  allowed: Set<string>
+): Array<{ id: string; level: OkrContributionTier; reason: string }> {
+  if (!Array.isArray(rawList)) return [];
+  const out: Array<{ id: string; level: OkrContributionTier; reason: string }> = [];
+  const seen = new Set<string>();
+  for (const row of rawList) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    const id = String(o[idKey] ?? "").trim();
+    if (!id || !allowed.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const level = normalizeLlmContributionTier(o.level);
+    const reason = String(o.reason ?? "")
+      .trim()
+      .slice(0, 400);
+    out.push({ id, level, reason });
+  }
+  return out;
+}
+
+function parseOkrContributionJson(
+  text: string,
+  expectedOkrId: string,
+  initiativeIds: string[],
+  strategyObjectiveIds: string[]
+): Omit<LlmOkrContributionAssessment, "provider" | "model" | "promptVersion"> | null {
+  const json = parseGenericJson(text);
+  if (!json) return null;
+  const okrId = String(json.okr_id ?? "").trim();
+  if (okrId !== expectedOkrId) return null;
+  const initAllowed = new Set(initiativeIds);
+  const soAllowed = new Set(strategyObjectiveIds);
+  const initiativeContributions = parseOkrContributionItems(
+    json.initiative_contributions,
+    "initiative_id",
+    initAllowed
+  ).map((x) => ({
+    initiativeId: x.id,
+    level: x.level,
+    reason: x.reason,
+  }));
+  const strategyObjectiveContributions = parseOkrContributionItems(
+    json.strategy_objective_contributions,
+    "objective_id",
+    soAllowed
+  ).map((x) => ({
+    objectiveId: x.id,
+    level: x.level,
+    reason: x.reason,
+  }));
+
+  const initSeen = new Set(initiativeContributions.map((x) => x.initiativeId));
+  for (const iid of initiativeIds) {
+    if (!initSeen.has(iid)) {
+      initiativeContributions.push({
+        initiativeId: iid,
+        level: "insufficient",
+        reason:
+          "Kein gültiger Modell-Eintrag für diese Initiative — technisch als «unzureichend beschrieben» erfasst.",
+      });
+    }
+  }
+
+  const soSeen = new Set(strategyObjectiveContributions.map((x) => x.objectiveId));
+  for (const sid of strategyObjectiveIds) {
+    if (!soSeen.has(sid)) {
+      strategyObjectiveContributions.push({
+        objectiveId: sid,
+        level: "insufficient",
+        reason:
+          "Kein gültiger Modell-Eintrag für dieses Strategieziel — technisch als «unzureichend beschrieben» erfasst.",
+      });
+    }
+  }
+
+  return { okrId, initiativeContributions, strategyObjectiveContributions };
+}
+
+function buildOkrContributionPrompt(
+  contextJson: string,
+  initiativeIds: string[],
+  strategyObjectiveIds: string[]
+): string {
+  return `Du bist ein strategischer Analyst. Bewerte, wie stark das OKR (über Key Results) in die **konkret verknüpften** Initiativen einzahlt, und — zurückhaltend — den Beitrag zu den genannten Strategiezielen im Kontext der Stoßrichtung (keine parallele Zielhierarchie erfinden).
+
+Antworte ausschließlich mit einem JSON-Objekt (kein Markdown), exakt dieser Struktur:
+{
+  "okr_id": "<uuid>",
+  "initiative_contributions": [ { "initiative_id": "<uuid>", "level": "low"|"medium"|"high"|"insufficient", "reason": "<kurz, max 2 Sätze, nur Transparenz>" } ],
+  "strategy_objective_contributions": [ { "objective_id": "<uuid>", "level": "low"|"medium"|"high"|"insufficient", "reason": "<kurz>" } ]
+}
+
+Regeln:
+- level nur low, medium, high oder insufficient (Synonyme weak=low, strong=high; insufficient = fachlich keine sinnvolle Einzahlungsbewertung möglich — im Output exakt «insufficient» schreiben, keine Umlaute).
+- Für jede Initiative in dieser ID-Liste muss genau ein Eintrag existieren: ${JSON.stringify(initiativeIds)}
+- Für jedes Strategieziel in dieser ID-Liste genau ein Eintrag: ${JSON.stringify(strategyObjectiveIds)}
+- Wenn OKR-, KR- oder Initiativentexte **zu dünn, generisch oder nicht belegbar** sind, sodass eine Stärke der Einzahlung **nicht verantwortbar** beurteilt werden kann, wähle **insufficient** (nicht medium/high). low nur wenn Inhalt zwar schwach aber **beurteilbar** ist; medium/high nur bei erkennbarer, textlich begründbarer Einzahlung.
+- reason ist nur für Menschen lesbar; bei insufficient kurz sagen, was fehlt (z. B. fehlende Zieldefinition).
+
+Kontext (JSON):
+${contextJson}`;
+}
+
+export async function assessOkrContributionsWithLlm(input: {
+  contextJson: string;
+  okrObjectiveId: string;
+  initiativeIds: string[];
+  strategyObjectiveIds: string[];
+  maxOutputTokens?: number;
+}): Promise<LlmScoreResponse<LlmOkrContributionAssessment>> {
+  const prompt = buildOkrContributionPrompt(
+    input.contextJson,
+    input.initiativeIds,
+    input.strategyObjectiveIds
+  );
+  const invoked = await invokeLlmForJson(prompt, input.maxOutputTokens);
+  if (!invoked?.text) return { result: null, usage: invoked?.usage ?? null };
+  const parsed = parseOkrContributionJson(
+    invoked.text,
+    input.okrObjectiveId,
+    input.initiativeIds,
+    input.strategyObjectiveIds
+  );
+  if (!parsed) return { result: null, usage: invoked.usage };
+  const provider = invoked.provider === "gemini" ? ("gemini" as const) : ("groq" as const);
+  const model = invoked.model;
+  return {
+    result: {
+      ...parsed,
+      provider,
+      model,
+      promptVersion: OKR_CONTRIBUTION_PROMPT_VERSION,
+    },
+    usage: invoked.usage,
   };
 }

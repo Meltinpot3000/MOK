@@ -71,6 +71,7 @@ import {
 import { membershipHasExecutiveRole } from "@/lib/rbac/membership-executive";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { executeOkrContributionAssessmentJob } from "@/lib/okr/execute-okr-contribution-assessment";
 
 type WorkspaceContext = {
   organizationId: string;
@@ -236,7 +237,8 @@ type BackgroundJobType =
   | "objective_evaluation_backfill"
   | "link_draft_generation"
   | "cluster_recompute"
-  | "gaps_recompute";
+  | "gaps_recompute"
+  | "okr_contribution_assessment";
 type BackgroundJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 type AnalysisNetworkConfig = {
@@ -2953,6 +2955,17 @@ export async function processPendingBackgroundJobs(
           trigger,
           tab: String(payload.tab ?? "environment"),
         });
+      } else if (pending.job_type === "okr_contribution_assessment") {
+        const okrObjectiveId = String(payload.okr_objective_id ?? "").trim();
+        if (okrObjectiveId) {
+          await executeOkrContributionAssessmentJob({
+            supabase,
+            organizationId: pending.organization_id,
+            cycleInstanceId: pending.cycle_instance_id,
+            okrObjectiveId,
+            trigger,
+          });
+        }
       }
       await supabase
         .schema("app")

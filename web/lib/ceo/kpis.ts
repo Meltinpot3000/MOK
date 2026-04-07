@@ -7,7 +7,7 @@ export type KpiCard = {
 type BuildKpisInput = {
   objectives: Array<{ progress_percent: number; status: string }>;
   keyResults: Array<{ status: string }>;
-  functionDistribution: Record<string, number>;
+  okrObjectiveCount: number;
   trendDeltaPercent: number | null;
 };
 
@@ -20,7 +20,7 @@ function formatPercent(value: number): string {
 }
 
 export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
-  const { objectives, keyResults, functionDistribution, trendDeltaPercent } = input;
+  const { objectives, keyResults, okrObjectiveCount, trendDeltaPercent } = input;
   const objectiveCount = objectives.length;
 
   const totalProgress = objectives.reduce(
@@ -40,15 +40,6 @@ export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
   ).length;
   const atRiskKeyResults = keyResults.filter((keyResult) => keyResult.status === "at_risk").length;
   const atRiskTotal = atRiskObjectives + atRiskKeyResults;
-
-  const distributionText =
-    Object.keys(functionDistribution).length === 0
-      ? "Keine Funktionsziele"
-      : Object.entries(functionDistribution)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([name, count]) => `${name}: ${count}`)
-          .join(" | ");
 
   const trendText =
     trendDeltaPercent === null
@@ -72,9 +63,12 @@ export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
       hint: `${completedObjectives} von ${objectiveCount} Objectives abgeschlossen`,
     },
     {
-      label: "Verteilung Funktionen",
-      value: String(Object.keys(functionDistribution).length),
-      hint: distributionText,
+      label: "OKR-Ziele (Quartal)",
+      value: String(okrObjectiveCount),
+      hint:
+        okrObjectiveCount === 0
+          ? "Keine OKR-Objectives in diesem Zyklus"
+          : `${okrObjectiveCount} OKR-Objectives im Zyklus`,
     },
     {
       label: "Trend vs. vorheriger Zyklus",

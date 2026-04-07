@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOkrCycles, getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
+import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
 import { orderOkrCyclesByPickPreference, pickDefaultOkrCycle } from "@/lib/okr/pick-default-okr-cycle";
 import {
   resolveStrategicDirectionForInitiative,
@@ -121,12 +122,22 @@ export type OkrPlanningKeyResultRow = {
   warningNoInitiativeLink: boolean;
 };
 
+export type OkrContributionEdgePlanningRow = {
+  targetType: "initiative" | "strategy_objective";
+  targetId: string;
+  targetTitle: string;
+  llmLevel: "low" | "medium" | "high" | "insufficient" | null;
+  llmReason: string | null;
+  confirmedLevel: "low" | "medium" | "high" | "insufficient" | null;
+  valueSource: "none" | "llm_accepted" | "manual";
+  llmSuggestionDismissed: boolean;
+};
+
 export type OkrPlanningObjectiveRow = {
   id: string;
   title: string;
   description: string | null;
   status: string;
-  progressPercent: number;
   ownerMembershipId: string | null;
   ownerDisplayName: string | null;
   deputyMembershipId: string | null;
@@ -134,6 +145,8 @@ export type OkrPlanningObjectiveRow = {
   leadingStrategicDirectionId: string | null;
   leadingStrategicDirectionTitle: string | null;
   keyResults: OkrPlanningKeyResultRow[];
+  contributionEdges: OkrContributionEdgePlanningRow[];
+  linkedStrategyObjectives: Array<{ id: string; title: string }>;
 };
 
 export type OkrPlanningInitiativeRow = {
@@ -179,6 +192,8 @@ export type OkrPlanningWorkspaceData = {
   okrObjectives: OkrPlanningObjectiveRow[];
   /** Organisationsregel: kein separater KR-Owner in der Planung; wird an Objective-Owner gebunden. */
   okrKrOwnerMustMatchObjective: boolean;
+  /** Tenant-Flag: automatische LLM-Contribution-Bewertung für OKRs. */
+  okrContributionAssessmentEnabled: boolean;
 };
 
 export async function getOkrPlanningWorkspaceData(
@@ -229,6 +244,7 @@ export async function getOkrPlanningWorkspaceData(
     targetsResult,
     objectivesResult,
     orgSettingsResult,
+    brandingResult,
   ] = await Promise.all([
     supabase
       .schema("app")
@@ -268,7 +284,7 @@ export async function getOkrPlanningWorkspaceData(
           .schema("app")
           .from("okr_objectives")
           .select(
-            "id, title, description, status, progress_percent, okr_cycle_id, owner_membership_id, deputy_membership_id"
+            "id, title, description, status, okr_cycle_id, owner_membership_id, deputy_membership_id"
           )
           .eq("organization_id", organizationId)
           .in("okr_cycle_id", okrCycleIds)
@@ -280,6 +296,12 @@ export async function getOkrPlanningWorkspaceData(
       .select("okr_kr_owner_must_match_objective")
       .eq("id", organizationId)
       .maybeSingle(),
+    supabase
+      .schema("app")
+      .from("tenant_branding")
+      .select("branding_config")
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
   ]);
 
   const orgSettingsRow = orgSettingsResult.data as
@@ -287,6 +309,8 @@ export async function getOkrPlanningWorkspaceData(
     | null
     | undefined;
   const okrKrOwnerMustMatchObjective = Boolean(orgSettingsRow?.okr_kr_owner_must_match_objective);
+  const llmPolicy = readAnalysisNetworkLlmPolicy(brandingResult.data?.branding_config ?? null);
+  const okrContributionAssessmentEnabled = isLlmFeatureEnabled(llmPolicy, "okr_contribution_assessment");
 
   const directions = (directionsResult.data ?? []) as Array<{ id: string; title: string }>;
   const directionTitleById = new Map(directions.map((d) => [d.id, d.title]));
@@ -334,7 +358,6 @@ export async function getOkrPlanningWorkspaceData(
     title: string;
     description: string | null;
     status: string;
-    progress_percent: number | null;
     okr_cycle_id: string | null;
     owner_membership_id: string | null;
     deputy_membership_id: string | null;
@@ -359,13 +382,15 @@ export async function getOkrPlanningWorkspaceData(
   const objectiveIds = objectives.map((o) => o.id);
 
   const leadingDirectionByObjectiveId = new Map<string, string>();
+  let okrStrategyJunctionRows: Array<{ okr_objective_id: string; strategy_objective_id: string }> = [];
   if (objectiveIds.length > 0) {
     const { data: junctionRows } = await supabase
       .schema("app")
       .from("okr_objective_strategy_objectives")
       .select("okr_objective_id, strategy_objective_id")
       .in("okr_objective_id", objectiveIds);
-    const strategyIds = [...new Set((junctionRows ?? []).map((j) => j.strategy_objective_id))];
+    okrStrategyJunctionRows = (junctionRows ?? []) as typeof okrStrategyJunctionRows;
+    const strategyIds = [...new Set(okrStrategyJunctionRows.map((j) => j.strategy_objective_id))];
     let directionLinks: Array<{ strategy_objective_id: string; strategic_direction_id: string }> = [];
     if (strategyIds.length > 0) {
       const dRes = await supabase
@@ -383,12 +408,37 @@ export async function getOkrPlanningWorkspaceData(
         directionByStrategy.set(l.strategy_objective_id, l.strategic_direction_id);
       }
     }
-    for (const j of junctionRows ?? []) {
+    for (const j of okrStrategyJunctionRows) {
       const dir = directionByStrategy.get(j.strategy_objective_id);
       if (dir && !leadingDirectionByObjectiveId.has(j.okr_objective_id)) {
         leadingDirectionByObjectiveId.set(j.okr_objective_id, dir);
       }
     }
+  }
+
+  const strategyObjectivesByOkrId = new Map<string, Array<{ id: string; title: string }>>();
+  const stratIdsAll = [...new Set(okrStrategyJunctionRows.map((j) => j.strategy_objective_id))];
+  const stratTitleById = new Map<string, string>();
+  if (stratIdsAll.length > 0) {
+    const { data: stratRows } = await supabase
+      .schema("app")
+      .from("strategy_objectives")
+      .select("id, title")
+      .eq("organization_id", organizationId)
+      .in("id", stratIdsAll);
+    for (const r of stratRows ?? []) {
+      stratTitleById.set(r.id as string, r.title as string);
+    }
+  }
+  for (const oid of objectiveIds) {
+    const rows = okrStrategyJunctionRows.filter((j) => j.okr_objective_id === oid);
+    strategyObjectivesByOkrId.set(
+      oid,
+      rows.map((j) => ({
+        id: j.strategy_objective_id,
+        title: stratTitleById.get(j.strategy_objective_id) ?? j.strategy_objective_id,
+      }))
+    );
   }
 
   let keyResults: Array<{
@@ -480,7 +530,7 @@ export async function getOkrPlanningWorkspaceData(
     keyResultsByObjective.set(kr.okr_objective_id, list);
   }
 
-  const okrObjectives: OkrPlanningObjectiveRow[] = objectives.map((obj) => {
+  const okrObjectivesBase: OkrPlanningObjectiveRow[] = objectives.map((obj) => {
     const dirId = leadingDirectionByObjectiveId.get(obj.id) ?? null;
     const krs = (keyResultsByObjective.get(obj.id) ?? []).map((kr) => {
       const iids = krToInitiatives.get(kr.id) ?? [];
@@ -513,7 +563,6 @@ export async function getOkrPlanningWorkspaceData(
       title: obj.title,
       description: obj.description,
       status: obj.status,
-      progressPercent: Number(obj.progress_percent ?? 0),
       ownerMembershipId: obj.owner_membership_id,
       ownerDisplayName: obj.owner_membership_id
         ? ownerByMembership.get(obj.owner_membership_id) ?? null
@@ -523,8 +572,73 @@ export async function getOkrPlanningWorkspaceData(
       leadingStrategicDirectionId: dirId,
       leadingStrategicDirectionTitle: dirId ? directionTitleById.get(dirId) ?? null : null,
       keyResults: krs,
+      contributionEdges: [],
+      linkedStrategyObjectives: strategyObjectivesByOkrId.get(obj.id) ?? [],
     };
   });
+
+  let okrObjectives = okrObjectivesBase;
+  if (objectiveIds.length > 0) {
+    const { data: edgeRows } = await supabase
+      .schema("app")
+      .from("okr_contribution_edges")
+      .select(
+        "okr_objective_id, target_type, target_id, llm_level, llm_reason, confirmed_level, value_source, llm_suggestion_dismissed"
+      )
+      .eq("organization_id", organizationId)
+      .in("okr_objective_id", objectiveIds);
+
+    const soIds = [
+      ...new Set(
+        (edgeRows ?? [])
+          .filter((e) => e.target_type === "strategy_objective")
+          .map((e) => e.target_id as string)
+      ),
+    ];
+    const soTitleById = new Map<string, string>();
+    if (soIds.length > 0) {
+      const { data: soRows } = await supabase
+        .schema("app")
+        .from("strategy_objectives")
+        .select("id, title")
+        .eq("organization_id", organizationId)
+        .in("id", soIds);
+      for (const r of soRows ?? []) {
+        soTitleById.set(r.id, r.title);
+      }
+    }
+
+    const edgesByOkr = new Map<string, OkrContributionEdgePlanningRow[]>();
+    for (const e of edgeRows ?? []) {
+      const oid = e.okr_objective_id as string;
+      const tt = e.target_type as string;
+      if (tt !== "initiative" && tt !== "strategy_objective") continue;
+      const targetType = tt as OkrContributionEdgePlanningRow["targetType"];
+      const targetId = e.target_id as string;
+      const targetTitle =
+        targetType === "initiative"
+          ? initiativeTitleById.get(targetId) ?? targetId
+          : soTitleById.get(targetId) ?? targetId;
+      const row: OkrContributionEdgePlanningRow = {
+        targetType,
+        targetId,
+        targetTitle,
+        llmLevel: (e.llm_level as OkrContributionEdgePlanningRow["llmLevel"]) ?? null,
+        llmReason: (e.llm_reason as string | null) ?? null,
+        confirmedLevel: (e.confirmed_level as OkrContributionEdgePlanningRow["confirmedLevel"]) ?? null,
+        valueSource: (e.value_source as OkrContributionEdgePlanningRow["valueSource"]) ?? "none",
+        llmSuggestionDismissed: Boolean(e.llm_suggestion_dismissed),
+      };
+      const list = edgesByOkr.get(oid) ?? [];
+      list.push(row);
+      edgesByOkr.set(oid, list);
+    }
+
+    okrObjectives = okrObjectivesBase.map((o) => ({
+      ...o,
+      contributionEdges: edgesByOkr.get(o.id) ?? [],
+    }));
+  }
 
   const responsibles: OkrResponsibleOption[] = membershipOwnerRows.map((row) => ({
     membershipId: row.id,
@@ -541,5 +655,6 @@ export async function getOkrPlanningWorkspaceData(
     initiatives,
     okrObjectives,
     okrKrOwnerMustMatchObjective,
+    okrContributionAssessmentEnabled,
   };
 }

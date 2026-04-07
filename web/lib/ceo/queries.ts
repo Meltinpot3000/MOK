@@ -15,20 +15,6 @@ export type PlanningCycle = {
   legacy_planning_cycle_id?: string | null;
 };
 
-export type StrategicGoal = {
-  id: string;
-  title: string;
-  status: string;
-  priority: number | null;
-};
-
-export type FunctionalStrategy = {
-  id: string;
-  title: string;
-  function_name: string;
-  status: string;
-};
-
 export type Objective = {
   id: string;
   title: string;
@@ -55,8 +41,6 @@ export type CeoDashboardData = {
   cycles: PlanningCycle[];
   selectedCycle: PlanningCycle | null;
   previousCycle: PlanningCycle | null;
-  strategicGoals: StrategicGoal[];
-  functionalStrategies: FunctionalStrategy[];
   objectives: Objective[];
   keyResults: KeyResult[];
   kpis: KpiCard[];
@@ -350,14 +334,12 @@ export async function getCeoDashboardData(
       cycles,
       selectedCycle: null,
       previousCycle: null,
-      strategicGoals: [],
-      functionalStrategies: [],
       objectives: [],
       keyResults: [],
       kpis: buildCeoKpis({
         objectives: [],
         keyResults: [],
-        functionDistribution: {},
+        okrObjectiveCount: 0,
         trendDeltaPercent: null,
       }),
     };
@@ -366,21 +348,7 @@ export async function getCeoDashboardData(
   const selectedIndex = cycles.findIndex((cycle) => cycle.id === selectedCycle.id);
   const previousCycle = selectedIndex >= 0 ? cycles[selectedIndex + 1] ?? null : null;
 
-  const [strategicGoalsResult, functionalStrategiesResult, objectivesResult] = await Promise.all([
-    supabase
-      .schema("app")
-      .from("strategic_goals")
-      .select("id, title, status, priority")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", selectedCycle.id)
-      .order("priority", { ascending: true }),
-    supabase
-      .schema("app")
-      .from("functional_strategies")
-      .select("id, title, function_name, status")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", selectedCycle.id)
-      .order("function_name", { ascending: true }),
+  const [objectivesResult, okrListResult] = await Promise.all([
     supabase
       .schema("app")
       .from("strategy_objectives")
@@ -388,16 +356,18 @@ export async function getCeoDashboardData(
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", selectedCycle.id)
       .order("created_at", { ascending: false }),
+    supabase
+      .schema("app")
+      .from("okr_objectives")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", selectedCycle.id),
   ]);
 
   const objectives = (objectivesResult.data ?? []) as Objective[];
-  const { data: okrRowsForKr } = await supabase
-    .schema("app")
-    .from("okr_objectives")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("cycle_instance_id", selectedCycle.id);
-  const okrIdsForKeyResults = (okrRowsForKr ?? []).map((r) => r.id);
+  const okrRowsForKr = okrListResult.data ?? [];
+  const okrObjectiveCount = okrRowsForKr.length;
+  const okrIdsForKeyResults = okrRowsForKr.map((r) => r.id);
 
   const { data: keyResultsData } =
     okrIdsForKeyResults.length > 0
@@ -446,19 +416,10 @@ export async function getCeoDashboardData(
     trendDeltaPercent = currentAvg - prevAvg;
   }
 
-  const functionDistribution = (functionalStrategiesResult.data ?? []).reduce<Record<string, number>>(
-    (acc, row) => {
-      const functionName = row.function_name || "Unbekannt";
-      acc[functionName] = (acc[functionName] ?? 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
   const kpis = buildCeoKpis({
     objectives,
     keyResults,
-    functionDistribution,
+    okrObjectiveCount,
     trendDeltaPercent,
   });
 
@@ -466,8 +427,6 @@ export async function getCeoDashboardData(
     cycles,
     selectedCycle,
     previousCycle,
-    strategicGoals: (strategicGoalsResult.data ?? []) as StrategicGoal[],
-    functionalStrategies: (functionalStrategiesResult.data ?? []) as FunctionalStrategy[],
     objectives,
     keyResults,
     kpis,

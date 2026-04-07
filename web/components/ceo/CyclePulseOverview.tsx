@@ -4,6 +4,8 @@ import { linearCycleProgressPercent } from "@/lib/ceo/planning-cycle-time-progre
 type CyclePulseOverviewProps = {
   cycles: PlanningCycle[];
   nowIso: string;
+  /** Volle Höhe in einer Flex-Zeile (z. B. neben Leitkennzahlen), oben/unten bündig mit dem Partner-Panel. */
+  fillHeight?: boolean;
 };
 
 type LevelSnapshot = {
@@ -64,7 +66,7 @@ function buildRingStyle(progressPercent: number, colorVar: string) {
   };
 }
 
-export function CyclePulseOverview({ cycles, nowIso }: CyclePulseOverviewProps) {
+export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: CyclePulseOverviewProps) {
   const nowMs = toTime(nowIso);
   const activeSchemeCycles = cycles.filter((cycle) => cycle.is_active_scheme);
   const scope = activeSchemeCycles.length > 0 ? activeSchemeCycles : cycles;
@@ -112,24 +114,24 @@ export function CyclePulseOverview({ cycles, nowIso }: CyclePulseOverviewProps) 
   const okrActiveStart = Math.max(0, activeOkrSegmentIndex) * okrSegmentDeg;
   const okrActiveEnd = okrActiveStart + okrSegmentDeg;
 
-  return (
-    <section className="brand-card overflow-hidden p-6">
-      <div
-        className="rounded-xl p-5 text-white"
-        style={{
-          backgroundImage:
-            "linear-gradient(90deg, var(--brand-accent) 0%, color-mix(in srgb, var(--brand-accent) 72%, white) 100%)",
-        }}
-      >
-        <p className="text-xs font-semibold uppercase tracking-wide text-white/80">Cycle Map</p>
-        <h2 className="mt-2 text-xl font-semibold">Zyklusdarstellung ueber alle Ebenen</h2>
-        <p className="mt-1 text-sm text-white/80">
-          Schema: {activeSchemeName} | Stand: {formatDate(nowIso)}
-        </p>
-      </div>
+  const header = (
+    <div
+      className="shrink-0 rounded-xl p-5 text-white"
+      style={{
+        backgroundImage:
+          "linear-gradient(90deg, var(--brand-accent) 0%, color-mix(in srgb, var(--brand-accent) 72%, white) 100%)",
+      }}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-white/80">Cycle Map</p>
+      <h2 className="mt-2 text-xl font-semibold">Zyklusdarstellung ueber alle Ebenen</h2>
+      <p className="mt-1 text-sm text-white/80">
+        Schema: {activeSchemeName} | Stand: {formatDate(nowIso)}
+      </p>
+    </div>
+  );
 
-      <div className="mt-6 brand-surface rounded-xl p-4">
-        <div className="mx-auto flex max-w-[980px] items-center justify-center py-6">
+  const diagram = (
+    <div className="mx-auto flex max-w-[980px] items-center justify-center py-6">
           <div
             className="relative z-10 h-[350px] w-[350px] rounded-full p-[14px] shadow-xl"
             style={buildRingStyle(levels[0].progressPercent, "var(--brand-primary)")}
@@ -190,7 +192,23 @@ export function CyclePulseOverview({ cycles, nowIso }: CyclePulseOverviewProps) 
             </div>
           </div>
         </div>
-      </div>
+  );
+
+  if (fillHeight) {
+    return (
+      <section className="brand-card flex h-full min-h-0 flex-col overflow-hidden p-6">
+        {header}
+        <div className="mt-6 flex min-h-0 flex-1 flex-col brand-surface rounded-xl p-4">
+          <div className="flex min-h-0 flex-1 items-center justify-center py-6">{diagram}</div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="brand-card overflow-hidden p-6">
+      {header}
+      <div className="mt-6 brand-surface rounded-xl p-4">{diagram}</div>
     </section>
   );
 }

@@ -83,6 +83,7 @@ export function CycleSidebar({
     (item) =>
       item.section === "phase1" &&
       permissions[item.id].read &&
+      item.id !== "key-figures" &&
       item.id !== "strategic-directions" &&
       item.id !== "initiatives" &&
       item.id !== "annual-targets"
