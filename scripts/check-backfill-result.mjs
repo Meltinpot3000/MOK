@@ -51,7 +51,7 @@ const objectives = await client.query(`
          ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score,
          ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification,
          ai_evaluated_at
-  from app.objectives 
+  from app.strategy_objectives 
   where ai_evaluation_status is not null and ai_evaluation_status != 'not_run'
   order by ai_evaluated_at desc nulls last
   limit 15

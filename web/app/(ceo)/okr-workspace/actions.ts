@@ -131,17 +131,17 @@ async function assertOkrCycle(
   return scope.includes(oc.cycle_instance_id);
 }
 
-/** `YYYY-MM-DD` für key_results.due_date — Ende des am Objective hängenden OKR-Zyklus */
+/** `YYYY-MM-DD` für key_results.due_date — Ende des am OKR-Objective hängenden OKR-Zyklus */
 async function keyResultDueDateFromOkrCycleEnd(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   organizationId: string,
-  objectiveId: string
+  okrObjectiveId: string
 ): Promise<string | null> {
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("okr_cycle_id, cycle_instance_id")
-    .eq("id", objectiveId)
+    .eq("id", okrObjectiveId)
     .eq("organization_id", organizationId)
     .maybeSingle();
 
@@ -164,18 +164,25 @@ async function replaceLeadingStrategicDirectionLink(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   organizationId: string;
   cycleInstanceId: string;
-  objectiveId: string;
+  strategyObjectiveId: string;
   strategicDirectionId: string;
   membershipId: string;
 }) {
-  const { supabase, organizationId, cycleInstanceId, objectiveId, strategicDirectionId, membershipId } = params;
+  const {
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    strategyObjectiveId,
+    strategicDirectionId,
+    membershipId,
+  } = params;
   const { error: delErr } = await supabase
     .schema("app")
     .from("strategic_direction_objective_links")
     .delete()
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
-    .eq("objective_id", objectiveId);
+    .eq("strategy_objective_id", strategyObjectiveId);
   if (delErr) return delErr.message;
 
   const { error: insErr } = await supabase
@@ -184,7 +191,7 @@ async function replaceLeadingStrategicDirectionLink(params: {
     .insert({
       organization_id: organizationId,
       cycle_instance_id: cycleInstanceId,
-      objective_id: objectiveId,
+      strategy_objective_id: strategyObjectiveId,
       strategic_direction_id: strategicDirectionId,
       created_by_membership_id: membershipId,
       contribution_level: "medium",
@@ -277,9 +284,67 @@ export async function createOkrObjectiveAction(input: {
     return createDenied;
   }
 
+  const { data: strategyRow, error: strategyErr } = await supabase
+    .schema("app")
+    .from("strategy_objectives")
+    .insert({
+      organization_id: auth.context.organizationId,
+      cycle_instance_id: input.cycleInstanceId,
+      title,
+      description,
+      status: "draft",
+      importance_score: 3,
+      owner_membership_id: ownerId,
+      created_by_membership_id: auth.context.membershipId,
+      created_by_source: "user",
+    })
+    .select("id")
+    .single();
+
+  if (strategyErr || !strategyRow?.id) {
+    logOkrSupabaseDiag(
+      "createOkrObjectiveAction.strategy_objectives_insert",
+      strategyErr,
+      {
+        organizationId: auth.context.organizationId,
+        membershipId: auth.context.membershipId,
+        ownerMembershipId: ownerId,
+        okrCycleId: input.okrCycleId,
+        cycleInstanceId: input.cycleInstanceId,
+      },
+      { always: true }
+    );
+    return { error: strategyErr?.message ?? "Strategie-Ziel konnte nicht angelegt werden." };
+  }
+
+  const strategyObjectiveId = strategyRow.id;
+
+  const linkErr = await replaceLeadingStrategicDirectionLink({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    strategyObjectiveId,
+    strategicDirectionId: input.strategicDirectionId,
+    membershipId: auth.context.membershipId,
+  });
+  if (linkErr) {
+    logOkrSupabaseDiag(
+      "createOkrObjectiveAction.strategic_direction_link",
+      null,
+      {
+        organizationId: auth.context.organizationId,
+        strategyObjectiveId,
+        message: linkErr,
+      },
+      { always: true }
+    );
+    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
+    return { error: linkErr };
+  }
+
   const { data: inserted, error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .insert({
       organization_id: auth.context.organizationId,
       cycle_instance_id: input.cycleInstanceId,
@@ -297,7 +362,7 @@ export async function createOkrObjectiveAction(input: {
 
   if (error || !inserted?.id) {
     logOkrSupabaseDiag(
-      "createOkrObjectiveAction.objectives_insert",
+      "createOkrObjectiveAction.okr_objectives_insert",
       error,
       {
         organizationId: auth.context.organizationId,
@@ -308,30 +373,24 @@ export async function createOkrObjectiveAction(input: {
       },
       { always: true }
     );
-    return { error: error?.message ?? "Objective konnte nicht angelegt werden." };
+    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
+    return { error: error?.message ?? "OKR-Objective konnte nicht angelegt werden." };
   }
 
-  const linkErr = await replaceLeadingStrategicDirectionLink({
-    supabase,
-    organizationId: auth.context.organizationId,
-    cycleInstanceId: input.cycleInstanceId,
-    objectiveId: inserted.id,
-    strategicDirectionId: input.strategicDirectionId,
-    membershipId: auth.context.membershipId,
+  const { error: junctionErr } = await supabase.schema("app").from("okr_objective_strategy_objectives").insert({
+    okr_objective_id: inserted.id,
+    strategy_objective_id: strategyObjectiveId,
   });
-  if (linkErr) {
-    logOkrSupabaseDiag(
-      "createOkrObjectiveAction.strategic_direction_link",
-      null,
-      {
-        organizationId: auth.context.organizationId,
-        objectiveId: inserted.id,
-        message: linkErr,
-      },
-      { always: true }
-    );
-    await supabase.schema("app").from("objectives").delete().eq("id", inserted.id);
-    return { error: linkErr };
+
+  if (junctionErr) {
+    logOkrSupabaseDiag("createOkrObjectiveAction.okr_strategy_junction", junctionErr, {
+      organizationId: auth.context.organizationId,
+      okrObjectiveId: inserted.id,
+      strategyObjectiveId,
+    }, { always: true });
+    await supabase.schema("app").from("okr_objectives").delete().eq("id", inserted.id);
+    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
+    return { error: junctionErr.message };
   }
 
   revalidateOkrPaths();
@@ -368,7 +427,7 @@ export async function updateOkrObjectiveAction(input: {
 
   const { data: existingObj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, okr_cycle_id, owner_membership_id, deputy_membership_id, status")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
@@ -450,20 +509,40 @@ export async function updateOkrObjectiveAction(input: {
 
   const { error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .update(patch)
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
-    .eq("cycle_instance_id", input.cycleInstanceId)
-    .not("okr_cycle_id", "is", null);
+    .eq("cycle_instance_id", input.cycleInstanceId);
 
   if (error) return { error: error.message };
+
+  const { data: junctionRows } = await supabase
+    .schema("app")
+    .from("okr_objective_strategy_objectives")
+    .select("strategy_objective_id")
+    .eq("okr_objective_id", input.objectiveId);
+  const strategyObjectiveId = junctionRows?.[0]?.strategy_objective_id;
+  if (!strategyObjectiveId) {
+    return { error: "OKR-Objective hat keine Verknüpfung zu einem Strategie-Ziel." };
+  }
+
+  const stratPatch: Record<string, unknown> = { title, description };
+  if (ownerId !== undefined) stratPatch.owner_membership_id = ownerId;
+  if (deputyId !== undefined) stratPatch.deputy_membership_id = deputyId;
+  const { error: stratUpdErr } = await supabase
+    .schema("app")
+    .from("strategy_objectives")
+    .update(stratPatch)
+    .eq("id", strategyObjectiveId)
+    .eq("organization_id", auth.context.organizationId);
+  if (stratUpdErr) return { error: stratUpdErr.message };
 
   const linkErr = await replaceLeadingStrategicDirectionLink({
     supabase,
     organizationId: auth.context.organizationId,
     cycleInstanceId: input.cycleInstanceId,
-    objectiveId: input.objectiveId,
+    strategyObjectiveId,
     strategicDirectionId: input.strategicDirectionId,
     membershipId: auth.context.membershipId,
   });
@@ -477,7 +556,7 @@ export async function updateOkrObjectiveAction(input: {
       .schema("app")
       .from("key_results")
       .update({ owner_membership_id: resolvedObjectiveOwner })
-      .eq("objective_id", input.objectiveId)
+      .eq("okr_objective_id", input.objectiveId)
       .eq("organization_id", auth.context.organizationId);
     if (cascadeErr) return { error: cascadeErr.message };
   }
@@ -493,12 +572,11 @@ export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string;
   const supabase = await createSupabaseServerClient();
   const { data: objMeta } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id, status")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
     .eq("cycle_instance_id", input.cycleInstanceId)
-    .not("okr_cycle_id", "is", null)
     .maybeSingle();
 
   if (!objMeta) {
@@ -523,16 +601,35 @@ export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string;
     return objectiveWriteDeniedError();
   }
 
+  const { data: linkedStrategy } = await supabase
+    .schema("app")
+    .from("okr_objective_strategy_objectives")
+    .select("strategy_objective_id")
+    .eq("okr_objective_id", input.objectiveId);
+
   const { error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .delete()
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
-    .eq("cycle_instance_id", input.cycleInstanceId)
-    .not("okr_cycle_id", "is", null);
+    .eq("cycle_instance_id", input.cycleInstanceId);
 
   if (error) return { error: error.message };
+
+  const strategyIds = linkedStrategy?.map((r) => r.strategy_objective_id) ?? [];
+  for (const sid of strategyIds) {
+    const { count, error: cntErr } = await supabase
+      .schema("app")
+      .from("okr_objective_strategy_objectives")
+      .select("*", { count: "exact", head: true })
+      .eq("strategy_objective_id", sid);
+    if (cntErr) continue;
+    if ((count ?? 0) === 0) {
+      await supabase.schema("app").from("strategy_objectives").delete().eq("id", sid);
+    }
+  }
+
   revalidateOkrPaths();
   return {};
 }
@@ -558,7 +655,7 @@ export async function createKeyResultAction(input: {
   const supabase = await createSupabaseServerClient();
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, okr_cycle_id, owner_membership_id, deputy_membership_id, status")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)
@@ -627,7 +724,7 @@ export async function createKeyResultAction(input: {
     .from("key_results")
     .insert({
       organization_id: auth.context.organizationId,
-      objective_id: input.objectiveId,
+      okr_objective_id: input.objectiveId,
       title,
       metric_type: input.metricType?.trim() || "boolean",
       start_value: input.startValue ?? null,
@@ -670,18 +767,18 @@ export async function updateKeyResultAction(input: {
   const { data: krContext } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id, owner_membership_id, deputy_membership_id")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
     .eq("id", input.keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
 
-  if (!krContext?.objective_id) return { error: "Key Result nicht gefunden." };
+  if (!krContext?.okr_objective_id) return { error: "Key Result nicht gefunden." };
 
   const { data: objOwnRow } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id, status")
-    .eq("id", krContext.objective_id)
+    .eq("id", krContext.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
   if (!objOwnRow?.id) return { error: "Objective nicht gefunden." };
@@ -718,7 +815,7 @@ export async function updateKeyResultAction(input: {
   const dueDate = await keyResultDueDateFromOkrCycleEnd(
     supabase,
     auth.context.organizationId,
-    krContext.objective_id
+    krContext.okr_objective_id
   );
 
   const { okrKrOwnerMustMatchObjective } = await getOrgOkrSettings(auth.context.organizationId);
@@ -815,17 +912,17 @@ export async function deleteKeyResultAction(input: { keyResultId: string }) {
   const { data: krRow } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id, owner_membership_id, deputy_membership_id")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
     .eq("id", input.keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
-  if (!krRow?.objective_id) return { error: "Key Result nicht gefunden." };
+  if (!krRow?.okr_objective_id) return { error: "Key Result nicht gefunden." };
 
   const { data: objRow } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id, status")
-    .eq("id", krRow.objective_id)
+    .eq("id", krRow.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
   if (!objRow?.id) return { error: "Objective nicht gefunden." };
@@ -873,7 +970,7 @@ export async function setKeyResultInitiativeLinksAction(input: {
   const { data: kr } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id, owner_membership_id, deputy_membership_id")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
     .eq("id", input.keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
@@ -882,9 +979,9 @@ export async function setKeyResultInitiativeLinksAction(input: {
 
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id")
-    .eq("id", kr.objective_id)
+    .eq("id", kr.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
 
@@ -962,7 +1059,7 @@ async function assertKeyResultAndInitiativeInCycleForLink(params: {
   const { data: kr } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id")
+    .select("id, okr_objective_id")
     .eq("id", keyResultId)
     .eq("organization_id", organizationId)
     .maybeSingle();
@@ -971,9 +1068,9 @@ async function assertKeyResultAndInitiativeInCycleForLink(params: {
 
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("okr_cycle_id, cycle_instance_id")
-    .eq("id", kr.objective_id)
+    .eq("id", kr.okr_objective_id)
     .eq("organization_id", organizationId)
     .maybeSingle();
 
@@ -1021,16 +1118,16 @@ export async function linkKeyResultInitiativeAction(input: {
   const { data: krPerm } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, owner_membership_id, deputy_membership_id, objective_id")
+    .select("id, owner_membership_id, deputy_membership_id, okr_objective_id")
     .eq("id", keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
-  const { data: objPerm } = krPerm?.objective_id
+  const { data: objPerm } = krPerm?.okr_objective_id
     ? await supabase
         .schema("app")
-        .from("objectives")
+        .from("okr_objectives")
         .select("id, owner_membership_id, deputy_membership_id, status")
-        .eq("id", krPerm.objective_id)
+        .eq("id", krPerm.okr_objective_id)
         .eq("organization_id", auth.context.organizationId)
         .maybeSingle()
     : { data: null };
@@ -1101,16 +1198,16 @@ export async function unlinkKeyResultInitiativeAction(input: {
   const { data: krPerm } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, owner_membership_id, deputy_membership_id, objective_id")
+    .select("id, owner_membership_id, deputy_membership_id, okr_objective_id")
     .eq("id", keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
-  const { data: objPerm } = krPerm?.objective_id
+  const { data: objPerm } = krPerm?.okr_objective_id
     ? await supabase
         .schema("app")
-        .from("objectives")
+        .from("okr_objectives")
         .select("id, owner_membership_id, deputy_membership_id, status")
-        .eq("id", krPerm.objective_id)
+        .eq("id", krPerm.okr_objective_id)
         .eq("organization_id", auth.context.organizationId)
         .maybeSingle()
     : { data: null };
@@ -1180,12 +1277,11 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: existingObjective } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id, status")
     .eq("id", objectiveId)
     .eq("organization_id", auth.context.organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
-    .not("okr_cycle_id", "is", null)
     .maybeSingle();
 
   if (!existingObjective?.id) {
@@ -1229,7 +1325,7 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
 
   const { data: objectiveAfter } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id")
     .eq("id", objectiveId)
     .eq("organization_id", auth.context.organizationId)
@@ -1245,7 +1341,7 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
   const { data: krRows } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id, owner_membership_id, deputy_membership_id")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
     .eq("organization_id", auth.context.organizationId)
     .in("id", krIds);
 
@@ -1257,7 +1353,7 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
 
   for (const krId of krIds) {
     const row = (krRows ?? []).find((r) => r.id === krId);
-    if (!row || row.objective_id !== objectiveId) {
+    if (!row || row.okr_objective_id !== objectiveId) {
       return { error: "Ungültiges Key Result für dieses Objective." };
     }
 
@@ -1347,7 +1443,7 @@ export async function createOkrCheckInAction(input: {
   const { data: kr } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id, owner_membership_id, deputy_membership_id")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
     .eq("id", input.keyResultId)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
@@ -1356,9 +1452,9 @@ export async function createOkrCheckInAction(input: {
 
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id, status")
-    .eq("id", kr.objective_id)
+    .eq("id", kr.okr_objective_id)
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
 
@@ -1436,7 +1532,7 @@ export async function shiftOkrObjectiveToNextCycleAction(input: {
 
   const { data: obj } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id, status, okr_cycle_id")
     .eq("id", input.objectiveId)
     .eq("organization_id", auth.context.organizationId)

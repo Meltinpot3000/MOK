@@ -27,6 +27,43 @@ function isMissingReviewRollupColumnsError(message: string): boolean {
   );
 }
 
+/** DB ohne Migration 0114: keine Tabelle app.strategy_objectives im PostgREST-Cache / Schema. */
+function isMissingStrategyObjectivesTable(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("strategy_objectives") &&
+    (m.includes("schema cache") || m.includes("does not exist") || m.includes("could not find"))
+  );
+}
+
+/** DB ohne Umbenennung 0114: strategic_direction_objective_links.objective_id statt strategy_objective_id. */
+function isMissingStrategyObjectiveIdColumn(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.includes("strategy_objective_id") && message.includes("does not exist");
+}
+
+function shouldUseLegacyReviewCycleObjectiveModel(
+  objErr: { message?: string } | null,
+  linkErr: { message?: string } | null
+): boolean {
+  return isMissingStrategyObjectivesTable(objErr?.message) || isMissingStrategyObjectiveIdColumn(linkErr?.message);
+}
+
+function isMissingOkrObjectivesTable(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("okr_objectives") &&
+    (m.includes("schema cache") || m.includes("does not exist") || m.includes("could not find"))
+  );
+}
+
+function isMissingKeyResultsOkrObjectiveIdColumn(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.includes("okr_objective_id") && message.includes("does not exist");
+}
+
 async function fetchInitiativesForReviewCycle(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   organizationId: string,
@@ -304,8 +341,6 @@ export async function getReviewCycleData(
     initiativesResult,
     linksResult,
     targetsResult,
-    objectivesResult,
-    dirObjLinksResult,
   ] = await Promise.all([
     supabase
       .schema("app")
@@ -340,20 +375,48 @@ export async function getReviewCycleData(
       .select("id, strategic_direction_id, title, progress_percent")
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIds),
-    supabase
+  ]);
+
+  let objectivesResult = await supabase
+    .schema("app")
+    .from("strategy_objectives")
+    .select("id, title")
+    .eq("organization_id", organizationId)
+    .in("cycle_instance_id", cycleIds);
+
+  let dirObjLinksResult = await supabase
+    .schema("app")
+    .from("strategic_direction_objective_links")
+    .select("strategic_direction_id, strategy_objective_id")
+    .eq("organization_id", organizationId);
+
+  if (shouldUseLegacyReviewCycleObjectiveModel(objectivesResult.error, dirObjLinksResult.error)) {
+    objectivesResult = await supabase
       .schema("app")
       .from("objectives")
       .select("id, title")
       .eq("organization_id", organizationId)
-      .in("cycle_instance_id", cycleIds),
-    supabase
+      .in("cycle_instance_id", cycleIds);
+    dirObjLinksResult = (await supabase
       .schema("app")
       .from("strategic_direction_objective_links")
       .select("strategic_direction_id, objective_id")
-      .eq("organization_id", organizationId),
-  ]);
+      .eq("organization_id", organizationId)) as typeof dirObjLinksResult;
+    if (objectivesResult.error) {
+      console.error("[getReviewCycleData] objectives (legacy app.objectives)", objectivesResult.error.message);
+    }
+    if (dirObjLinksResult.error) {
+      console.error("[getReviewCycleData] dirObjLinks (legacy objective_id)", dirObjLinksResult.error.message);
+    }
+  } else {
+    for (const label of ["objectives", "dirObjLinks"] as const) {
+      const err =
+        label === "objectives" ? objectivesResult.error : dirObjLinksResult.error;
+      if (err) console.error(`[getReviewCycleData] ${label}`, err.message);
+    }
+  }
 
-  for (const label of ["directions", "programs", "initiatives", "links", "targets", "objectives", "dirObjLinks"] as const) {
+  for (const label of ["directions", "programs", "initiatives", "links", "targets"] as const) {
     const err =
       label === "directions"
         ? directionsResult.error
@@ -363,11 +426,7 @@ export async function getReviewCycleData(
             ? initiativesResult.error
             : label === "links"
               ? linksResult.error
-              : label === "targets"
-                ? targetsResult.error
-                : label === "objectives"
-                  ? objectivesResult.error
-                  : dirObjLinksResult.error;
+              : targetsResult.error;
     if (err) console.error(`[getReviewCycleData] ${label}`, err.message);
   }
 
@@ -417,10 +476,17 @@ export async function getReviewCycleData(
     progress_percent: number;
   }>;
   const objectives = (objectivesResult.data ?? []) as Array<{ id: string; title: string }>;
-  const directionObjectiveLinks = (dirObjLinksResult.data ?? []) as Array<{
+  const directionObjectiveLinksRaw = (dirObjLinksResult.data ?? []) as Array<{
     strategic_direction_id: string;
-    objective_id: string;
+    strategy_objective_id?: string;
+    objective_id?: string;
   }>;
+  const directionObjectiveLinks = directionObjectiveLinksRaw
+    .map((l) => ({
+      strategic_direction_id: l.strategic_direction_id,
+      objective_id: l.strategy_objective_id ?? l.objective_id ?? "",
+    }))
+    .filter((l) => l.objective_id.length > 0);
 
   const objectiveIds = new Set(objectives.map((o) => o.id));
   const directionIds = new Set(directions.map((d) => d.id));
@@ -429,27 +495,74 @@ export async function getReviewCycleData(
     (l) => directionIds.has(l.strategic_direction_id) && objectiveIds.has(l.objective_id)
   );
 
-  const keyResultsQuery =
-    objectiveIds.size > 0
+  let okrObjectiveIds = new Set<string>();
+  const okrInCyclesRes = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .in("cycle_instance_id", cycleIds);
+
+  if (!okrInCyclesRes.error) {
+    okrObjectiveIds = new Set((okrInCyclesRes.data ?? []).map((r) => r.id));
+  } else if (isMissingOkrObjectivesTable(okrInCyclesRes.error.message)) {
+    const legacy = await supabase
+      .schema("app")
+      .from("objectives")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .in("cycle_instance_id", cycleIds)
+      .not("okr_cycle_id", "is", null);
+    if (legacy.error) {
+      console.error("[getReviewCycleData] objectives for KR scope (legacy)", legacy.error.message);
+    } else {
+      okrObjectiveIds = new Set((legacy.data ?? []).map((r) => r.id));
+    }
+  } else {
+    console.error("[getReviewCycleData] okr_objectives", okrInCyclesRes.error.message);
+  }
+
+  let keyResultsQuery =
+    okrObjectiveIds.size > 0
       ? await supabase
           .schema("app")
           .from("key_results")
-          .select("id, objective_id, title, due_date, status")
+          .select("id, okr_objective_id, title, due_date, status")
           .eq("organization_id", organizationId)
-          .in("objective_id", [...objectiveIds])
+          .in("okr_objective_id", [...okrObjectiveIds])
       : { data: [] as unknown[], error: null };
+
+  if (keyResultsQuery.error && isMissingKeyResultsOkrObjectiveIdColumn(keyResultsQuery.error.message)) {
+    keyResultsQuery = await supabase
+      .schema("app")
+      .from("key_results")
+      .select("id, objective_id, title, due_date, status")
+      .eq("organization_id", organizationId)
+      .in("objective_id", [...okrObjectiveIds]);
+  }
 
   if (keyResultsQuery.error) {
     console.error("[getReviewCycleData] key_results", keyResultsQuery.error.message);
   }
 
-  const keyResults = (keyResultsQuery.data ?? []) as Array<{
-    id: string;
-    objective_id: string;
-    title: string;
-    due_date: string | null;
-    status: string;
-  }>;
+  const keyResults = (keyResultsQuery.data ?? []).map((kr) => {
+    const r = kr as {
+      id: string;
+      okr_objective_id?: string;
+      objective_id?: string;
+      title: string;
+      due_date: string | null;
+      status: string;
+    };
+    const objId = r.okr_objective_id ?? r.objective_id ?? "";
+    return {
+      id: r.id,
+      objective_id: objId,
+      title: r.title,
+      due_date: r.due_date,
+      status: r.status,
+    };
+  }).filter((r) => r.objective_id.length > 0);
 
   const programById = new Map<string, ReviewCycleProgramRow>(
     programs.map((p) => [p.id, { id: p.id, strategic_direction_id: p.strategic_direction_id }])

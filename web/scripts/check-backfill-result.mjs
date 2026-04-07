@@ -56,22 +56,22 @@ const jobs = await client.query(`
 `);
 console.table(jobs.rows);
 
-console.log("\n=== Objectives gesamt (Status-Verteilung) ===\n");
+console.log("\n=== Strategie-Objectives gesamt (Status-Verteilung) ===\n");
 const objStats = await client.query(`
   select ai_evaluation_status, count(*) as cnt
-  from app.objectives
+  from app.strategy_objectives
   group by ai_evaluation_status
   order by cnt desc
 `);
 console.table(objStats.rows);
 
-console.log("\n=== Objectives mit AI-Bewertung ===\n");
+console.log("\n=== Strategie-Objectives mit AI-Bewertung ===\n");
 const objectives = await client.query(`
   select id, title, ai_objective_score, ai_evaluation_status, ai_clarity_score, 
          ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score,
          ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification,
          ai_evaluated_at
-  from app.objectives 
+  from app.strategy_objectives 
   where ai_evaluation_status is not null and ai_evaluation_status != 'not_run'
   order by ai_evaluated_at desc nulls last
   limit 15

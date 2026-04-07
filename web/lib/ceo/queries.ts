@@ -383,7 +383,7 @@ export async function getCeoDashboardData(
       .order("function_name", { ascending: true }),
     supabase
       .schema("app")
-      .from("objectives")
+      .from("strategy_objectives")
       .select("id, title, status, progress_percent")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", selectedCycle.id)
@@ -391,24 +391,40 @@ export async function getCeoDashboardData(
   ]);
 
   const objectives = (objectivesResult.data ?? []) as Objective[];
-  const objectiveIds = objectives.map((objective) => objective.id);
+  const { data: okrRowsForKr } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", selectedCycle.id);
+  const okrIdsForKeyResults = (okrRowsForKr ?? []).map((r) => r.id);
 
   const { data: keyResultsData } =
-    objectiveIds.length > 0
+    okrIdsForKeyResults.length > 0
       ? await supabase
           .schema("app")
           .from("key_results")
-          .select("id, title, status, objective_id")
+          .select("id, title, status, okr_objective_id")
           .eq("organization_id", organizationId)
-          .in("objective_id", objectiveIds)
+          .in("okr_objective_id", okrIdsForKeyResults)
       : { data: [] as KeyResult[] };
+
+  const keyResults: KeyResult[] = (keyResultsData ?? []).map((kr) => {
+    const r = kr as { id: string; title: string; status: string; okr_objective_id: string };
+    return {
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      objective_id: r.okr_objective_id,
+    };
+  });
 
   let trendDeltaPercent: number | null = null;
 
   if (previousCycle) {
     const { data: previousObjectives } = await supabase
       .schema("app")
-      .from("objectives")
+      .from("strategy_objectives")
       .select("progress_percent")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", previousCycle.id);
@@ -441,7 +457,7 @@ export async function getCeoDashboardData(
 
   const kpis = buildCeoKpis({
     objectives,
-    keyResults: (keyResultsData ?? []) as KeyResult[],
+    keyResults,
     functionDistribution,
     trendDeltaPercent,
   });
@@ -453,7 +469,7 @@ export async function getCeoDashboardData(
     strategicGoals: (strategicGoalsResult.data ?? []) as StrategicGoal[],
     functionalStrategies: (functionalStrategiesResult.data ?? []) as FunctionalStrategy[],
     objectives,
-    keyResults: (keyResultsData ?? []) as KeyResult[],
+    keyResults,
     kpis,
   };
 }

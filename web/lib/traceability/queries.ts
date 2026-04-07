@@ -36,13 +36,13 @@ export async function getObjectiveTraceability(organizationId: string, cycleInst
     supabase
       .schema("app")
       .from("objective_target_links")
-      .select("id, objective_id, annual_target_id, contribution_level")
+      .select("id, strategy_objective_id, annual_target_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("objective_direction_links")
-      .select("id, objective_id, strategic_direction_id, contribution_level")
+      .select("id, strategy_objective_id, strategic_direction_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase

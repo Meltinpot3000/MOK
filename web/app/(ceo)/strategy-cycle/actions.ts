@@ -1962,7 +1962,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
 
   const { data: objectives } = await params.supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .select("id, title, description, importance_score")
     .eq("organization_id", params.organizationId)
     .eq("cycle_instance_id", params.cycleId);
@@ -2021,7 +2021,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
           0.25 * r.clarity_score;
         const rowUpd = await params.supabase
           .schema("app")
-          .from("objectives")
+          .from("strategy_objectives")
           .update({
             ai_clarity_score: r.clarity_score,
             ai_strategic_relevance_score: r.strategic_relevance_score,
@@ -2057,7 +2057,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
       } else {
         const failUpd = await params.supabase
           .schema("app")
-          .from("objectives")
+          .from("strategy_objectives")
           .update({ ai_evaluation_status: "failed" })
           .eq("id", obj.id)
           .eq("organization_id", params.organizationId)
@@ -2071,7 +2071,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
     } catch (err) {
       const exUpd = await params.supabase
         .schema("app")
-        .from("objectives")
+        .from("strategy_objectives")
         .update({ ai_evaluation_status: "failed" })
         .eq("id", obj.id)
         .eq("organization_id", params.organizationId)
@@ -3298,7 +3298,7 @@ async function evaluateSingleObjectiveIfEnabled(params: {
       0.25 * r.clarity_score;
     await params.supabase
       .schema("app")
-      .from("objectives")
+      .from("strategy_objectives")
       .update({
         ai_clarity_score: r.clarity_score,
         ai_strategic_relevance_score: r.strategic_relevance_score,
@@ -3321,7 +3321,7 @@ async function evaluateSingleObjectiveIfEnabled(params: {
   } else {
     await params.supabase
       .schema("app")
-      .from("objectives")
+      .from("strategy_objectives")
       .update({ ai_evaluation_status: "failed" })
       .eq("id", params.objectiveId)
       .eq("organization_id", params.organizationId)
@@ -3342,7 +3342,7 @@ export async function createObjectiveInCycle(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: inserted, error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .insert({
       organization_id: context.organizationId,
       cycle_instance_id: context.cycleId,
@@ -3387,7 +3387,7 @@ export async function updateObjectiveInCycle(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .update({
       title,
       description,
@@ -3454,7 +3454,7 @@ export async function runObjectiveEvaluation(formData: FormData) {
 
   const { data: objectives } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .select("id, title, description, importance_score")
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId);
@@ -3508,7 +3508,7 @@ export async function runObjectiveEvaluation(formData: FormData) {
         0.25 * r.clarity_score;
       await supabase
         .schema("app")
-        .from("objectives")
+        .from("strategy_objectives")
         .update({
           ai_clarity_score: r.clarity_score,
           ai_strategic_relevance_score: r.strategic_relevance_score,
@@ -3536,7 +3536,7 @@ export async function runObjectiveEvaluation(formData: FormData) {
     } else {
       await supabase
         .schema("app")
-        .from("objectives")
+        .from("strategy_objectives")
         .update({
           ai_evaluation_status: "failed",
         })
@@ -3809,7 +3809,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: objective } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .select("id, status")
     .eq("id", objectiveId)
     .eq("organization_id", context.organizationId)
@@ -3826,7 +3826,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
-    .eq("objective_id", objectiveId)
+    .eq("strategy_objective_id", objectiveId)
     .maybeSingle();
   if (!isObjectiveEligibleForDirectionLink(objective.status) && !existingLink) {
     finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&error=objective-not-linkable");
@@ -3837,11 +3837,11 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
       organization_id: context.organizationId,
       cycle_instance_id: context.cycleId,
       strategic_direction_id: directionId,
-      objective_id: objectiveId,
+      strategy_objective_id: objectiveId,
       contribution_level: normalizeContributionLevel(String(formData.get("contribution_level") ?? "medium")),
       created_by_membership_id: context.membershipId,
     },
-    { onConflict: "cycle_instance_id,strategic_direction_id,objective_id" }
+    { onConflict: "cycle_instance_id,strategic_direction_id,strategy_objective_id" }
   );
   finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=linked");
 }
@@ -3861,7 +3861,7 @@ export async function unlinkDirectionFromObjectiveInCycle(formData: FormData) {
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_direction_id", directionId)
-    .eq("objective_id", objectiveId);
+    .eq("strategy_objective_id", objectiveId);
   finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=unlinked");
 }
 
@@ -3881,7 +3881,7 @@ export async function saveCorrelationStatusOverride(formData: FormData) {
     {
       organization_id: context.organizationId,
       cycle_instance_id: context.cycleId,
-      objective_id: objectiveId,
+      strategy_objective_id: objectiveId,
       challenge_id: challengeId,
       strategic_direction_id: directionId,
       status,
@@ -3891,7 +3891,7 @@ export async function saveCorrelationStatusOverride(formData: FormData) {
     },
     {
       onConflict:
-        "cycle_instance_id,objective_id,challenge_id,strategic_direction_id",
+        "cycle_instance_id,strategy_objective_id,challenge_id,strategic_direction_id",
     }
   );
   done(withSuccess(returnTo, "correlation-override-saved"));
@@ -3913,7 +3913,7 @@ export async function clearCorrelationStatusOverride(formData: FormData) {
     .delete()
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
-    .eq("objective_id", objectiveId)
+    .eq("strategy_objective_id", objectiveId)
     .eq("challenge_id", challengeId)
     .eq("strategic_direction_id", directionId);
   done(withSuccess(returnTo, "correlation-override-cleared"));
@@ -4407,21 +4407,21 @@ async function filterKeyResultIdsForCycleInstance(
   const { data: krs } = await supabase
     .schema("app")
     .from("key_results")
-    .select("id, objective_id")
+    .select("id, okr_objective_id")
     .eq("organization_id", organizationId)
     .in("id", keyResultIds);
-  const objectiveIds = [...new Set((krs ?? []).map((k) => k.objective_id))];
-  if (objectiveIds.length === 0) return new Set();
+  const okrObjectiveIds = [...new Set((krs ?? []).map((k) => (k as { okr_objective_id: string }).okr_objective_id))];
+  if (okrObjectiveIds.length === 0) return new Set();
   const { data: objs } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id")
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
-    .in("id", objectiveIds);
-  const validObjective = new Set((objs ?? []).map((o) => o.id));
+    .in("id", okrObjectiveIds);
+  const validOkrObjective = new Set((objs ?? []).map((o) => o.id));
   return new Set(
-    (krs ?? []).filter((k) => validObjective.has(k.objective_id)).map((k) => k.id)
+    (krs ?? []).filter((k) => validOkrObjective.has((k as { okr_objective_id: string }).okr_objective_id)).map((k) => k.id)
   );
 }
 
@@ -4787,10 +4787,10 @@ export async function linkObjectiveToIndustryInCycle(formData: FormData) {
     {
       organization_id: context.organizationId,
       cycle_instance_id: context.cycleId,
-      objective_id: objectiveId,
+      strategy_objective_id: objectiveId,
       industry_id: industryId,
     },
-    { onConflict: "planning_cycle_id,objective_id,industry_id" }
+    { onConflict: "planning_cycle_id,strategy_objective_id,industry_id" }
   );
   finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=linked");
 }
@@ -4809,7 +4809,7 @@ export async function unlinkObjectiveFromIndustryInCycle(formData: FormData) {
     .delete()
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
-    .eq("objective_id", objectiveId)
+    .eq("strategy_objective_id", objectiveId)
     .eq("industry_id", industryId);
   finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=unlinked");
 }
@@ -4826,10 +4826,10 @@ export async function linkObjectiveToBusinessModelInCycle(formData: FormData) {
     {
       organization_id: context.organizationId,
       cycle_instance_id: context.cycleId,
-      objective_id: objectiveId,
+      strategy_objective_id: objectiveId,
       business_model_id: businessModelId,
     },
-    { onConflict: "planning_cycle_id,objective_id,business_model_id" }
+    { onConflict: "planning_cycle_id,strategy_objective_id,business_model_id" }
   );
   finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=linked");
 }
@@ -4848,7 +4848,7 @@ export async function unlinkObjectiveFromBusinessModelInCycle(formData: FormData
     .delete()
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
-    .eq("objective_id", objectiveId)
+    .eq("strategy_objective_id", objectiveId)
     .eq("business_model_id", businessModelId);
   finishOrRedirect(formData, "/strategy-cycle?l1=objectives&success=unlinked");
 }
@@ -4862,7 +4862,7 @@ export async function deleteObjectiveInCycle(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .delete()
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)

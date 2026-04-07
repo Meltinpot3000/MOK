@@ -30,7 +30,7 @@ export async function updateObjectiveHealthOverride(
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .update({
       objective_health_override: override,
       objective_health_override_by_membership_id: override ? context.membershipId : null,
@@ -55,7 +55,7 @@ export async function updateObjectiveReviewComment(
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("strategy_objectives")
     .update({ objective_review_comment: comment || null })
     .eq("id", objectiveId)
     .eq("organization_id", context.organizationId);

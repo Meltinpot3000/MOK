@@ -91,7 +91,7 @@ export async function getObjectivesForCycle(organizationId: string, cycleInstanc
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, title, description, status, progress_percent, confidence_level, okr_cycle_id, created_at")
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleInstanceId)
@@ -100,8 +100,8 @@ export async function getObjectivesForCycle(organizationId: string, cycleInstanc
   return data ?? [];
 }
 
-export async function getKeyResultsForObjectives(organizationId: string, objectiveIds: string[]) {
-  if (objectiveIds.length === 0) {
+export async function getKeyResultsForObjectives(organizationId: string, okrObjectiveIds: string[]) {
+  if (okrObjectiveIds.length === 0) {
     return [];
   }
 
@@ -110,11 +110,11 @@ export async function getKeyResultsForObjectives(organizationId: string, objecti
     .schema("app")
     .from("key_results")
     .select(
-      "id, objective_id, title, status, metric_type, start_value, target_value, current_value, measurement_unit"
+      "id, okr_objective_id, title, status, metric_type, start_value, target_value, current_value, measurement_unit"
     )
     .eq("organization_id", organizationId)
-    .in("objective_id", objectiveIds)
-    .order("objective_id", { ascending: true })
+    .in("okr_objective_id", okrObjectiveIds)
+    .order("okr_objective_id", { ascending: true })
     .order("created_at", { ascending: true });
 
   return data ?? [];

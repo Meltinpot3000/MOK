@@ -221,7 +221,7 @@ export function objectiveRelationFromBulk(
   if (normalizeMembershipUuid(objective.deputy_membership_id) === mid) return "deputy";
   const ownerId = normalizeMembershipUuid(objective.owner_membership_id);
   if (ownerId) {
-    const reportsTo = ctx.reportsToByMembershipId.get(ownerId);
+    const reportsTo = ctx.reportsToByMembershipId.get(ownerId) ?? null;
     if (normalizeMembershipUuid(reportsTo) === mid) return "department";
   }
   return "none";

@@ -38,7 +38,7 @@ export async function collectOkrCycleOwnerMembershipIds(input: {
   const supabase = await createSupabaseServerClient();
   const { data: objectives, error: oErr } = await supabase
     .schema("app")
-    .from("objectives")
+    .from("okr_objectives")
     .select("id, owner_membership_id, deputy_membership_id")
     .eq("organization_id", input.organizationId)
     .eq("cycle_instance_id", input.cycleInstanceId)
@@ -66,7 +66,7 @@ export async function collectOkrCycleOwnerMembershipIds(input: {
     .from("key_results")
     .select("owner_membership_id, deputy_membership_id")
     .eq("organization_id", input.organizationId)
-    .in("objective_id", objIds);
+    .in("okr_objective_id", objIds);
 
   if (kErr) {
     console.error("[collectOkrCycleOwnerMembershipIds] key_results", kErr.message);

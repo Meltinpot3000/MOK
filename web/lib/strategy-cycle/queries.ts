@@ -176,7 +176,7 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("strategic_direction_objective_links")
-      .select("strategic_direction_id, objective_id, contribution_level")
+      .select("strategic_direction_id, strategy_objective_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -212,13 +212,13 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("objective_industries")
-      .select("objective_id, industry_id")
+      .select("strategy_objective_id, industry_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
       .from("objective_business_models")
-      .select("objective_id, business_model_id")
+      .select("strategy_objective_id, business_model_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -252,7 +252,7 @@ export async function getStrategyCycleWorkspaceData(
     (legacyPlanningCycleId
       ? supabase
           .schema("app")
-          .from("objectives")
+          .from("strategy_objectives")
           .select(
             "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
           )
@@ -260,7 +260,7 @@ export async function getStrategyCycleWorkspaceData(
           .or(`cycle_instance_id.eq.${cycleInstanceId},cycle_id.eq.${legacyPlanningCycleId}`)
       : supabase
           .schema("app")
-          .from("objectives")
+          .from("strategy_objectives")
           .select(
             "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
           )
@@ -269,14 +269,14 @@ export async function getStrategyCycleWorkspaceData(
     supabase
       .schema("app")
       .from("cluster_objective_relations")
-      .select("id, cluster_id, objective_id, relation_strength, gap_score")
+      .select("id, cluster_id, strategy_objective_id, relation_strength, gap_score")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("gap_score", { ascending: false }),
     supabase
       .schema("app")
       .from("strategy_correlation_status_overrides")
-      .select("objective_id, challenge_id, strategic_direction_id, status, note, updated_at")
+      .select("strategy_objective_id, challenge_id, strategic_direction_id, status, note, updated_at")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -413,15 +413,17 @@ export async function getStrategyCycleWorkspaceData(
   }
   const industryIdsByObjectiveId = new Map<string, string[]>();
   for (const row of objectiveIndustriesResult.data ?? []) {
-    const current = industryIdsByObjectiveId.get(row.objective_id) ?? [];
-    current.push(row.industry_id);
-    industryIdsByObjectiveId.set(row.objective_id, current);
+    const r = row as { strategy_objective_id: string; industry_id: string };
+    const current = industryIdsByObjectiveId.get(r.strategy_objective_id) ?? [];
+    current.push(r.industry_id);
+    industryIdsByObjectiveId.set(r.strategy_objective_id, current);
   }
   const businessModelIdsByObjectiveId = new Map<string, string[]>();
   for (const row of objectiveBusinessModelsResult.data ?? []) {
-    const current = businessModelIdsByObjectiveId.get(row.objective_id) ?? [];
-    current.push(row.business_model_id);
-    businessModelIdsByObjectiveId.set(row.objective_id, current);
+    const r = row as { strategy_objective_id: string; business_model_id: string };
+    const current = businessModelIdsByObjectiveId.get(r.strategy_objective_id) ?? [];
+    current.push(r.business_model_id);
+    businessModelIdsByObjectiveId.set(r.strategy_objective_id, current);
   }
   const operatingModelIdsByDirectionId = new Map<string, string[]>();
   for (const row of directionOperatingModelsResult.data ?? []) {
@@ -513,8 +515,40 @@ export async function getStrategyCycleWorkspaceData(
       if (label) creatorDisplayNameByMembershipId.set(row.id, label);
     }
   }
-  const clusterObjectiveRelations = clusterObjectiveRelationsResult.data ?? [];
-  const correlationStatusOverrides = correlationOverridesResult.data ?? [];
+  const clusterObjectiveRelations = (clusterObjectiveRelationsResult.data ?? []).map((row) => {
+    const r = row as {
+      id: string;
+      cluster_id: string;
+      strategy_objective_id: string;
+      relation_strength: number | null;
+      gap_score: number | null;
+    };
+    return {
+      id: r.id,
+      cluster_id: r.cluster_id,
+      objective_id: r.strategy_objective_id,
+      relation_strength: r.relation_strength,
+      gap_score: r.gap_score,
+    };
+  });
+  const correlationStatusOverrides = (correlationOverridesResult.data ?? []).map((row) => {
+    const r = row as {
+      strategy_objective_id: string;
+      challenge_id: string;
+      strategic_direction_id: string;
+      status: string;
+      note: string | null;
+      updated_at: string | null;
+    };
+    return {
+      objective_id: r.strategy_objective_id,
+      challenge_id: r.challenge_id,
+      strategic_direction_id: r.strategic_direction_id,
+      status: r.status,
+      note: r.note,
+      updated_at: r.updated_at,
+    };
+  });
   const programs = programsResult.data ?? [];
   let programOverviews: ProgramOverviewViewRow[] = [];
   if (programs.length > 0) {
@@ -562,28 +596,28 @@ export async function getStrategyCycleWorkspaceData(
       .eq("cycle_instance_id", cycleInstanceId)
       .in("initiative_id", initiativeIdsForKr);
     const krIds = [...new Set((ikrLinks ?? []).map((l) => l.key_result_id))];
-    const krById = new Map<string, { id: string; title: string; objective_id: string }>();
+    const krById = new Map<string, { id: string; title: string; okr_objective_id: string }>();
     if (krIds.length > 0) {
       const { data: krs } = await supabase
         .schema("app")
         .from("key_results")
-        .select("id, title, objective_id")
+        .select("id, title, okr_objective_id")
         .eq("organization_id", organizationId)
         .in("id", krIds);
       for (const k of krs ?? []) {
-        krById.set(k.id, k as { id: string; title: string; objective_id: string });
+        krById.set(k.id, k as { id: string; title: string; okr_objective_id: string });
       }
     }
-    const objectiveIdsForKr = [...new Set([...krById.values()].map((k) => k.objective_id))];
+    const okrObjectiveIdsForKr = [...new Set([...krById.values()].map((k) => k.okr_objective_id))];
     const objectiveTitleById = new Map<string, string>();
     const objectiveOkrCycleById = new Map<string, string | null>();
-    if (objectiveIdsForKr.length > 0) {
+    if (okrObjectiveIdsForKr.length > 0) {
       const { data: objRows } = await supabase
         .schema("app")
-        .from("objectives")
+        .from("okr_objectives")
         .select("id, title, okr_cycle_id")
         .eq("organization_id", organizationId)
-        .in("id", objectiveIdsForKr);
+        .in("id", okrObjectiveIdsForKr);
       for (const o of objRows ?? []) {
         objectiveTitleById.set(o.id, o.title);
         objectiveOkrCycleById.set(o.id, o.okr_cycle_id ?? null);
@@ -609,14 +643,14 @@ export async function getStrategyCycleWorkspaceData(
     function krContextForLink(krId: string): InitiativeKrLinkContext | null {
       const kr = krById.get(krId);
       if (!kr) return null;
-      const objId = kr.objective_id;
-      const okrId = objectiveOkrCycleById.get(objId) ?? null;
+      const objId = kr.okr_objective_id;
+      const okrCycl = objectiveOkrCycleById.get(objId) ?? null;
       return {
         key_result_id: kr.id,
         key_result_title: kr.title,
         objective_id: objId,
         objective_title: objectiveTitleById.get(objId) ?? "Objective",
-        okr_cycle_label: okrId ? okrCycleLabelById.get(okrId) ?? null : null,
+        okr_cycle_label: okrCycl ? okrCycleLabelById.get(okrCycl) ?? null : null,
       };
     }
     const titlesByInitiative = new Map<string, string[]>();
@@ -638,21 +672,30 @@ export async function getStrategyCycleWorkspaceData(
     }));
   }
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
-  let directionObjectiveLinks = directionObjectiveLinksResult.data ?? [];
-  if (directionObjectiveLinksResult.error && directionObjectiveLinks.length === 0) {
+  let directionObjectiveLinksRaw = directionObjectiveLinksResult.data ?? [];
+  if (directionObjectiveLinksResult.error && directionObjectiveLinksRaw.length === 0) {
     const { data: fallbackObjectiveLinks } = await supabase
       .schema("app")
       .from("strategic_direction_objective_links")
-      .select("strategic_direction_id, objective_id")
+      .select("strategic_direction_id, strategy_objective_id, contribution_level")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId);
     if (fallbackObjectiveLinks?.length) {
-      directionObjectiveLinks = fallbackObjectiveLinks.map((row) => ({
-        ...row,
-        contribution_level: "medium",
-      }));
+      directionObjectiveLinksRaw = fallbackObjectiveLinks;
     }
   }
+  const directionObjectiveLinks = directionObjectiveLinksRaw.map((row) => {
+    const r = row as {
+      strategic_direction_id: string;
+      strategy_objective_id: string;
+      contribution_level?: string | null;
+    };
+    return {
+      strategic_direction_id: r.strategic_direction_id,
+      objective_id: r.strategy_objective_id,
+      contribution_level: r.contribution_level ?? "medium",
+    };
+  });
   const initiativeTargetLinks = initiativeTargetLinksResult.data ?? [];
 
   const challengeIdsByDirectionId = new Map<string, Set<string>>();
@@ -744,7 +787,13 @@ export async function getStrategyCycleWorkspaceData(
   );
 
   let pipKeyResultOptions: PipKeyResultOption[] = [];
-  const objectiveRowsForPip = objectives as Array<{
+  const { data: okrRowsForPip } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, title, okr_cycle_id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId);
+  const objectiveRowsForPip = (okrRowsForPip ?? []) as Array<{
     id: string;
     title: string;
     okr_cycle_id?: string | null;
@@ -754,9 +803,9 @@ export async function getStrategyCycleWorkspaceData(
     const { data: krPickerRows } = await supabase
       .schema("app")
       .from("key_results")
-      .select("id, title, objective_id")
+      .select("id, title, okr_objective_id")
       .eq("organization_id", organizationId)
-      .in("objective_id", objectiveIdsForPipKr);
+      .in("okr_objective_id", objectiveIdsForPipKr);
     const objByIdForPip = new Map(objectiveRowsForPip.map((o) => [o.id, o]));
     const pipOkrCycleIds = [
       ...new Set(
@@ -776,13 +825,14 @@ export async function getStrategyCycleWorkspaceData(
       }
     }
     for (const kr of krPickerRows ?? []) {
-      const obj = objByIdForPip.get(kr.objective_id);
+      const rkr = kr as { id: string; title: string; okr_objective_id: string };
+      const obj = objByIdForPip.get(rkr.okr_objective_id);
       if (!obj) continue;
       const oc = obj.okr_cycle_id ? pipOkrCycleLabelById.get(obj.okr_cycle_id) ?? null : null;
       pipKeyResultOptions.push({
-        id: kr.id,
-        title: kr.title,
-        objective_id: kr.objective_id,
+        id: rkr.id,
+        title: rkr.title,
+        objective_id: rkr.okr_objective_id,
         objective_title: obj.title,
         okr_cycle_label: oc,
       });

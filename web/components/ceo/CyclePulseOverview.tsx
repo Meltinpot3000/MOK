@@ -1,4 +1,5 @@
 import type { PlanningCycle } from "@/lib/ceo/queries";
+import { linearCycleProgressPercent } from "@/lib/ceo/planning-cycle-time-progress";
 
 type CyclePulseOverviewProps = {
   cycles: PlanningCycle[];
@@ -31,18 +32,7 @@ function pickCycle(
   const ordered = [...items].sort((a, b) => toTime(a.start_date) - toTime(b.start_date));
   const current = ordered.find((cycle) => toTime(cycle.start_date) <= nowMs && nowMs < toTime(cycle.end_date));
   if (current) {
-    const start = new Date(current.start_date);
-    const end = new Date(current.end_date);
-    const now = new Date(nowMs);
-    const totalMonths = Math.max(
-      1,
-      (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + (end.getUTCMonth() - start.getUTCMonth())
-    );
-    const elapsedMonthsRaw =
-      (now.getUTCFullYear() - start.getUTCFullYear()) * 12 + (now.getUTCMonth() - start.getUTCMonth());
-    const elapsedMonths = Math.max(0, Math.min(totalMonths, elapsedMonthsRaw));
-    const anchoredElapsed = elapsedMonths === 0 ? 1 : elapsedMonths;
-    const progressPercent = Math.max(0, Math.min(100, (anchoredElapsed / totalMonths) * 100));
+    const progressPercent = linearCycleProgressPercent(current.start_date, current.end_date, nowMs);
     return { cycle: current, status: "laufend", progressPercent };
   }
 
@@ -192,6 +182,11 @@ export function CyclePulseOverview({ cycles, nowIso }: CyclePulseOverviewProps) 
             >
               <p className="text-lg font-semibold text-zinc-900">OKR Zyklus</p>
               <p className="mt-1 text-sm font-medium text-zinc-800">{Math.round(levels[2].progressPercent)}%</p>
+              {levels[2].cycle ? (
+                <p className="mt-2 max-w-[150px] text-[11px] leading-tight text-zinc-700">
+                  {formatDate(levels[2].cycle.start_date)} - {formatDate(levels[2].cycle.end_date)}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

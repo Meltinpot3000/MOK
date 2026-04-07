@@ -30,8 +30,12 @@ function distanceToCycle(referenceMs: number, c: OkrCyclePickRow): number {
   return referenceMs - e;
 }
 
-export function pickDefaultOkrCycle(cycles: OkrCyclePickRow[], referenceDate: Date = new Date()): string | null {
-  if (cycles.length === 0) return null;
+/** Reihenfolge wie pickDefaultOkrCycle (bester zuerst) — z. B. Fallback wenn der Default-Zeitraum keine Daten hat. */
+export function orderOkrCyclesByPickPreference(
+  cycles: OkrCyclePickRow[],
+  referenceDate: Date = new Date()
+): OkrCyclePickRow[] {
+  if (cycles.length === 0) return [];
   const today = utcDateOnlyIso(referenceDate);
   const refMs = dateOnlyUtcMs(today);
 
@@ -39,10 +43,10 @@ export function pickDefaultOkrCycle(cycles: OkrCyclePickRow[], referenceDate: Da
   if (inWindow.length > 0) {
     const activeInWindow = inWindow.filter((c) => c.status === "active");
     const pool = activeInWindow.length > 0 ? activeInWindow : inWindow;
-    return [...pool].sort((a, b) => dateOnlyUtcMs(b.start_date) - dateOnlyUtcMs(a.start_date))[0]?.id ?? null;
+    return [...pool].sort((a, b) => dateOnlyUtcMs(b.start_date) - dateOnlyUtcMs(a.start_date));
   }
 
-  const sorted = [...cycles].sort((a, b) => {
+  return [...cycles].sort((a, b) => {
     const da = distanceToCycle(refMs, a);
     const db = distanceToCycle(refMs, b);
     if (da !== db) return da - db;
@@ -51,5 +55,8 @@ export function pickDefaultOkrCycle(cycles: OkrCyclePickRow[], referenceDate: Da
     if (aAct !== bAct) return aAct - bAct;
     return dateOnlyUtcMs(b.start_date) - dateOnlyUtcMs(a.start_date);
   });
-  return sorted[0]?.id ?? null;
+}
+
+export function pickDefaultOkrCycle(cycles: OkrCyclePickRow[], referenceDate: Date = new Date()): string | null {
+  return orderOkrCyclesByPickPreference(cycles, referenceDate)[0]?.id ?? null;
 }

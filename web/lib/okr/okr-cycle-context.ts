@@ -1,6 +1,7 @@
-﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
 import { getOkrPlanningWorkspaceData, type OkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
+import { getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
 import { initiativeWarningNoKeyResultLink, type InitiativeKrLinkRow } from "@/lib/okr/okr-planning-view-model";
 import {
   buildOkrObjectiveView,
@@ -38,6 +39,7 @@ export async function getOkrCycleContext(
 
   const keyResultIds = collectKeyResultIds(workspace);
   const supabase = await createSupabaseServerClient();
+  const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
 
   const updatesByKeyResultId = new Map<string, OkrUpdateRow[]>();
   if (keyResultIds.length > 0) {
@@ -46,7 +48,7 @@ export async function getOkrCycleContext(
       .from("okr_updates")
       .select("key_result_id, progress_value, confidence_level, comment, created_at")
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
+      .in("cycle_instance_id", okrScopeInstanceIds)
       .in("key_result_id", keyResultIds)
       .order("created_at", { ascending: false });
 
@@ -93,7 +95,7 @@ export async function getOkrCycleContext(
       .from("initiative_key_result_links")
       .select("initiative_id, key_result_id")
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
+      .in("cycle_instance_id", okrScopeInstanceIds)
       .in("key_result_id", keyResultIds);
     initiativeKrLinks = (linkRows ?? []) as InitiativeKrLinkRow[];
   }
