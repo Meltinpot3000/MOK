@@ -1,5 +1,6 @@
 import type { AnalysisEntryRecord, AnalysisLinkType } from "@/lib/analysis-network/types";
 import type { OkrContributionTier } from "@/lib/strategy-cycle/coverage-level";
+import { z } from "zod";
 
 type QualityEntryInput = Pick<
   AnalysisEntryRecord,
@@ -99,6 +100,7 @@ const CLUSTER_PROMPT_VERSION = "analysis-cluster-v1";
 const GAP_PROMPT_VERSION = "analysis-gap-v1";
 const GRAPH_LAYOUT_PROMPT_VERSION = "analysis-graph-layout-v1";
 const OKR_CONTRIBUTION_PROMPT_VERSION = "okr-contribution-v3";
+const KR_INITIATIVE_MATCHING_PROMPT_VERSION = "kr-initiative-matching-v1";
 
 export const GEMINI_MODEL_QUALITY = process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro";
 export const GEMINI_MODEL_LINKS = process.env.ANALYSIS_LLM_MODEL_GEMINI_LINKS ?? "gemini-2.5-flash";
@@ -958,6 +960,23 @@ export type LlmOkrContributionAssessment = {
   promptVersion: string;
 };
 
+export type LlmKrInitiativeMatch = {
+  initiativeId: string;
+  level: "low" | "medium" | "high";
+  reason: string;
+  confidence: number;
+};
+
+export type LlmKrInitiativeMatchingResult = {
+  status: "ok" | "insufficient_context";
+  krId: string;
+  initiativeMatches: LlmKrInitiativeMatch[];
+  insufficientContextReason: string | null;
+  provider: "gemini" | "groq";
+  model: string;
+  promptVersion: string;
+};
+
 function normalizeLlmContributionTier(raw: unknown): OkrContributionTier {
   const v = String(raw ?? "")
     .trim()
@@ -1114,6 +1133,133 @@ export async function assessOkrContributionsWithLlm(input: {
       provider,
       model,
       promptVersion: OKR_CONTRIBUTION_PROMPT_VERSION,
+    },
+    usage: invoked.usage,
+  };
+}
+
+function buildKrInitiativeMatchingPrompt(input: {
+  contextJson: string;
+  keyResultId: string;
+  initiativeIds: string[];
+}): string {
+  return `Du bist ein Strategie-Analyst fuer die Verknuepfung von Key Results und Initiativen.
+
+Antworte ausschliesslich mit einem JSON-Objekt (kein Markdown), exakt in einer der beiden Formen:
+
+1) Bei ausreichendem Kontext:
+{
+  "status": "ok",
+  "kr_id": "<uuid>",
+  "initiative_matches": [
+    {
+      "initiative_id": "<uuid>",
+      "level": "low"|"medium"|"high",
+      "reason": "<max 2 Saetze, konkret>",
+      "confidence": 0.0
+    }
+  ]
+}
+
+2) Bei zu schwachem Kontext:
+{
+  "status": "insufficient_context",
+  "kr_id": "<uuid>",
+  "insufficient_context_reason": "<kurz und konkret>"
+}
+
+Regeln:
+- Nur IDs aus dieser Liste verwenden: ${JSON.stringify(input.initiativeIds)}
+- Maximal 5 initiative_matches.
+- confidence zwischen 0 und 1.
+- level darf nur low, medium oder high sein.
+- Wenn KR oder Initiativen inhaltlich zu unklar sind, gib status=insufficient_context statt zu raten.
+
+Kontext (JSON):
+${input.contextJson}`;
+}
+
+const krInitiativeMatchItemSchema = z.object({
+  initiative_id: z.string().uuid(),
+  level: z.enum(["low", "medium", "high"]),
+  reason: z.string().trim().min(1).max(400),
+  confidence: z.number().min(0).max(1),
+});
+
+const krInitiativeMatchingSchema = z.union([
+  z.object({
+    status: z.literal("ok"),
+    kr_id: z.string().uuid(),
+    initiative_matches: z.array(krInitiativeMatchItemSchema).max(5),
+  }),
+  z.object({
+    status: z.literal("insufficient_context"),
+    kr_id: z.string().uuid(),
+    insufficient_context_reason: z.string().trim().min(1).max(400),
+  }),
+]);
+
+export async function assessKrInitiativeMatchingWithLlm(input: {
+  contextJson: string;
+  keyResultId: string;
+  initiativeIds: string[];
+  maxOutputTokens?: number;
+}): Promise<LlmScoreResponse<LlmKrInitiativeMatchingResult>> {
+  const prompt = buildKrInitiativeMatchingPrompt(input);
+  const invoked = await invokeLlmForJson(prompt, input.maxOutputTokens);
+  if (!invoked?.text) return { result: null, usage: invoked?.usage ?? null };
+
+  const parsedJson = parseGenericJson(invoked.text);
+  if (!parsedJson) return { result: null, usage: invoked.usage };
+  const parsed = krInitiativeMatchingSchema.safeParse(parsedJson);
+  if (!parsed.success) return { result: null, usage: invoked.usage };
+
+  if (parsed.data.kr_id !== input.keyResultId) {
+    return { result: null, usage: invoked.usage };
+  }
+
+  const allowed = new Set(input.initiativeIds);
+  const provider = invoked.provider === "gemini" ? ("gemini" as const) : ("groq" as const);
+  const model = invoked.model;
+
+  if (parsed.data.status === "insufficient_context") {
+    return {
+      result: {
+        status: "insufficient_context",
+        krId: parsed.data.kr_id,
+        initiativeMatches: [],
+        insufficientContextReason: parsed.data.insufficient_context_reason,
+        provider,
+        model,
+        promptVersion: KR_INITIATIVE_MATCHING_PROMPT_VERSION,
+      },
+      usage: invoked.usage,
+    };
+  }
+
+  const unique = new Set<string>();
+  const matches: LlmKrInitiativeMatch[] = [];
+  for (const row of parsed.data.initiative_matches) {
+    if (!allowed.has(row.initiative_id) || unique.has(row.initiative_id)) continue;
+    unique.add(row.initiative_id);
+    matches.push({
+      initiativeId: row.initiative_id,
+      level: row.level,
+      reason: row.reason.trim().slice(0, 400),
+      confidence: Number(row.confidence.toFixed(3)),
+    });
+  }
+  matches.sort((a, b) => b.confidence - a.confidence);
+
+  return {
+    result: {
+      status: "ok",
+      krId: parsed.data.kr_id,
+      initiativeMatches: matches.slice(0, 5),
+      insufficientContextReason: null,
+      provider,
+      model,
+      promptVersion: KR_INITIATIVE_MATCHING_PROMPT_VERSION,
     },
     usage: invoked.usage,
   };

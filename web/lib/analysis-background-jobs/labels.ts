@@ -7,6 +7,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   cluster_recompute: "Cluster-Neuberechnung",
   gaps_recompute: "Lücken-Neuberechnung",
   okr_contribution_assessment: "OKR-Contribution-Bewertung",
+  kr_initiative_matching: "KR-Initiativen-Matching",
 };
 
 export function getJobTypeLabel(jobType: string): string {

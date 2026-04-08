@@ -1,18 +1,34 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
-import { ResponsibleAssignmentPanels } from "@/components/ceo/ResponsibleAssignmentPanels";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
-import { ResponsibleCreateForm } from "@/components/ceo/ResponsibleCreateForm";
 import { ResponsibleRowEditForm } from "@/components/ceo/ResponsibleRowEditForm";
+import { ResponsibleSetupForm } from "@/components/ceo/ResponsibleSetupForm";
+import {
+  fetchMaxAssignmentRankInUnit,
+  rankFromAssignmentType,
+} from "@/lib/responsibles/assignment-rank";
+import {
+  fetchMaxRbacRankForMembership,
+  fetchMaxRbacRankForResponsible,
+  fetchRbacMaxRankByMembershipIds,
+} from "@/lib/rbac/org-role-rank";
 import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
+  getMembershipsForResponsibleSetup,
   getOrganizationUnits,
   getActivePlanningCycle,
   getPhase0Context,
   getResponsibles,
 } from "@/lib/phase0/queries";
+import {
+  ensureResponsibleForMembership,
+  syncResponsibleManagerEdge,
+  syncResponsibleReportEdges,
+} from "@/lib/responsibles/membership-responsible";
+import { writeResponsibleAssignment } from "@/lib/responsibles/write-responsible-assignment";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 
 type ResponsiblesPageProps = {
@@ -50,6 +66,7 @@ function roleLabelForType(assignmentType: AssignmentType, assignmentRoleDe?: str
 }
 
 function getStatusMessage(error?: string, success?: string, code?: string) {
+  if (success === "saved") return { type: "success", text: "Aenderungen wurden gespeichert." };
   if (success === "assigned") return { type: "success", text: "Zuordnung wurde gespeichert." };
   if (success === "assignment-removed") return { type: "success", text: "Zuordnung wurde entfernt." };
   if (error === "assign-failed") {
@@ -58,8 +75,20 @@ function getStatusMessage(error?: string, success?: string, code?: string) {
       text: `Zuordnung konnte nicht gespeichert werden. Bitte Eingaben pruefen.${code ? ` (Code: ${code})` : ""}`,
     };
   }
+  if (error === "bundle-failed") {
+    return {
+      type: "error",
+      text: `Speichern fehlgeschlagen.${code ? ` (Code: ${code})` : ""}`,
+    };
+  }
   if (error === "missing-fields") {
     return { type: "error", text: "Bitte alle Pflichtfelder ausfuellen." };
+  }
+  if (error === "hierarchy-role-order") {
+    return {
+      type: "error",
+      text: "Reporting passt nicht zur Rollenlogik: Manager mindestens auf gleicher Organisations-Rollenstufe wie die gewählte Mitgliedschaft; Reports höchstens auf gleicher Stufe. Bei gewählter Organisationseinheit gelten zusätzlich die Regeln für Hauptverantwortung / Unterstützung / Stakeholder.",
+    };
   }
   return null;
 }
@@ -112,6 +141,53 @@ async function getAssignableOrganizationUnits(
   }));
 }
 
+type UserIdentity = { email: string | null; name: string | null };
+
+async function buildMembershipPickerOptions(
+  organizationId: string
+): Promise<
+  Array<{ id: string; label: string; email: string | null; title: string | null; responsibleId: string | null }>
+> {
+  const raw = await getMembershipsForResponsibleSetup(organizationId);
+  const adminClient = createSupabaseAdminClient();
+  const identityByUserId = new Map<string, UserIdentity>();
+
+  if (adminClient) {
+    await Promise.all(
+      Array.from(new Set(raw.map((m) => m.user_id))).map(async (userId) => {
+        const { data } = await adminClient.auth.admin.getUserById(userId);
+        const email = data.user?.email?.toLowerCase() ?? null;
+        const metadata =
+          data.user?.user_metadata && typeof data.user.user_metadata === "object"
+            ? (data.user.user_metadata as Record<string, unknown>)
+            : null;
+        const fullNameRaw = metadata?.full_name ?? metadata?.name ?? metadata?.display_name ?? null;
+        const name =
+          typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0 ? fullNameRaw.trim() : null;
+        identityByUserId.set(userId, { email, name });
+      })
+    );
+  }
+
+  return raw.map((m) => {
+    const ident = identityByUserId.get(m.user_id);
+    const email = ident?.email ?? null;
+    const display =
+      (m.display_name && m.display_name.trim().length > 0 ? m.display_name.trim() : null) ??
+      ident?.name ??
+      (email ? email.split("@")[0] : null) ??
+      "Mitglied";
+    const label = `${display}${email ? ` (${email})` : ""}${m.title?.trim() ? ` — ${m.title.trim()}` : ""}`;
+    return {
+      id: m.id,
+      label,
+      email,
+      title: m.title,
+      responsibleId: m.responsible_id,
+    };
+  });
+}
+
 export default async function ResponsiblesPage({ searchParams }: ResponsiblesPageProps) {
   const pageAccess = await getSidebarAccessContext("organization");
   if (pageAccess.state === "unauthenticated") {
@@ -135,12 +211,22 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
     });
   }
 
-  const [responsibles, organizationUnits, activeCycle, assignments] = await Promise.all([
+  const [responsibles, organizationUnits, activeCycle, assignments, membershipOptions] = await Promise.all([
     getResponsibles(effectiveOrganizationId),
     getOrganizationUnits(effectiveOrganizationId),
     getActivePlanningCycle(effectiveOrganizationId),
     getResponsibleAssignments(effectiveOrganizationId),
+    buildMembershipPickerOptions(effectiveOrganizationId),
   ]);
+  const supabaseClient = await createSupabaseServerClient();
+  const rbacMaxRankByMembershipId = await fetchRbacMaxRankByMembershipIds(
+    supabaseClient,
+    effectiveOrganizationId,
+    [
+      ...membershipOptions.map((m) => m.id),
+      ...responsibles.map((r) => r.membership_id).filter((id): id is string => Boolean(id)),
+    ]
+  );
   const assignableOrgUnits = await getAssignableOrganizationUnits(
     effectiveOrganizationId,
     organizationUnits
@@ -154,213 +240,141 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
     assignmentsByResponsible.set(assignment.responsible_id, bucket);
   }
 
-  async function createResponsible(formData: FormData) {
+  const unitAssignmentsForForm = assignments
+    .filter((a): assignment is ResponsibleAssignmentRow & { organization_unit_id: string } =>
+      Boolean(a.organization_unit_id)
+    )
+    .map((a) => ({
+      responsible_id: a.responsible_id,
+      organization_unit_id: a.organization_unit_id,
+      assignment_type: a.assignment_type,
+    }));
+
+  async function saveResponsibleSetup(formData: FormData) {
     "use server";
     const localContext = await getPhase0Context();
     if (!localContext) redirect("/no-access");
     const localAccess = await getSidebarAccessContext("organization");
     if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
-
-    const fullName = String(formData.get("full_name") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    const roleTitle = String(formData.get("role_title") ?? "").trim();
-    if (!fullName || !email || !roleTitle) {
-      redirect("/responsibles?error=missing-fields");
-    }
-
-    const supabase = await createSupabaseServerClient();
-    await supabase.schema("app").from("responsibles").insert({
-      organization_id: localContext.organizationId,
-      full_name: fullName,
-      email: email.toLowerCase(),
-      role_title: roleTitle,
-      membership_id: null,
-    });
-
-    revalidatePath("/responsibles");
-    redirect("/responsibles");
-  }
-
-  async function assignResponsible(formData: FormData) {
-    "use server";
-    const localAccess = await getSidebarAccessContext("organization");
-    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
     const actorOrganizationId = localAccess.access.organizationId;
 
-    const responsibleId = String(formData.get("responsible_id"));
-    const organizationUnitId = String(formData.get("organization_unit_id"));
-    const assignmentType = String(formData.get("assignment_type")) as AssignmentType;
-    const assignmentRoleDe = roleLabelForType(assignmentType, null);
-    if (!responsibleId || !organizationUnitId || !assignmentType) {
+    const membershipId = String(formData.get("membership_id") ?? "").trim();
+    const organizationUnitId = String(formData.get("organization_unit_id") ?? "").trim();
+    const assignmentTypeRaw = String(formData.get("assignment_type") ?? "").trim();
+    const managerIdRaw = String(formData.get("manager_responsible_id") ?? "").trim();
+    const managerId = managerIdRaw.length > 0 ? managerIdRaw : null;
+
+    const reportIds = [
+      ...new Set(
+        formData
+          .getAll("report_responsible_ids")
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    if (!membershipId) {
+      redirect("/responsibles?error=missing-fields");
+    }
+
+    const assignmentType: AssignmentType =
+      assignmentTypeRaw === "support" || assignmentTypeRaw === "stakeholder" ? assignmentTypeRaw : "owner";
+
+    const ensured = await ensureResponsibleForMembership(actorOrganizationId, membershipId);
+    if (!ensured.ok) {
+      redirect(`/responsibles?error=bundle-failed&code=${encodeURIComponent(ensured.code)}`);
+    }
+    const focalId = ensured.responsibleId;
+
+    if (managerId && reportIds.includes(managerId)) {
+      redirect("/responsibles?error=missing-fields");
+    }
+    if (managerId === focalId) {
+      redirect("/responsibles?error=missing-fields");
+    }
+    if (reportIds.includes(focalId)) {
       redirect("/responsibles?error=missing-fields");
     }
 
     const supabase = await createSupabaseServerClient();
-    const { data: responsibleRow, error: responsibleError } = await supabase
-      .schema("app")
-      .from("responsibles")
-      .select("id, organization_id, full_name")
-      .eq("id", responsibleId)
-      .maybeSingle();
-    if (responsibleError) {
-      console.error("[assignResponsible] responsible lookup failed", {
-        code: responsibleError.code,
-        message: responsibleError.message,
-        details: responsibleError.details,
-        hint: responsibleError.hint,
-        actorOrganizationId,
-        responsibleId,
-      });
+
+    const focalRbacRank = await fetchMaxRbacRankForMembership(
+      supabase,
+      actorOrganizationId,
+      membershipId
+    );
+    if (managerId) {
+      const mgrRank = await fetchMaxRbacRankForResponsible(supabase, actorOrganizationId, managerId);
+      if (mgrRank < focalRbacRank) {
+        redirect("/responsibles?error=hierarchy-role-order");
+      }
     }
-    if (!responsibleRow?.organization_id) {
-      redirect("/responsibles?error=assign-failed&code=RESP_NOT_FOUND");
+    for (const rid of reportIds) {
+      const repRank = await fetchMaxRbacRankForResponsible(supabase, actorOrganizationId, rid);
+      if (repRank > focalRbacRank) {
+        redirect("/responsibles?error=hierarchy-role-order");
+      }
     }
 
-    const orgResultNew = await supabase
-      .schema("app")
-      .from("organization_unit")
-      .select("id, code, name, organization_id")
-      .eq("id", organizationUnitId)
-      .maybeSingle();
-    const unitOrganizationId = orgResultNew.data?.organization_id ?? null;
-    if (orgResultNew.error) {
-      console.error("[assignResponsible] unit lookup diagnostics", {
+    if (organizationUnitId) {
+      const assignResult = await writeResponsibleAssignment(
+        supabase,
         actorOrganizationId,
+        focalId,
         organizationUnitId,
-        orgResultNewError: orgResultNew.error
-          ? {
-              code: orgResultNew.error.code,
-              message: orgResultNew.error.message,
-              details: orgResultNew.error.details,
-              hint: orgResultNew.error.hint,
-            }
-          : null,
-      });
-    }
-    if (!unitOrganizationId) {
-      const errorCode = encodeURIComponent(orgResultNew.error?.code ?? "UNIT_NOT_FOUND");
-      redirect(`/responsibles?error=assign-failed&code=${errorCode}`);
-    }
-    if (
-      responsibleRow.organization_id !== unitOrganizationId ||
-      responsibleRow.organization_id !== actorOrganizationId
-    ) {
-      redirect("/responsibles?error=assign-failed&code=ORG_MISMATCH");
-    }
-
-    type Variant = {
-      selectColumn: "organization_unit_id";
-      payload: Record<string, string>;
-      unitIdForColumn: string;
-      label: string;
-    };
-    const variants: Variant[] = [
-      {
-        selectColumn: "organization_unit_id",
-        label: "new_with_role",
-        unitIdForColumn: organizationUnitId,
-        payload: {
-          organization_id: actorOrganizationId,
-          responsible_id: responsibleId,
-          assignment_type: assignmentType,
-          assignment_role_de: assignmentRoleDe,
-          organization_unit_id: organizationUnitId,
-        },
-      },
-      {
-        selectColumn: "organization_unit_id",
-        label: "new_without_role",
-        unitIdForColumn: organizationUnitId,
-        payload: {
-          organization_id: actorOrganizationId,
-          responsible_id: responsibleId,
-          assignment_type: assignmentType,
-          organization_unit_id: organizationUnitId,
-        },
-      },
-    ];
-
-    let lastError: { code?: string; message?: string; details?: string; hint?: string } | null = null;
-    for (const variant of variants) {
-      if (!variant.unitIdForColumn) {
-        console.error("[assignResponsible] skip variant without mapped unit id", {
-          variant: variant.label,
-          actorOrganizationId,
-          submittedOrganizationUnitId: organizationUnitId,
-        });
-        continue;
-      }
-      const existingResult = await supabase
-        .schema("app")
-        .from("responsible_assignments")
-        .select("id")
-        .eq("organization_id", actorOrganizationId)
-        .eq("responsible_id", responsibleId)
-        .eq("assignment_type", assignmentType)
-        .eq(variant.selectColumn, variant.unitIdForColumn)
-        .limit(1);
-
-      if (existingResult.error) {
-        lastError = existingResult.error;
-        console.error("[assignResponsible] existing assignment lookup failed", {
-          variant: variant.label,
-          selectColumn: variant.selectColumn,
-          unitIdForColumn: variant.unitIdForColumn,
-          code: existingResult.error.code,
-          message: existingResult.error.message,
-          details: existingResult.error.details,
-          hint: existingResult.error.hint,
-          actorOrganizationId,
-          responsibleId,
-          assignmentType,
-        });
-        if (!["42703", "PGRST204"].includes(existingResult.error.code ?? "")) break;
-        continue;
-      }
-
-      const existingId = existingResult.data?.[0]?.id ?? null;
-      const writeResult = existingId
-        ? await supabase
-            .schema("app")
-            .from("responsible_assignments")
-            .update(variant.payload)
-            .eq("id", existingId)
-            .eq("organization_id", actorOrganizationId)
-        : await supabase.schema("app").from("responsible_assignments").insert(variant.payload);
-
-      if (!writeResult.error) {
-        revalidatePath("/responsibles");
-        revalidatePath("/organization");
-        redirect("/responsibles?success=assigned");
-      }
-
-      lastError = writeResult.error;
-      console.error("[assignResponsible] write failed", {
-        variant: variant.label,
-        selectColumn: variant.selectColumn,
-        unitIdForColumn: variant.unitIdForColumn,
-        payloadKeys: Object.keys(variant.payload),
-        code: writeResult.error.code,
-        message: writeResult.error.message,
-        details: writeResult.error.details,
-        hint: writeResult.error.hint,
-        actorOrganizationId,
-        responsibleId,
         assignmentType,
-      });
-      if (!["42703", "PGRST204", "P0001"].includes(writeResult.error.code ?? "")) {
-        break;
+        roleLabelForType
+      );
+      if (!assignResult.ok) {
+        redirect(`/responsibles?error=assign-failed&code=${encodeURIComponent(assignResult.code)}`);
+      }
+
+      const focalRank =
+        (await fetchMaxAssignmentRankInUnit(
+          supabase,
+          actorOrganizationId,
+          organizationUnitId,
+          focalId
+        )) ?? rankFromAssignmentType(assignmentType);
+
+      if (managerId) {
+        const mgrRank = await fetchMaxAssignmentRankInUnit(
+          supabase,
+          actorOrganizationId,
+          organizationUnitId,
+          managerId
+        );
+        if (mgrRank === null || mgrRank < focalRank) {
+          redirect("/responsibles?error=hierarchy-role-order");
+        }
+      }
+      for (const rid of reportIds) {
+        const repRank = await fetchMaxAssignmentRankInUnit(
+          supabase,
+          actorOrganizationId,
+          organizationUnitId,
+          rid
+        );
+        if (repRank === null || repRank > focalRank) {
+          redirect("/responsibles?error=hierarchy-role-order");
+        }
       }
     }
 
-    if (lastError) {
-      const errorCode = encodeURIComponent(lastError.code ?? "unknown");
-      redirect(`/responsibles?error=assign-failed&code=${errorCode}`);
+    const mgrRes = await syncResponsibleManagerEdge(supabase, actorOrganizationId, focalId, managerId);
+    if (!mgrRes.ok) {
+      redirect(`/responsibles?error=bundle-failed&code=${encodeURIComponent(mgrRes.code)}`);
+    }
+
+    const repRes = await syncResponsibleReportEdges(supabase, actorOrganizationId, focalId, reportIds);
+    if (!repRes.ok) {
+      redirect(`/responsibles?error=bundle-failed&code=${encodeURIComponent(repRes.code)}`);
     }
 
     revalidatePath("/responsibles");
     revalidatePath("/organization");
-    redirect("/responsibles?success=assigned");
+    revalidatePath("/invitations");
+    redirect("/responsibles?success=saved");
   }
 
   async function removeResponsibleAssignment(formData: FormData) {
@@ -392,61 +406,6 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
     redirect("/responsibles?success=assignment-removed");
   }
 
-  async function createReportingLine(formData: FormData) {
-    "use server";
-    const localContext = await getPhase0Context();
-    if (!localContext) redirect("/no-access");
-    const localAccess = await getSidebarAccessContext("organization");
-    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
-
-    const managerId = String(formData.get("manager_responsible_id"));
-    const reportId = String(formData.get("report_responsible_id"));
-    if (!managerId || !reportId) {
-      redirect("/responsibles?error=missing-fields");
-    }
-
-    const supabase = await createSupabaseServerClient();
-    await supabase.schema("app").from("responsible_hierarchy").insert({
-      organization_id: localContext.organizationId,
-      manager_responsible_id: managerId,
-      report_responsible_id: reportId,
-    });
-
-    revalidatePath("/responsibles");
-    redirect("/responsibles");
-  }
-
-  async function updateResponsible(formData: FormData) {
-    "use server";
-    const localContext = await getPhase0Context();
-    if (!localContext) redirect("/no-access");
-    const localAccess = await getSidebarAccessContext("organization");
-    if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
-
-    const responsibleId = String(formData.get("id") ?? "").trim();
-    const fullName = String(formData.get("full_name") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    const roleTitle = String(formData.get("role_title") ?? "").trim();
-    if (!responsibleId || !fullName || !email || !roleTitle) {
-      redirect("/responsibles");
-    }
-
-    const supabase = await createSupabaseServerClient();
-    await supabase
-      .schema("app")
-      .from("responsibles")
-      .update({
-        full_name: fullName,
-        email: email.toLowerCase(),
-        role_title: roleTitle,
-      })
-      .eq("organization_id", localContext.organizationId)
-      .eq("id", responsibleId);
-
-    revalidatePath("/responsibles");
-    redirect("/responsibles");
-  }
-
   async function deleteResponsible(formData: FormData) {
     "use server";
     const localContext = await getPhase0Context();
@@ -462,12 +421,20 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
     const supabase = await createSupabaseServerClient();
     await supabase
       .schema("app")
+      .from("organization_memberships")
+      .update({ responsible_id: null })
+      .eq("organization_id", localContext.organizationId)
+      .eq("responsible_id", responsibleId);
+
+    await supabase
+      .schema("app")
       .from("responsibles")
       .delete()
       .eq("organization_id", localContext.organizationId)
       .eq("id", responsibleId);
 
     revalidatePath("/responsibles");
+    revalidatePath("/invitations");
     redirect("/responsibles");
   }
 
@@ -477,7 +444,8 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Verantwortliche</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Lege Verantwortliche an, bearbeite Stammdaten und ordne sie direkt den passenden Bereichen zu.
+          Verknuepfe Benutzer aus dem Kontingent mit Organisationseinheiten und Reporting-Linien. Stammdaten pflegst
+          du unter Benutzerliste und Einladungen.
         </p>
       </header>
 
@@ -495,29 +463,38 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
         </p>
       ) : null}
 
-      <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Verantwortliche anlegen</h2>
-        <ResponsibleCreateForm canWrite={canWrite} action={createResponsible} />
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <article className="brand-card p-6">
+            <h2 className="text-lg font-semibold text-zinc-900">Verantwortliche zuordnen</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Person aus dem Benutzerkontingent wählen, optional Organisationseinheit und Rolle im Bereich setzen,
+              sowie Manager und direkte Reports (mehrfach) pflegen.
+            </p>
+            <ResponsibleSetupForm
+              canWrite={canWrite}
+              action={saveResponsibleSetup}
+              memberships={membershipOptions}
+              responsibles={responsibles}
+              orgUnits={assignableOrgUnits}
+              roleOptions={RESPONSIBLE_ROLE_OPTIONS}
+              unitAssignments={unitAssignmentsForForm}
+              rbacMaxRankByMembershipId={rbacMaxRankByMembershipId}
+            />
+          </article>
+        </div>
+        <div className="min-w-0">
+          <OrganizationGraphPanel
+            organizationId={context.organizationId}
+            cycleInstanceId={activeCycle?.id ?? null}
+          />
+        </div>
       </section>
-
-      <ResponsibleAssignmentPanels
-        canWrite={canWrite}
-        responsibles={responsibles}
-        orgUnits={assignableOrgUnits}
-        roleOptions={RESPONSIBLE_ROLE_OPTIONS}
-        assignAction={assignResponsible}
-        hierarchyAction={createReportingLine}
-      />
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
           Diese Rolle hat nur Leserechte für Verantwortliche.
         </p>
       ) : null}
-
-      <OrganizationGraphPanel
-        organizationId={context.organizationId}
-        cycleInstanceId={activeCycle?.id ?? null}
-      />
 
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Verantwortlichenliste</h2>
@@ -526,18 +503,13 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
             <div className="grid grid-cols-10 gap-2 border-b border-zinc-200 pb-2 text-left text-zinc-500">
               <p className="col-span-3">Name</p>
               <p className="col-span-3">E-Mail</p>
-              <p className="col-span-2">Rollenbezeichnung</p>
+              <p className="col-span-2">Rolle (Kontingent)</p>
               <p className="col-span-2">Aktionen</p>
             </div>
             <div>
               {responsibles.map((responsible) => (
                 <div key={responsible.id} className="border-b border-zinc-100 py-2">
-                  <ResponsibleRowEditForm
-                    responsible={responsible}
-                    canWrite={canWrite}
-                    updateAction={updateResponsible}
-                    deleteAction={deleteResponsible}
-                  />
+                  <ResponsibleRowEditForm responsible={responsible} canWrite={canWrite} deleteAction={deleteResponsible} />
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {(assignmentsByResponsible.get(responsible.id) ?? []).length === 0 ? (
                       <span className="text-xs text-zinc-500">Keine Organisationszuordnung vorhanden.</span>

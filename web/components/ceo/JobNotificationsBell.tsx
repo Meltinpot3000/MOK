@@ -32,21 +32,28 @@ export function JobNotificationsBell() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fetchJobs = useCallback(async () => {
+  const fetchJobs = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch("/api/analysis-background-jobs/recent");
+      const res = await fetch("/api/analysis-background-jobs/recent", { signal });
       if (!res.ok) return;
       const { jobs: data } = (await res.json()) as { jobs: RecentJob[] };
       setJobs(data ?? []);
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       // ignore
     }
   }, []);
 
   useEffect(() => {
-    fetchJobs();
-    const id = setInterval(fetchJobs, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const controller = new AbortController();
+    void fetchJobs(controller.signal);
+    const id = setInterval(() => {
+      void fetchJobs(controller.signal);
+    }, POLL_INTERVAL_MS);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
   }, [fetchJobs]);
 
   useEffect(() => {

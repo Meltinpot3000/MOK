@@ -120,6 +120,21 @@ export type OkrPlanningKeyResultRow = {
   linkedInitiativeIds: string[];
   linkedInitiativeTitles: string[];
   warningNoInitiativeLink: boolean;
+  initiativeSuggestions: Array<{
+    initiativeId: string;
+    initiativeTitle: string;
+    llmLevel: "low" | "medium" | "high" | null;
+    llmReason: string | null;
+    confirmedLevel: "low" | "medium" | "high" | null;
+    confirmationStatus: "none" | "pending" | "accepted" | "rejected" | "manual";
+    llmRunId: string | null;
+  }>;
+  latestMatchingRun:
+    | {
+        status: "ok" | "insufficient_context" | "failed";
+        insufficientContextReason: string | null;
+      }
+    | null;
 };
 
 export type OkrContributionEdgePlanningRow = {
@@ -194,6 +209,8 @@ export type OkrPlanningWorkspaceData = {
   okrKrOwnerMustMatchObjective: boolean;
   /** Tenant-Flag: automatische LLM-Contribution-Bewertung für OKRs. */
   okrContributionAssessmentEnabled: boolean;
+  /** Tenant-Flag: automatische LLM-Matching-Vorschlaege fuer KR-Initiativen. */
+  krInitiativeMatchingEnabled: boolean;
 };
 
 export async function getOkrPlanningWorkspaceData(
@@ -215,7 +232,7 @@ export async function getOkrPlanningWorkspaceData(
 
   const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
 
-  let initiativesFirst = await supabase
+  const initiativesFirst = await supabase
     .schema("app")
     .from("initiatives")
     .select(INITIATIVE_SELECT_WITH_REVIEW)
@@ -311,6 +328,7 @@ export async function getOkrPlanningWorkspaceData(
   const okrKrOwnerMustMatchObjective = Boolean(orgSettingsRow?.okr_kr_owner_must_match_objective);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingResult.data?.branding_config ?? null);
   const okrContributionAssessmentEnabled = isLlmFeatureEnabled(llmPolicy, "okr_contribution_assessment");
+  const krInitiativeMatchingEnabled = isLlmFeatureEnabled(llmPolicy, "kr_initiative_matching");
 
   const directions = (directionsResult.data ?? []) as Array<{ id: string; title: string }>;
   const directionTitleById = new Map(directions.map((d) => [d.id, d.title]));
@@ -473,20 +491,64 @@ export async function getOkrPlanningWorkspaceData(
 
   const keyResultIds = keyResults.map((k) => k.id);
   let initiativeKrLinks: InitiativeKrLinkRow[] = [];
+  let linkMetaRows: Array<{
+    initiative_id: string;
+    key_result_id: string;
+    llm_level: "low" | "medium" | "high" | null;
+    llm_reason: string | null;
+    llm_run_id: string | null;
+    confirmed_level: "low" | "medium" | "high" | null;
+    confirmation_status: "none" | "pending" | "accepted" | "rejected" | "manual";
+  }> = [];
   if (keyResultIds.length > 0) {
     const linkRes = await supabase
       .schema("app")
       .from("initiative_key_result_links")
-      .select("initiative_id, key_result_id")
+      .select(
+        "initiative_id, key_result_id, llm_level, llm_reason, llm_run_id, confirmed_level, confirmation_status"
+      )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .in("key_result_id", keyResultIds);
-    initiativeKrLinks = (linkRes.data ?? []) as InitiativeKrLinkRow[];
+    linkMetaRows = (linkRes.data ?? []) as typeof linkMetaRows;
+    initiativeKrLinks = linkMetaRows.map((r) => ({
+      initiative_id: r.initiative_id,
+      key_result_id: r.key_result_id,
+    }));
+  }
+
+  const latestRunByKrId = new Map<
+    string,
+    { status: "ok" | "insufficient_context" | "failed"; insufficientContextReason: string | null }
+  >();
+  if (keyResultIds.length > 0) {
+    const { data: runs } = await supabase
+      .schema("app")
+      .from("kr_initiative_matching_runs")
+      .select("key_result_id, status, insufficient_context_reason, created_at")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .in("key_result_id", keyResultIds)
+      .order("created_at", { ascending: false });
+    for (const run of runs ?? []) {
+      const keyResultId = run.key_result_id as string;
+      if (latestRunByKrId.has(keyResultId)) continue;
+      latestRunByKrId.set(keyResultId, {
+        status: run.status as "ok" | "insufficient_context" | "failed",
+        insufficientContextReason: (run.insufficient_context_reason as string | null) ?? null,
+      });
+    }
   }
 
   const krTitleById = new Map(keyResults.map((k) => [k.id, k.title]));
   const initiativeTitleById = new Map(initiativesRaw.map((i) => [i.id, i.title]));
   const krToInitiatives = initiativeIdsByKeyResultId(initiativeKrLinks);
+  const linksByKrId = new Map<string, typeof linkMetaRows>();
+  for (const row of linkMetaRows) {
+    const list = linksByKrId.get(row.key_result_id) ?? [];
+    list.push(row);
+    linksByKrId.set(row.key_result_id, list);
+  }
 
   const initiatives: OkrPlanningInitiativeRow[] = initiativesRaw.map((row) => {
     const resolution = resolveStrategicDirectionForInitiative(
@@ -555,6 +617,16 @@ export async function getOkrPlanningWorkspaceData(
         linkedInitiativeIds: iids,
         linkedInitiativeTitles: iids.map((id) => initiativeTitleById.get(id) ?? id),
         warningNoInitiativeLink: keyResultWarningNoInitiativeLink(kr.id, initiativeKrLinks),
+        initiativeSuggestions: (linksByKrId.get(kr.id) ?? []).map((r) => ({
+          initiativeId: r.initiative_id,
+          initiativeTitle: initiativeTitleById.get(r.initiative_id) ?? r.initiative_id,
+          llmLevel: r.llm_level ?? null,
+          llmReason: r.llm_reason ?? null,
+          confirmedLevel: r.confirmed_level ?? null,
+          confirmationStatus: r.confirmation_status ?? "none",
+          llmRunId: r.llm_run_id ?? null,
+        })),
+        latestMatchingRun: latestRunByKrId.get(kr.id) ?? null,
       };
     });
     const objDeputy = obj.deputy_membership_id;
@@ -656,5 +728,6 @@ export async function getOkrPlanningWorkspaceData(
     okrObjectives,
     okrKrOwnerMustMatchObjective,
     okrContributionAssessmentEnabled,
+    krInitiativeMatchingEnabled,
   };
 }

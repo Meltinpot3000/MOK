@@ -29,6 +29,8 @@ function kr(partial: Partial<OkrPlanningKeyResultRow> & { id: string; objectiveI
     linkedInitiativeIds: partial.linkedInitiativeIds ?? [],
     linkedInitiativeTitles: partial.linkedInitiativeTitles ?? [],
     warningNoInitiativeLink: partial.warningNoInitiativeLink ?? false,
+    initiativeSuggestions: partial.initiativeSuggestions ?? [],
+    latestMatchingRun: partial.latestMatchingRun ?? null,
   };
 }
 

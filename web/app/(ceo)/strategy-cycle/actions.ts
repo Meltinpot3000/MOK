@@ -72,6 +72,7 @@ import { membershipHasExecutiveRole } from "@/lib/rbac/membership-executive";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { executeOkrContributionAssessmentJob } from "@/lib/okr/execute-okr-contribution-assessment";
+import { executeKrInitiativeMatchingJob } from "@/lib/okr/execute-kr-initiative-matching";
 
 type WorkspaceContext = {
   organizationId: string;
@@ -238,7 +239,8 @@ type BackgroundJobType =
   | "link_draft_generation"
   | "cluster_recompute"
   | "gaps_recompute"
-  | "okr_contribution_assessment";
+  | "okr_contribution_assessment"
+  | "kr_initiative_matching";
 type BackgroundJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 type AnalysisNetworkConfig = {
@@ -2963,6 +2965,17 @@ export async function processPendingBackgroundJobs(
             organizationId: pending.organization_id,
             cycleInstanceId: pending.cycle_instance_id,
             okrObjectiveId,
+            trigger,
+          });
+        }
+      } else if (pending.job_type === "kr_initiative_matching") {
+        const keyResultId = String(payload.key_result_id ?? "").trim();
+        if (keyResultId) {
+          await executeKrInitiativeMatchingJob({
+            supabase,
+            organizationId: pending.organization_id,
+            cycleInstanceId: pending.cycle_instance_id,
+            keyResultId,
             trigger,
           });
         }

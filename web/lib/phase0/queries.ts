@@ -39,6 +39,18 @@ export type Responsible = {
   email: string | null;
   role_title: string | null;
   is_active: boolean;
+  /** Optional: gekoppelte Mitgliedschaft (Benutzerkontingent). */
+  membership_id: string | null;
+};
+
+/** Aktive/ eingeladene Mitgliedschaften für die Kopplung Verantwortliche ↔ Benutzerkontingent. */
+export type MembershipForResponsibleSetup = {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  title: string | null;
+  responsible_id: string | null;
+  status: string;
 };
 
 const DEFAULT_ORGANIZATION_UNIT_TYPES: Array<
@@ -137,11 +149,24 @@ export async function getResponsibles(organizationId: string): Promise<Responsib
   const { data } = await supabase
     .schema("app")
     .from("responsibles")
-    .select("id, full_name, email, role_title, is_active")
+    .select("id, full_name, email, role_title, is_active, membership_id")
     .eq("organization_id", organizationId)
     .order("full_name", { ascending: true });
 
   return (data ?? []) as Responsible[];
+}
+
+export async function getMembershipsForResponsibleSetup(organizationId: string): Promise<MembershipForResponsibleSetup[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("id, user_id, display_name, title, responsible_id, status")
+    .eq("organization_id", organizationId)
+    .in("status", ["active", "invited"] as const)
+    .order("display_name", { ascending: true, nullsFirst: false });
+
+  return (data ?? []) as MembershipForResponsibleSetup[];
 }
 
 export async function getPlanningCycles(organizationId: string) {

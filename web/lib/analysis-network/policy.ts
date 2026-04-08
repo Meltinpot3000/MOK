@@ -8,7 +8,8 @@ type LlmFeatureKey =
   | "model_health_checks"
   | "objective_evaluation"
   | "matrix_program_proposal"
-  | "okr_contribution_assessment";
+  | "okr_contribution_assessment"
+  | "kr_initiative_matching";
 
 export type AnalysisNetworkLlmPolicy = {
   llmEnabled: boolean;
@@ -17,6 +18,7 @@ export type AnalysisNetworkLlmPolicy = {
   maxOutputTokensByFeature: Record<LlmFeatureKey, number>;
   dailySoftTokenLimit: number;
   monthlyHardTokenLimit: number;
+  krInitiativeMatchingConfidenceThreshold: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -37,6 +39,12 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
     if (normalized === "false" || normalized === "0" || normalized === "no") return false;
   }
   return fallback;
+}
+
+function readFraction(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Number(clamp(parsed, 0, 1).toFixed(3));
 }
 
 function readAnalysisNetworkObject(brandingConfig: unknown): Record<string, unknown> {
@@ -70,6 +78,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     objective_evaluation: readBoolean(featureFlagsRaw.objective_evaluation, false),
     matrix_program_proposal: readBoolean(featureFlagsRaw.matrix_program_proposal, true),
     okr_contribution_assessment: readBoolean(featureFlagsRaw.okr_contribution_assessment, false),
+    kr_initiative_matching: readBoolean(featureFlagsRaw.kr_initiative_matching, false),
   };
 
   const maxOutputTokensByFeature: Record<LlmFeatureKey, number> = {
@@ -83,6 +92,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     objective_evaluation: readNumber(outputByFeatureRaw.objective_evaluation, 600, 64, 4096),
     matrix_program_proposal: readNumber(outputByFeatureRaw.matrix_program_proposal, 900, 64, 4096),
     okr_contribution_assessment: readNumber(outputByFeatureRaw.okr_contribution_assessment, 520, 64, 4096),
+    kr_initiative_matching: readNumber(outputByFeatureRaw.kr_initiative_matching, 700, 64, 4096),
   };
 
   return {
@@ -92,6 +102,10 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     maxOutputTokensByFeature,
     dailySoftTokenLimit: readNumber(analysisNetwork.llm_daily_soft_token_limit, 150000, 0, 100000000),
     monthlyHardTokenLimit: readNumber(analysisNetwork.llm_monthly_hard_token_limit, 3000000, 0, 1000000000),
+    krInitiativeMatchingConfidenceThreshold: readFraction(
+      analysisNetwork.kr_initiative_matching_confidence_threshold,
+      0.8
+    ),
   };
 }
 

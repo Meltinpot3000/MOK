@@ -33,7 +33,6 @@ type MembershipRow = {
   /** Funktion / Rollenbezeichnung in der Organisation. */
   title: string | null;
   created_at: string;
-  responsible_id: string | null;
   responsible:
     | {
         id: string;
@@ -65,7 +64,7 @@ function getStatusMessage(error?: string, success?: string, detail?: string) {
   if (success === "membership-row-saved") {
     return {
       type: "success",
-      text: "Rollen und Verantwortliche-Zuordnung wurden gespeichert." as const,
+      text: "Rollen und Mitgliedschaftsdaten wurden gespeichert." as const,
     };
   }
   if (success === "invite-created-mail-sent") {
@@ -115,9 +114,6 @@ function getStatusMessage(error?: string, success?: string, detail?: string) {
   if (error === "missing-membership") {
     return { type: "error", text: "Mitgliedschaft fehlt oder ist ungueltig." as const };
   }
-  if (error === "missing-responsible") {
-    return { type: "error", text: "Verantwortlicher fehlt oder ist ungueltig." as const };
-  }
   if (error === "save-failed") {
     return { type: "error", text: "Zuordnung konnte nicht gespeichert werden." as const };
   }
@@ -164,7 +160,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
 
   const baseUrl = await getAppBaseUrl();
   const serviceRoleConfigured = isServiceRoleConfigured();
-  const [roles, invitations, membershipsRes, responsiblesRes, editableRolesRes] = await Promise.all([
+  const [roles, invitations, membershipsRes, editableRolesRes] = await Promise.all([
     getInvitationRoles(context.organizationId),
     listInvitations(context.organizationId),
     createSupabaseServerClient().then((supabase) =>
@@ -172,19 +168,10 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         .schema("app")
         .from("organization_memberships")
         .select(
-          "id, user_id, status, display_name, title, created_at, responsible_id, responsible:responsible_id(id, full_name, email, role_title)"
+          "id, user_id, status, display_name, title, created_at, responsible:responsible_id(id, full_name, email, role_title)"
         )
         .eq("organization_id", context.organizationId)
         .order("created_at", { ascending: false })
-    ),
-    createSupabaseServerClient().then((supabase) =>
-      supabase
-        .schema("app")
-        .from("responsibles")
-        .select("id, full_name, email, role_title, is_active")
-        .eq("organization_id", context.organizationId)
-        .eq("is_active", true)
-        .order("full_name", { ascending: true })
     ),
     createSupabaseServerClient().then((supabase) =>
       supabase
@@ -212,14 +199,6 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
   const status = getStatusMessage(params.error, params.success, params.detail);
 
   const roleAssignments = (roleAssignmentsRes.data ?? []) as RoleAssignmentRow[];
-  const responsibles =
-    (responsiblesRes.data ?? []) as Array<{
-      id: string;
-      full_name: string;
-      email: string | null;
-      role_title: string | null;
-      is_active: boolean;
-    }>;
   const editableRoles = (editableRolesRes.data ?? []) as RoleRow[];
 
   const roleCodesByMembership = new Map<string, string[]>();
@@ -279,7 +258,6 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
     if (localAccess.state !== "ok" || !localAccess.canWrite) redirect("/no-access");
 
     const membershipId = String(formData.get("membership_id") ?? "").trim();
-    const responsibleIdRaw = String(formData.get("responsible_id") ?? "").trim();
     const roleCodes = [
       ...new Set(
         formData
@@ -305,19 +283,6 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       .eq("organization_id", localContext.organizationId)
       .maybeSingle();
     if (!membership) redirect("/invitations?error=missing-membership");
-
-    if (responsibleIdRaw) {
-      const { data: responsible } = await supabase
-        .schema("app")
-        .from("responsibles")
-        .select("id, organization_id, is_active")
-        .eq("id", responsibleIdRaw)
-        .eq("organization_id", localContext.organizationId)
-        .maybeSingle();
-      if (!responsible || !responsible.is_active) {
-        redirect("/invitations?error=missing-responsible");
-      }
-    }
 
     const { data: roleRows } = await supabase
       .schema("rbac")
@@ -358,12 +323,10 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       if (insertError) redirect("/invitations?error=role-save-failed");
     }
 
-    const nextResponsibleId = responsibleIdRaw ? responsibleIdRaw : null;
     const { error: membershipUpdateError } = await supabase
       .schema("app")
       .from("organization_memberships")
       .update({
-        responsible_id: nextResponsibleId,
         display_name: membershipDisplayName,
         title: membershipTitle,
       })
@@ -610,7 +573,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Benutzer</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Benutzer</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Verwalte Benutzer, Verantwortlichen-Zuordnungen und Zugaenge zentral an einer Stelle.
+          Verwalte Benutzer, Rollen und Zugaenge zentral an einer Stelle. Verantwortliche pflegst du unter
+          Organisationsstruktur.
         </p>
       </header>
 
@@ -629,17 +593,16 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       ) : null}
 
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Benutzerliste und Verantwortlichen-Zuordnung</h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Benutzerliste</h2>
         <p className="mt-1 text-sm text-zinc-600">
           Mehrere Organisations-Rollen pro Benutzer sind moeglich; Navigationsrechte aus allen Rollen werden vereinigt
-          (effektives Recht ist die Summe). Optional ist genau ein Verantwortlicher zuordenbar — das steuert kein RBAC.
+          (effektives Recht ist die Summe).
         </p>
         <div className="mt-4 overflow-x-auto">
           <InvitationsMembershipTable
             memberships={memberships}
             identityByUserId={identityByUserIdRecord}
             roleCodesByMembership={roleCodesByMembershipRecord}
-            responsibles={responsibles}
             editableRoles={editableRoles}
             canWrite={canWrite}
             saveMembershipRow={saveMembershipRow}

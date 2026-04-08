@@ -14,7 +14,6 @@ type MembershipRow = {
   /** Funktion in der Organisation (app.organization_memberships.title). */
   title: string | null;
   created_at: string;
-  responsible_id: string | null;
   responsible:
     | {
         id: string;
@@ -40,12 +39,6 @@ type Props = {
   memberships: MembershipRow[];
   identityByUserId: Record<string, UserIdentity>;
   roleCodesByMembership: Record<string, string[]>;
-  responsibles: Array<{
-    id: string;
-    full_name: string;
-    email: string | null;
-    role_title: string | null;
-  }>;
   editableRoles: Array<{ id: string; code: string; name: string }>;
   canWrite: boolean;
   saveMembershipRow: (formData: FormData) => Promise<void>;
@@ -65,17 +58,10 @@ function displayUser(membership: MembershipRow, identityByUserId: Record<string,
   return { displayName, displayEmail };
 }
 
-function responsibleSummary(membership: MembershipRow): string {
-  const r = Array.isArray(membership.responsible) ? membership.responsible[0] : membership.responsible;
-  if (!r) return "";
-  return `${r.full_name}${r.role_title ? ` (${r.role_title})` : ""}`;
-}
-
 export function InvitationsMembershipTable({
   memberships,
   identityByUserId,
   roleCodesByMembership,
-  responsibles,
   editableRoles,
   canWrite,
   saveMembershipRow,
@@ -120,15 +106,6 @@ export function InvitationsMembershipTable({
           );
         },
       },
-      {
-        id: "responsible",
-        label: "Verantwortliche",
-        sortValue: (row) => responsibleSummary(row),
-        render: (row) => {
-          const text = responsibleSummary(row);
-          return <span className="text-zinc-800">{text || "—"}</span>;
-        },
-      },
     ],
     [identityByUserId, roleCodesByMembership]
   );
@@ -143,14 +120,11 @@ export function InvitationsMembershipTable({
       emptyMessage="Keine Benutzer-Memberships vorhanden."
       renderExpandedContent={(membership) => {
         const roleCodes = (roleCodesByMembership[membership.id] ?? []).slice().sort();
-        const responsible = Array.isArray(membership.responsible)
-          ? membership.responsible[0]
-          : membership.responsible;
         return (
           <form action={saveMembershipRow} className="mx-auto max-w-3xl space-y-4">
             <input type="hidden" name="membership_id" value={membership.id} />
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Rollen und Verantwortliche bearbeiten
+              Rollen bearbeiten
             </p>
             <div className="space-y-4 border-t border-zinc-200 pt-4">
               <div>
@@ -188,56 +162,29 @@ export function InvitationsMembershipTable({
                   Rollenbezeichnung oder Funktion — getrennt vom persoenlichen Anzeigenamen.
                 </p>
               </div>
-              <div className="grid gap-6 md:grid-cols-2">
-                <fieldset disabled={!canWrite} className="min-w-0 space-y-1.5 border-0 p-0">
-                  <legend className="mb-2 text-sm font-medium text-zinc-800">
-                    Organisation-Rollen
-                  </legend>
-                  {editableRoles.map((role) => (
-                    <label
-                      key={role.id}
-                      className={`flex items-start gap-2 text-sm ${canWrite ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
-                    >
-                      <input
-                        type="checkbox"
-                        name="role_codes"
-                        value={role.code}
-                        defaultChecked={roleCodes.includes(role.code)}
-                        className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-zinc-300 accent-blue-600"
-                      />
-                      <span className="text-zinc-800">
-                        {role.name}{" "}
-                        <span className="text-zinc-500">({role.code})</span>
-                      </span>
-                    </label>
-                  ))}
-                </fieldset>
-                <div className="md:border-l md:border-zinc-200 md:pl-6">
-                  <p className="mb-2 text-sm font-medium text-zinc-800">Verantwortliche Zuordnung</p>
-                  <p className="mb-2 text-xs text-zinc-500">
-                    <span className="font-medium text-zinc-600">Aktuell:</span>{" "}
-                    {responsible
-                      ? `${responsible.full_name}${
-                          responsible.role_title ? ` (${responsible.role_title})` : ""
-                        }`
-                      : "keine Zuordnung"}
-                  </p>
-                  <select
-                    name="responsible_id"
-                    defaultValue={membership.responsible_id ?? ""}
-                    disabled={!canWrite}
-                    className="w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+              <fieldset disabled={!canWrite} className="min-w-0 space-y-1.5 border-0 p-0">
+                <legend className="mb-2 text-sm font-medium text-zinc-800">
+                  Organisation-Rollen
+                </legend>
+                {editableRoles.map((role) => (
+                  <label
+                    key={role.id}
+                    className={`flex items-start gap-2 text-sm ${canWrite ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                   >
-                    <option value="">Keine Zuordnung</option>
-                    {responsibles.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.full_name}
-                        {entry.role_title ? ` - ${entry.role_title}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                    <input
+                      type="checkbox"
+                      name="role_codes"
+                      value={role.code}
+                      defaultChecked={roleCodes.includes(role.code)}
+                      className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-zinc-300 accent-blue-600"
+                    />
+                    <span className="text-zinc-800">
+                      {role.name}{" "}
+                      <span className="text-zinc-500">({role.code})</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
             </div>
             <div className="flex justify-end border-t border-zinc-200 pt-4">
               <button

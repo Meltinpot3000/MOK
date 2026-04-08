@@ -17,6 +17,7 @@ import {
 import { getOkrCycleInstanceScopeIds, getOkrCycles } from "@/lib/okr/queries";
 import { resolveNextOkrCycleId } from "@/lib/okr/okr-cycle-nav";
 import { scheduleOkrContributionAssessmentJob } from "@/lib/okr/contribution-assessment-schedule";
+import { scheduleKrInitiativeMatchingIfEnabled } from "@/lib/okr/kr-initiative-matching-schedule";
 import { fetchOkrContributionTargetsForObjective } from "@/lib/okr/contribution-assessment-triggers";
 import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
 import {
@@ -99,6 +100,31 @@ function keyResultWriteDeniedError() {
   return {
     error: "Keine Berechtigung: Key Result kann nur mit passender Relation und OKR-KR-Permission geändert werden." as const,
   };
+}
+
+function keyResultMatchingRelevantChanged(input: {
+  prev: {
+    title: string;
+    metric_type: string;
+    start_value: number | null;
+    target_value: number | null;
+    measurement_unit: string | null;
+  };
+  next: {
+    title: string;
+    metric_type: string;
+    start_value: number | null;
+    target_value: number | null;
+    measurement_unit: string | null;
+  };
+}): boolean {
+  return (
+    input.prev.title !== input.next.title ||
+    input.prev.metric_type !== input.next.metric_type ||
+    input.prev.start_value !== input.next.start_value ||
+    input.prev.target_value !== input.next.target_value ||
+    (input.prev.measurement_unit ?? null) !== (input.next.measurement_unit ?? null)
+  );
 }
 
 async function assertStrategicDirectionInCycle(
@@ -765,6 +791,14 @@ export async function createKeyResultAction(input: {
       membershipId: auth.context.membershipId,
       trigger: "key_result_create",
     });
+    await scheduleKrInitiativeMatchingIfEnabled({
+      supabase,
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: obj.cycle_instance_id,
+      keyResultId: inserted.id,
+      membershipId: auth.context.membershipId,
+      trigger: "key_result_create",
+    });
   }
   return { id: inserted.id };
 }
@@ -927,7 +961,36 @@ export async function updateKeyResultAction(input: {
     .eq("organization_id", auth.context.organizationId);
 
   if (error) return { error: error.message };
+  const shouldRunKrMatching = keyResultMatchingRelevantChanged({
+    prev: {
+      title: krContext.title,
+      metric_type: krContext.metric_type,
+      start_value: krContext.start_value,
+      target_value: krContext.target_value,
+      measurement_unit: krContext.measurement_unit,
+    },
+    next: {
+      title,
+      metric_type: input.metricType?.trim() || "boolean",
+      start_value: input.startValue ?? krContext.start_value,
+      target_value: input.targetValue ?? krContext.target_value,
+      measurement_unit:
+        input.measurementUnit !== undefined
+          ? input.measurementUnit?.trim() || null
+          : (krContext.measurement_unit ?? null),
+    },
+  });
   revalidateOkrPaths();
+  if (objOwnRow.cycle_instance_id && shouldRunKrMatching) {
+    await scheduleKrInitiativeMatchingIfEnabled({
+      supabase,
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: objOwnRow.cycle_instance_id,
+      keyResultId: input.keyResultId,
+      membershipId: auth.context.membershipId,
+      trigger: "key_result_update",
+    });
+  }
   return {};
 }
 
@@ -1304,6 +1367,229 @@ export async function unlinkKeyResultInitiativeAction(input: {
     membershipId: auth.context.membershipId,
     trigger: "initiative_link_remove",
   });
+  return {};
+}
+
+async function loadKrSuggestionPermissionContext(params: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  cycleInstanceId: string;
+  keyResultId: string;
+}) {
+  const { supabase, organizationId, cycleInstanceId, keyResultId } = params;
+  const { data: kr } = await supabase
+    .schema("app")
+    .from("key_results")
+    .select("id, okr_objective_id, owner_membership_id, deputy_membership_id")
+    .eq("id", keyResultId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (!kr?.id || !kr.okr_objective_id) return { error: "Key Result nicht gefunden." as const };
+  const { data: obj } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, owner_membership_id, deputy_membership_id, status, cycle_instance_id")
+    .eq("id", kr.okr_objective_id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (!obj?.id || obj.cycle_instance_id !== cycleInstanceId) {
+    return { error: "Key Result gehört nicht zu diesem Zyklus." as const };
+  }
+  if (obj.status === "shifted") {
+    return { error: "Initiative-Vorschläge für verschobenes Objective nicht änderbar." as const };
+  }
+  return { kr, obj };
+}
+
+export async function acceptKrInitiativeSuggestionAction(input: {
+  cycleInstanceId: string;
+  keyResultId: string;
+  initiativeId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+  const supabase = await createSupabaseServerClient();
+  const loaded = await loadKrSuggestionPermissionContext({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    keyResultId: input.keyResultId,
+  });
+  if ("error" in loaded) return loaded;
+  if (
+    !(await canAccessKeyResult({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      keyResult: {
+        id: loaded.kr.id,
+        owner_membership_id: loaded.kr.owner_membership_id ?? null,
+        deputy_membership_id: loaded.kr.deputy_membership_id ?? null,
+      },
+      objective: {
+        id: loaded.obj.id,
+        owner_membership_id: loaded.obj.owner_membership_id ?? null,
+        deputy_membership_id: loaded.obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return keyResultWriteDeniedError();
+  }
+  const { data: link } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .select("id, llm_level")
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("key_result_id", input.keyResultId)
+    .eq("initiative_id", input.initiativeId)
+    .maybeSingle();
+  if (!link?.id || !link.llm_level) {
+    return { error: "Kein LLM-Vorschlag zum Übernehmen." };
+  }
+  const { error } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .update({
+      confirmed_level: link.llm_level,
+      confirmation_status: "accepted",
+    })
+    .eq("id", link.id);
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function rejectKrInitiativeSuggestionAction(input: {
+  cycleInstanceId: string;
+  keyResultId: string;
+  initiativeId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+  const supabase = await createSupabaseServerClient();
+  const loaded = await loadKrSuggestionPermissionContext({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    keyResultId: input.keyResultId,
+  });
+  if ("error" in loaded) return loaded;
+  if (
+    !(await canAccessKeyResult({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      keyResult: {
+        id: loaded.kr.id,
+        owner_membership_id: loaded.kr.owner_membership_id ?? null,
+        deputy_membership_id: loaded.kr.deputy_membership_id ?? null,
+      },
+      objective: {
+        id: loaded.obj.id,
+        owner_membership_id: loaded.obj.owner_membership_id ?? null,
+        deputy_membership_id: loaded.obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return keyResultWriteDeniedError();
+  }
+  const { data: link } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .select("id")
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("key_result_id", input.keyResultId)
+    .eq("initiative_id", input.initiativeId)
+    .maybeSingle();
+  if (!link?.id) return { error: "Kein Vorschlag gefunden." };
+  const { error } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .update({
+      confirmation_status: "rejected",
+      confirmed_level: null,
+    })
+    .eq("id", link.id);
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function overrideKrInitiativeLevelAction(input: {
+  cycleInstanceId: string;
+  keyResultId: string;
+  initiativeId: string;
+  level: "low" | "medium" | "high";
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+  const supabase = await createSupabaseServerClient();
+  const loaded = await loadKrSuggestionPermissionContext({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    keyResultId: input.keyResultId,
+  });
+  if ("error" in loaded) return loaded;
+  if (
+    !(await canAccessKeyResult({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      keyResult: {
+        id: loaded.kr.id,
+        owner_membership_id: loaded.kr.owner_membership_id ?? null,
+        deputy_membership_id: loaded.kr.deputy_membership_id ?? null,
+      },
+      objective: {
+        id: loaded.obj.id,
+        owner_membership_id: loaded.obj.owner_membership_id ?? null,
+        deputy_membership_id: loaded.obj.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return keyResultWriteDeniedError();
+  }
+  const { data: link } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .select("id")
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("key_result_id", input.keyResultId)
+    .eq("initiative_id", input.initiativeId)
+    .maybeSingle();
+  if (!link?.id) {
+    const gate = await assertKeyResultAndInitiativeInCycleForLink({
+      supabase,
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: input.cycleInstanceId,
+      keyResultId: input.keyResultId,
+      initiativeId: input.initiativeId,
+    });
+    if ("error" in gate) return gate;
+    const { error: insErr } = await supabase.schema("app").from("initiative_key_result_links").insert({
+      organization_id: auth.context.organizationId,
+      cycle_instance_id: input.cycleInstanceId,
+      key_result_id: input.keyResultId,
+      initiative_id: input.initiativeId,
+      created_by_membership_id: auth.context.membershipId,
+      confirmed_level: input.level,
+      confirmation_status: "manual",
+    });
+    if (insErr) return { error: insErr.message };
+    revalidateOkrPaths();
+    return {};
+  }
+  const { error } = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .update({
+      confirmed_level: input.level,
+      confirmation_status: "manual",
+    })
+    .eq("id", link.id);
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
   return {};
 }
 

@@ -297,6 +297,15 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
               OKR Contribution Assessment (Alignment zu Initiativen / Strategiezielen)
             </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-700">
+              <input
+                type="checkbox"
+                name="llm_feature_kr_initiative_matching"
+                defaultChecked={llmPolicy.featureFlags.kr_initiative_matching}
+                className="h-4 w-4 rounded border-zinc-300"
+              />
+              KR-Initiativen-Matching (Sentinel Vorschlaege im KR-Detail)
+            </label>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
@@ -428,6 +437,31 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 max={4096}
                 name="llm_max_output_tokens_okr_contribution_assessment"
                 defaultValue={llmPolicy.maxOutputTokensByFeature.okr_contribution_assessment}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-zinc-600">KR-Initiativen-Matching</span>
+              <input
+                type="number"
+                min={64}
+                max={4096}
+                name="llm_max_output_tokens_kr_initiative_matching"
+                defaultValue={llmPolicy.maxOutputTokensByFeature.kr_initiative_matching}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-zinc-600">
+                KR-Matching Confidence-Grenze (0.0 bis 1.0)
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step="0.01"
+                name="kr_initiative_matching_confidence_threshold"
+                defaultValue={llmPolicy.krInitiativeMatchingConfidenceThreshold}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
               />
             </label>

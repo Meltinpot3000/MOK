@@ -30,11 +30,14 @@ import {
 } from "@/components/ceo/ExpandableTable";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
+  acceptKrInitiativeSuggestionAction,
   createKeyResultAction,
   createOkrObjectiveAction,
   deleteKeyResultAction,
   deleteOkrObjectiveAction,
   linkKeyResultInitiativeAction,
+  overrideKrInitiativeLevelAction,
+  rejectKrInitiativeSuggestionAction,
   saveOkrPlanningPanelAction,
   shiftOkrObjectiveToNextCycleAction,
   unlinkKeyResultInitiativeAction,
@@ -321,9 +324,177 @@ function KeyResultPlanningKrOneLineRow({
               ))}
             </div>
           )}
+          <KrInitiativeSuggestionsPanel
+            kr={kr}
+            cycleInstanceId={cycleInstanceId}
+            canWrite={canWrite && canEditThisKr}
+            onMutationSuccess={onMutationSuccess}
+          />
         </div>
       </KrPlanningInitiativesDetails>
     </>
+  );
+}
+
+function levelBadgeClass(level: "low" | "medium" | "high"): string {
+  if (level === "high") return "border-red-200 bg-red-50 text-red-700";
+  if (level === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-zinc-200 bg-zinc-50 text-zinc-700";
+}
+
+function KrInitiativeSuggestionsPanel({
+  kr,
+  cycleInstanceId,
+  canWrite,
+  onMutationSuccess,
+}: {
+  kr: OkrPlanningKeyResultRow;
+  cycleInstanceId: string;
+  canWrite: boolean;
+  onMutationSuccess: OkrPlanningDataRefresh;
+}) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const all = kr.initiativeSuggestions;
+  const confirmed = all.filter((r) => r.confirmationStatus === "accepted" || r.confirmationStatus === "manual");
+  const suggestions = all.filter((r) => r.confirmationStatus !== "accepted" && r.confirmationStatus !== "manual");
+  const run = kr.latestMatchingRun;
+
+  const runAction = async (initiativeId: string, fn: () => Promise<{ error?: string }>) => {
+    if (!canWrite) return;
+    setPendingId(initiativeId);
+    try {
+      const res = await fn();
+      if (res?.error) {
+        window.alert(res.error);
+        return;
+      }
+      await onMutationSuccess();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-zinc-100 pt-3">
+      {run?.status === "insufficient_context" ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          {run.insufficientContextReason ??
+            "Dieses Key Result ist aktuell zu unspezifisch beschrieben, um sinnvolle Initiative-Matches zu ermitteln."}
+        </div>
+      ) : null}
+
+      <div>
+        <p className="text-[11px] font-semibold text-zinc-700">Bestätigte Initiativen</p>
+        {confirmed.length === 0 ? (
+          <p className="mt-1 text-xs text-zinc-500">Noch keine bestätigten Zuordnungen.</p>
+        ) : (
+          <div className="mt-1 space-y-1.5">
+            {confirmed.map((row) => (
+              <div key={`confirmed-${row.initiativeId}`} className="rounded border border-zinc-200 bg-zinc-50 p-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-zinc-900">{row.initiativeTitle}</span>
+                  {row.confirmedLevel ? (
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${levelBadgeClass(row.confirmedLevel)}`}>
+                      {row.confirmedLevel}
+                    </span>
+                  ) : null}
+                  <span className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] text-zinc-600">
+                    gesetzt
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-[11px] font-semibold text-zinc-700">Vorgeschlagene Initiativen</p>
+        {suggestions.filter((s) => s.llmLevel).length === 0 ? (
+          <p className="mt-1 text-xs text-zinc-500">Keine Vorschläge mit ausreichender Confidence.</p>
+        ) : (
+          <div className="mt-1 space-y-2">
+            {suggestions
+              .filter((row) => row.llmLevel)
+              .map((row) => (
+                <div key={`suggestion-${row.initiativeId}`} className="rounded border border-zinc-200 bg-white p-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-zinc-900">{row.initiativeTitle}</span>
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${levelBadgeClass(row.llmLevel!)}`}>
+                      {row.llmLevel}
+                    </span>
+                    {row.confirmationStatus === "pending" ? (
+                      <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700">
+                        Suggestion
+                      </span>
+                    ) : null}
+                    {row.confirmedLevel && row.llmLevel && row.confirmedLevel !== row.llmLevel ? (
+                      <span className="rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700">
+                        Updated suggestion ({row.confirmedLevel} -&gt; {row.llmLevel})
+                      </span>
+                    ) : null}
+                  </div>
+                  {row.llmReason ? <p className="mt-1 text-[11px] text-zinc-600">{row.llmReason}</p> : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      disabled={!canWrite || pendingId === row.initiativeId}
+                      className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700 disabled:opacity-50"
+                      onClick={() =>
+                        void runAction(row.initiativeId, () =>
+                          acceptKrInitiativeSuggestionAction({
+                            cycleInstanceId,
+                            keyResultId: kr.id,
+                            initiativeId: row.initiativeId,
+                          })
+                        )
+                      }
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canWrite || pendingId === row.initiativeId}
+                      className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-[11px] text-rose-700 disabled:opacity-50"
+                      onClick={() =>
+                        void runAction(row.initiativeId, () =>
+                          rejectKrInitiativeSuggestionAction({
+                            cycleInstanceId,
+                            keyResultId: kr.id,
+                            initiativeId: row.initiativeId,
+                          })
+                        )
+                      }
+                    >
+                      Reject
+                    </button>
+                    {(["low", "medium", "high"] as const).map((level) => (
+                      <button
+                        key={`${row.initiativeId}-${level}`}
+                        type="button"
+                        disabled={!canWrite || pendingId === row.initiativeId}
+                        className="rounded border border-zinc-300 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-700 disabled:opacity-50"
+                        onClick={() =>
+                          void runAction(row.initiativeId, () =>
+                            overrideKrInitiativeLevelAction({
+                              cycleInstanceId,
+                              keyResultId: kr.id,
+                              initiativeId: row.initiativeId,
+                              level,
+                            })
+                          )
+                        }
+                      >
+                        Override {level}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

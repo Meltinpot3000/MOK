@@ -30,6 +30,24 @@ function cycleLinkClass(isActive: boolean): string {
     : "block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100";
 }
 
+function UserManualIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className ?? "h-5 w-5"}
+      aria-hidden
+    >
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v19H6.5A2.5 2.5 0 0 0 4 23V4.5A2.5 2.5 0 0 1 6.5 2Z" />
+    </svg>
+  );
+}
+
 export function CycleSidebar({
   cycles,
   branding,
@@ -41,6 +59,7 @@ export function CycleSidebar({
   primaryRoleLabel,
 }: CycleSidebarProps) {
   const pathname = usePathname();
+  const isUserManualActive = pathname === "/user-manual" || pathname.startsWith("/user-manual/");
   const brandingConfig =
     branding?.branding_config && typeof branding.branding_config === "object"
       ? (branding.branding_config as Record<string, unknown>)
@@ -101,25 +120,39 @@ export function CycleSidebar({
   const showJobBell = permissions["strategy-cycle"]?.read ?? false;
 
   return (
-    <aside className="w-72 border-r border-zinc-200 bg-white p-4">
+    <aside className="flex w-72 flex-col border-r border-zinc-200 bg-white p-4">
       <div className="mb-6">
         <div className="flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
-          {branding?.logo_url ? (
-            <span
-              className="inline-block h-[41px] w-16 rounded bg-zinc-100"
-              style={{
-                backgroundImage: `url("${branding.logo_url}")`,
-                backgroundRepeat: "no-repeat",
-                backgroundSize: "contain",
-                backgroundPosition: `${logoPositionX}% ${logoPositionY}%`,
-              }}
-              aria-label="Mandantenlogo"
-              title={branding.logo_url}
-            />
-          ) : null}
+            {branding?.logo_url ? (
+              <span
+                className="inline-block h-[41px] w-16 rounded bg-zinc-100"
+                style={{
+                  backgroundImage: `url("${branding.logo_url}")`,
+                  backgroundRepeat: "no-repeat",
+                  backgroundSize: "contain",
+                  backgroundPosition: `${logoPositionX}% ${logoPositionY}%`,
+                }}
+                aria-label="Mandantenlogo"
+                title={branding.logo_url}
+              />
+            ) : null}
           </div>
-          {showJobBell ? <JobNotificationsBell /> : null}
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Link
+              href="/user-manual"
+              className={
+                isUserManualActive
+                  ? "rounded-md bg-zinc-900 p-2 text-white"
+                  : "rounded-md p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+              }
+              aria-label="User Manual öffnen"
+              title="User Manual"
+            >
+              <UserManualIcon />
+            </Link>
+            {showJobBell ? <JobNotificationsBell /> : null}
+          </div>
         </div>
         <h1 className="mt-2.5 break-words text-lg font-semibold leading-tight text-zinc-900">{productName}</h1>
         {userDisplayLine ? (

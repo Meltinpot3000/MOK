@@ -56,6 +56,8 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
     String(formData.get("llm_feature_objective_evaluation") ?? "off") === "on";
   const llmFeatureOkrContributionAssessment =
     String(formData.get("llm_feature_okr_contribution_assessment") ?? "off") === "on";
+  const llmFeatureKrInitiativeMatching =
+    String(formData.get("llm_feature_kr_initiative_matching") ?? "off") === "on";
   const llmDefaultMaxOutputTokens = Number(formData.get("llm_max_output_tokens_default") ?? 700);
   const llmMaxOutputQuality = Number(formData.get("llm_max_output_tokens_quality_scoring") ?? 500);
   const llmMaxOutputGraphLayout = Number(formData.get("llm_max_output_tokens_graph_layout") ?? 1000);
@@ -71,6 +73,12 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
   );
   const llmMaxOutputOkrContributionAssessment = Number(
     formData.get("llm_max_output_tokens_okr_contribution_assessment") ?? 520
+  );
+  const llmMaxOutputKrInitiativeMatching = Number(
+    formData.get("llm_max_output_tokens_kr_initiative_matching") ?? 700
+  );
+  const krInitiativeMatchingConfidenceThreshold = Number(
+    formData.get("kr_initiative_matching_confidence_threshold") ?? 0.8
   );
   const llmDailySoftTokenLimit = Number(formData.get("llm_daily_soft_token_limit") ?? 150000);
   const llmMonthlyHardTokenLimit = Number(formData.get("llm_monthly_hard_token_limit") ?? 3000000);
@@ -114,6 +122,7 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
       model_health_checks: llmFeatureModelHealth,
       objective_evaluation: llmFeatureObjectiveEvaluation,
       okr_contribution_assessment: llmFeatureOkrContributionAssessment,
+      kr_initiative_matching: llmFeatureKrInitiativeMatching,
     },
     llm_max_output_tokens_default: clampInt(llmDefaultMaxOutputTokens, 700, 64, 4096),
     llm_max_output_tokens_by_feature: {
@@ -127,7 +136,12 @@ export async function saveLlmSystemConfiguration(formData: FormData) {
       model_health_checks: clampInt(llmMaxOutputHealth, 128, 64, 4096),
       objective_evaluation: clampInt(llmMaxOutputObjectiveEvaluation, 600, 64, 4096),
       okr_contribution_assessment: clampInt(llmMaxOutputOkrContributionAssessment, 520, 64, 4096),
+      kr_initiative_matching: clampInt(llmMaxOutputKrInitiativeMatching, 700, 64, 4096),
     },
+    kr_initiative_matching_confidence_threshold: Math.max(
+      0,
+      Math.min(1, Number(krInitiativeMatchingConfidenceThreshold.toFixed(3)))
+    ),
     llm_daily_soft_token_limit: clampInt(llmDailySoftTokenLimit, 150000, 0, 100000000),
     llm_monthly_hard_token_limit: clampInt(llmMonthlyHardTokenLimit, 3000000, 0, 1000000000),
   };

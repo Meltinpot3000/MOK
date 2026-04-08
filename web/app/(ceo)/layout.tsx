@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { redirect } from "next/navigation";
-import { CycleSidebar } from "@/components/ceo/CycleSidebar";
+import { CeoAppShell } from "@/components/ceo/CeoAppShell";
 import { getAppShellAccess } from "@/lib/rbac/page-access";
 import {
   getAuthenticatedUserId,
@@ -71,18 +71,18 @@ export default async function CeoLayout({
   } as CSSProperties;
 
   return (
-    <div className="brand-shell flex min-h-screen bg-zinc-50" style={brandStyle}>
-      <CycleSidebar
-        cycles={cycles}
-        branding={branding}
-        productName={productName}
-        permissions={sidebarPermissions}
-        nowIso={new Date().toISOString()}
-        userDisplayLine={userDisplayLine}
-        userEmail={sidebarIdentity.email}
-        primaryRoleLabel={primaryRoleLabel}
-      />
-      <main className="flex-1 p-6">{children}</main>
-    </div>
+    <CeoAppShell
+      brandStyle={brandStyle}
+      cycles={cycles}
+      branding={branding}
+      productName={productName}
+      permissions={sidebarPermissions}
+      nowIso={new Date().toISOString()}
+      userDisplayLine={userDisplayLine}
+      userEmail={sidebarIdentity.email}
+      primaryRoleLabel={primaryRoleLabel}
+    >
+      {children}
+    </CeoAppShell>
   );
 }
