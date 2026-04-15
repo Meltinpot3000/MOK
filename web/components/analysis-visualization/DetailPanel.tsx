@@ -67,7 +67,8 @@ export function DetailPanel({
       </div>
       {!selectedNode && !selectedEdge ? (
         <p className="text-xs text-zinc-600">
-          Knoten oder Verbindung auswaehlen, um Details und strategische Ableitung zu sehen.
+          
+          Knoten oder Verbindung auswählen, um Details und strategische Ableitung zu sehen.
         </p>
       ) : null}
 
@@ -93,7 +94,8 @@ export function DetailPanel({
             <p className="mt-2 text-xs text-zinc-600">{selectedNode.description}</p>
           ) : null}
           <p className="mt-2 text-xs text-zinc-600">
-            Strategischer Hinweis: Nutze Knoten mit hoher Wirkung und vielen ausgehenden Kanten als Kandidaten fuer Herausforderungen.
+            
+            Strategischer Hinweis: Nutze Knoten mit hoher Wirkung und vielen ausgehenden Kanten als Kandidaten für Herausforderungen.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <a
@@ -121,7 +123,8 @@ export function DetailPanel({
           </p>
           {tri ? (
             <p className="text-xs text-zinc-600">
-              Naehe {Math.round(tri.proximityScore * 100)}% | Unterstuetzung{" "}
+              
+              Nähe {Math.round(tri.proximityScore * 100)}% | Unterstützung{" "}
               {Math.round(tri.supportScore * 100)}% | Abstossung {Math.round(tri.repulsionScore * 100)}%
             </p>
           ) : null}
@@ -162,7 +165,7 @@ export function DetailPanel({
             >
               <option value="related_to">ist verbunden mit</option>
               <option value="causes">verursacht</option>
-              <option value="supports">unterstuetzt</option>
+              <option value="supports">unterstützt</option>
               <option value="contradicts">widerspricht</option>
               <option value="amplifies">verstaerkt</option>
               <option value="depends_on">haengt ab von</option>
@@ -244,7 +247,7 @@ export function DetailPanel({
             setStatus("Loesche...");
             try {
               await onDeleteEdge(edge);
-              setStatus("Verbindung geloescht.");
+              setStatus("Verbindung gel\u00F6scht.");
             } catch {
               setStatus("Loeschen fehlgeschlagen.");
             } finally {

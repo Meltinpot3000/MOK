@@ -39,6 +39,8 @@ type Props = {
   review: StrategyReviewRow | null;
   membershipId: string;
   canWrite: boolean;
+  /** Wenn gesetzt, entfällt die doppelte Überschrift (Seite liefert Titel + Reiter). */
+  hidePageHeader?: boolean;
   feedbackRows: Array<{
     id: string;
     subject_type: string;
@@ -58,6 +60,7 @@ export function StrategyReviewProcedureShell({
   review: initialReview,
   membershipId,
   canWrite,
+  hidePageHeader = false,
   feedbackRows,
 }: Props) {
   const router = useRouter();
@@ -282,17 +285,27 @@ export function StrategyReviewProcedureShell({
 
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
 
-      <header className="brand-card p-6">
-        <h1 className="text-xl font-semibold text-zinc-900">Strategy Review</h1>
-        <p className="mt-1 text-sm text-zinc-600">
-          Zyklus: {cycleLabel} ({cycleStart} – {cycleEnd})
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Status: <strong>{review.procedure_status}</strong> · Readiness:{" "}
-          <strong>{review.readiness_status}</strong>
-          {review.override_forced ? " · Override aktiv" : ""}
-        </p>
-      </header>
+      {hidePageHeader ? (
+        <div className="brand-card px-6 py-3">
+          <p className="text-xs text-zinc-600">
+            Status: <strong>{review.procedure_status}</strong> · Readiness:{" "}
+            <strong>{review.readiness_status}</strong>
+            {review.override_forced ? " · Override aktiv" : ""}
+          </p>
+        </div>
+      ) : (
+        <header className="brand-card p-6">
+          <h1 className="text-xl font-semibold text-zinc-900">Strategy Review</h1>
+          <p className="mt-1 text-sm text-zinc-600">
+            Zyklus: {cycleLabel} ({cycleStart} – {cycleEnd})
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Status: <strong>{review.procedure_status}</strong> · Readiness:{" "}
+            <strong>{review.readiness_status}</strong>
+            {review.override_forced ? " · Override aktiv" : ""}
+          </p>
+        </header>
+      )}
 
       {/* Step 0 — Announcement */}
       {(review.procedure_status === "not_started" || review.procedure_status === "announcement_sent") && (

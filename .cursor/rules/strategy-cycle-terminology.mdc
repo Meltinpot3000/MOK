@@ -1,0 +1,29 @@
+---
+description: Begriffe Strategiezyklus vs. OKR — UI- und Dokumentationstexte
+globs:
+  - web/app/(ceo)/strategy-cycle/**/*
+  - web/components/ceo/strategy-cycle/**/*
+  - web/lib/strategy-cycle/**/*
+---
+
+# Terminologie: Strategiezyklus und OKR
+
+## Strategiezyklus (`strategy_objectives` / UI-Reiter «Ziele»)
+
+- In **Nutzer- und Hilfetexten** durchgängig **«Ziel» / «Ziele»** oder **«strategische Ziele»** verwenden.
+- Das englische **«Objectives»** nicht für den Strategiezyklus nutzen (weder Überschriften noch Fließtext).
+- Technische Bezeichner im Code (`objective_id`, `strategy_objectives`, Funktionsnamen) unverändert lassen.
+
+## OKR-Zyklus
+
+- Der Begriff **«Objectives»** bzw. **«OKR-Objectives»** ist dem **OKR-Arbeitsbereich** vorbehalten (OKR-Modell: Objectives & Key Results).
+- Strategische Ziele des Strategiezyklus und OKR-Objectives bewusst **nicht** vermischen; bei Querverweisen die Unterscheidung kurz klären.
+
+## Kurzreferenz
+
+| Kontext            | UI-/Dokumentationssprache        |
+|-------------------|----------------------------------|
+| Strategiezyklus   | Ziele, strategische Ziele        |
+| OKR               | Objectives / OKR-Objectives      |
+
+Ergänzend: `web/app/(ceo)/user-manual/page.tsx`, Abschnitt «Zentrale Begriffe».

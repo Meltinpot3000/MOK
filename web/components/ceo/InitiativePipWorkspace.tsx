@@ -42,8 +42,9 @@ export function InitiativePipWorkspace({
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Initiative erfassen</h2>
         <p className="mt-1 text-[11px] text-zinc-500">
+          
           Neue Initiativen hier anlegen. Bestehende Initiativen in der Tabelle rechts aufklappen und dort bearbeiten
-          (wie bei strategischen Stossrichtungen).
+          (wie bei strategischen Stoßrichtungen).
         </p>
         <InitiativeCreateForm
           canWrite={canWrite}

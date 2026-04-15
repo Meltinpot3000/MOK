@@ -18,8 +18,8 @@ type InitiativesPageProps = {
 };
 
 function getStatus(error?: string, success?: string) {
-  if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung auswaehlen." };
-  if (success === "linked") return { type: "success", text: "Dimension wurde erfolgreich verknuepft." };
+  if (error === "missing-link") return { type: "error", text: "Bitte g\u00FCltige Verkn\u00FCpfung ausw\u00E4hlen." };
+  if (success === "linked") return { type: "success", text: "Dimension wurde erfolgreich verkn\u00FCpft." };
   return null;
 }
 
@@ -69,7 +69,8 @@ export default async function InitiativesPage({ searchParams }: InitiativesPageP
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Initiativen / Programme</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Initiativen / Programme</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Verknuepfe Initiativen direkt mit Industrien, Geschaeftsmodellen und Betriebsmodellen.
+          
+          Verknüpfe Initiativen direkt mit Industrien, Geschäftsmodellen und Betriebsmodellen.
         </p>
       </header>
 
@@ -102,7 +103,8 @@ export default async function InitiativesPage({ searchParams }: InitiativesPageP
                     Industrien: {linkedIndustries.map((x) => x.name).join(", ") || "-"}
                   </p>
                   <p className="text-xs text-zinc-600">
-                    Geschaeftsmodelle: {linkedBusinessModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
+                    
+                    Geschäftsmodelle: {linkedBusinessModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
                   </p>
                   <p className="text-xs text-zinc-600">
                     Betriebsmodelle: {linkedOperatingModels.map((x) => `${x.name} (v${x.version_no})`).join(", ") || "-"}
@@ -111,32 +113,32 @@ export default async function InitiativesPage({ searchParams }: InitiativesPageP
                     <form action={linkInitiativeToIndustry} className="flex gap-2">
                       <input type="hidden" name="initiative_id" value={initiative.id} />
                       <select name="industry_id" defaultValue="" className="min-w-[200px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                        <option value="">Industrie verknuepfen</option>
+                        <option value="">Industrie verknüpfen</option>
                         {industries.map((industry) => (
                           <option key={industry.id} value={industry.id}>{industry.name}</option>
                         ))}
                       </select>
-                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
+                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknüpfen</button>
                     </form>
                     <form action={linkInitiativeToBusinessModel} className="flex gap-2">
                       <input type="hidden" name="initiative_id" value={initiative.id} />
                       <select name="business_model_id" defaultValue="" className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                        <option value="">Geschaeftsmodell verknuepfen</option>
+                        <option value="">Geschäftsmodell verknüpfen</option>
                         {businessModels.map((model) => (
                           <option key={model.id} value={model.id}>{model.name} (v{model.version_no})</option>
                         ))}
                       </select>
-                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
+                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknüpfen</button>
                     </form>
                     <form action={linkInitiativeToOperatingModel} className="flex gap-2">
                       <input type="hidden" name="initiative_id" value={initiative.id} />
                       <select name="operating_model_id" defaultValue="" className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs">
-                        <option value="">Betriebsmodell verknuepfen</option>
+                        <option value="">Betriebsmodell verknüpfen</option>
                         {operatingModels.map((model) => (
                           <option key={model.id} value={model.id}>{model.name} (v{model.version_no})</option>
                         ))}
                       </select>
-                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknuepfen</button>
+                      <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1.5 text-xs">Verknüpfen</button>
                     </form>
                   </div>
                 </div>

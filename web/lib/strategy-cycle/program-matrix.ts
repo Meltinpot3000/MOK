@@ -7,21 +7,21 @@ import {
 } from "./strategic-direction-lifecycle";
 
 /**
- * Programm-Matrix: Zeilen = Stossrichtungen; Spalten = Herausforderungen, danach Objectives.
+ * Programm-Matrix: Zeilen = Stossrichtungen; Spalten = Herausforderungen, danach Ziele.
  *
  * --- Herausforderung × Stossrichtung ---
  *   Roh_H = ( Σ_i (OI_i × ÜF_O,i) ) × HS × ÜF_H × SP
- *   (wie zuvor; OI = importance_score Objective, ÜF_O/ÜF_H = 0 | 0,5 | 1 | 2)
+ *   (wie zuvor; OI = importance_score Ziel, ÜF_O/ÜF_H = 0 | 0,5 | 1 | 2)
  *
- * --- Objective × Stossrichtung (Unterstützung des Objectives durch die Richtung) ---
+ * --- Ziel × Stossrichtung (Unterstützung des Ziels durch die Richtung) ---
  *   Roh_O = SP × Priorität_Obj × Importance_Obj × ÜF_O / 3
  *   Priorität_Obj = importance_score (1–5, Standard 3)
  *   Importance_Obj = ai_objective_score falls gesetzt, sonst 3 (neutral — vermeidet Doppelzählung)
- *   ÜF_O = Abdeckung Richtung–Objective: 0 (kein Link) | 0,5 | 1 | 2
+ *   ÜF_O = Abdeckung Richtung–Ziel: 0 (kein Link) | 0,5 | 1 | 2
  *   Der Faktor /3 bewirkt: gleiche Basisgrössen zählen Herausforderungs-Zellen etwa dreimal so stark
- *   wie Objective-Zellen (vor gemeinsamer Normierung auf 0–100).
+ *   wie Ziel-Zellen (vor gemeinsamer Normierung auf 0–100).
  *
- * Anzeige 0–100: min(100, round(Roh / MaxRoh × 100)) über alle Zellen (Challenges + Objectives);
+ * Anzeige 0–100: min(100, round(Roh / MaxRoh × 100)) über alle Zellen (Challenges + Ziele);
  * MaxRoh = 0 → alle 0.
  */
 
@@ -63,7 +63,7 @@ export type ProgramMatrixObjectiveCell = {
   score: number;
   statusTier: "strong" | "medium" | "weak";
   isLinked: boolean;
-  /** ÜF_O Richtung–Objective: 0 | 0,5 | 1 | 2 */
+  /** ÜF_O Richtung–Ziel: 0 | 0,5 | 1 | 2 */
   contributionWeight: number;
   contributionLevel: ContributionLevel | null;
   scoreExplanation: string;
@@ -85,7 +85,7 @@ export type ProgramMatrixDirectionRow = {
   directionTitle: string;
   directionStatus: StrategicDirectionStatus;
   rowScoreSum: number;
-  /** Verknuepfte Objectives der Stossrichtung (fuer Zeilen-Info unabhaengig von Challenge-Spalten). */
+  /** Verknuepfte Ziele der Stossrichtung (fuer Zeilen-Info unabhaengig von Challenge-Spalten). */
   linkedObjectives: ProgramMatrixObjective[];
   cells: ProgramMatrixCell[];
   objectiveCells: ProgramMatrixObjectiveCell[];
@@ -162,7 +162,7 @@ export function redundancyBandFromAddressingCount(n: number): ProgramMatrixRedun
 }
 
 /**
- * Abdeckung aus Pill-Stufe (Challenge–Richtung oder Richtung–Objective):
+ * Abdeckung aus Pill-Stufe (Challenge–Richtung oder Richtung–Ziel):
  * schwach 0,5 | mittel 1 | stark 2
  */
 export function matrixCoverageFactorFromLevel(level: string | null | undefined): number {
@@ -261,14 +261,14 @@ function buildChallengeExplanation(p: {
 }): string {
   if (!p.isLinked || p.üfH <= 0) {
     const parts = [
-      "Keine Abdeckung: Herausforderung und Stossrichtung sind nicht verknuepft (Abdeckung = 0). Roh-Score dieser Zelle = 0.",
+      "Keine Abdeckung: Herausforderung und Sto\u00DFrichtung sind nicht verkn\u00FCpft (Abdeckung = 0). Roh-Score dieser Zelle = 0.",
     ];
     if (p.maxRaw > 0) {
       parts.push(
         `Normierung: min(100, Roh/MaxRoh×100) mit MaxRoh=${p.maxRaw.toFixed(3)} → Anzeige ${p.normalizedScore}.`
       );
     } else parts.push("Normierung: MaxRoh = 0 — Anzeige 0.");
-    if (p.isGap) parts.push("Gap: keine Objectives an der Stossrichtung.");
+    if (p.isGap) parts.push("Gap: keine Ziele an der Sto\u00DFrichtung.");
     return parts.join(" ");
   }
 
@@ -277,14 +277,14 @@ function buildChallengeExplanation(p: {
     `Unterstützung = Σ(OI×Abdeckung_Objekt) × HS × Abdeckung_Challenge × SP = ${p.weightedOISum.toFixed(3)} × ${p.challengeScore.toFixed(2)} × ${p.üfH} × ${p.sp.toFixed(2)} = ${p.raw.toFixed(3)}.`
   );
   if (p.weightedOISum <= 0) {
-    parts.push("Hinweis: Summe OI×Abdeckung_Objekt ist 0 (keine verknuepften Objectives oder alle OI 0).");
+    parts.push("Hinweis: Summe OI\u00D7Abdeckung_Objekt ist 0 (keine verkn\u00FCpften Ziele oder alle OI 0).");
   }
   if (p.maxRaw > 0) {
     parts.push(
       `Normierung Matrix: min(100, Roh/MaxRoh×100) mit MaxRoh=${p.maxRaw.toFixed(3)} → Anzeige-Score ${p.normalizedScore}.`
     );
   } else parts.push("Normierung: MaxRoh = 0 — Anzeige 0.");
-  if (p.isGap) parts.push("Hinweis: keine Objectives an dieser Stossrichtung (Gap).");
+  if (p.isGap) parts.push("Hinweis: keine Ziele an dieser Sto\u00DFrichtung (Gap).");
   if (p.contributionLabel) parts.push(`Abdeckung Herausforderung–Richtung: ${p.contributionLabel}.`);
   return parts.join(" ");
 }
@@ -303,7 +303,7 @@ function buildObjectiveExplanation(p: {
 }): string {
   if (!p.isLinked || p.üfO <= 0) {
     const parts = [
-      "Keine Abdeckung: Stossrichtung und Objective sind nicht verknuepft (Abdeckung = 0). Roh-Score = 0.",
+      "Keine Abdeckung: Sto\u00DFrichtung und Ziel sind nicht verkn\u00FCpft (Abdeckung = 0). Roh-Score = 0.",
     ];
     if (p.maxRaw > 0) {
       parts.push(
@@ -316,7 +316,7 @@ function buildObjectiveExplanation(p: {
     ? "Importance = KI-Gesamtscore (ai_objective_score)"
     : "Importance = 3 (neutral, keine KI-Bewertung — Roh = SP×Priorität×Abdeckung)";
   const parts: string[] = [
-    `Unterstützung Objective = SP × Objective-Priorität (importance_score) × Importance × Abdeckung / 3 = ${p.sp.toFixed(2)} × ${p.objectivePriority} × ${p.objectiveImportance.toFixed(2)} × ${p.üfO} / 3 = ${p.raw.toFixed(3)}.`,
+    `Unterstützung Ziel = SP × Ziel-Priorität (importance_score) × Importance × Abdeckung / 3 = ${p.sp.toFixed(2)} × ${p.objectivePriority} × ${p.objectiveImportance.toFixed(2)} × ${p.üfO} / 3 = ${p.raw.toFixed(3)}.`,
     impNote,
   ];
   if (p.maxRaw > 0) {
@@ -324,7 +324,7 @@ function buildObjectiveExplanation(p: {
       `Normierung Matrix (gemeinsam mit Herausforderungs-Zellen): MaxRoh=${p.maxRaw.toFixed(3)} → Anzeige ${p.normalizedScore}.`
     );
   }
-  if (p.contributionLabel) parts.push(`Abdeckung Richtung–Objective: ${p.contributionLabel}.`);
+  if (p.contributionLabel) parts.push(`Abdeckung Richtung–Ziel: ${p.contributionLabel}.`);
   return parts.join(" ");
 }
 

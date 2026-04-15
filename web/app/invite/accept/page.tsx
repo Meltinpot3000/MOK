@@ -20,7 +20,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     return (
       <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-zinc-900">Einladung ungueltig</h1>
+          <h1 className="text-2xl font-semibold text-zinc-900">Einladung ungültig</h1>
           <p className="mt-2 text-sm text-zinc-600">Der Einladungs-Token fehlt oder ist beschaedigt.</p>
           <Link
             href="/login"
@@ -54,7 +54,8 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Einladung nicht gefunden</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Diese Einladung existiert nicht oder wurde bereits geloescht.
+            
+            Diese Einladung existiert nicht oder wurde bereits gelöscht.
           </p>
           <Link
             href="/login"
@@ -73,7 +74,8 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Falsche E-Mail</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Diese Einladung ist fuer {invite.invited_email} ausgestellt. Bitte mit diesem Account einloggen.
+            
+            Diese Einladung ist für {invite.invited_email} ausgestellt. Bitte mit diesem Account einloggen.
           </p>
           <Link
             href="/logout"
@@ -90,7 +92,7 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     return (
       <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-zinc-900">Einladung nicht mehr gueltig</h1>
+          <h1 className="text-2xl font-semibold text-zinc-900">Einladung nicht mehr gültig</h1>
           <p className="mt-2 text-sm text-zinc-600">
             Die Einladung wurde widerrufen oder ist abgelaufen. Bitte die Administration um eine neue Einladung.
           </p>
@@ -108,8 +110,8 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
     return (
       <main className="mx-auto flex min-h-screen max-w-xl items-center px-6">
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-zinc-900">Einladung unvollstaendig</h1>
-          <p className="mt-2 text-sm text-zinc-600">Fuer diese Einladung sind keine Rollen hinterlegt.</p>
+          <h1 className="text-2xl font-semibold text-zinc-900">Einladung unvollständig</h1>
+          <p className="mt-2 text-sm text-zinc-600">Für diese Einladung sind keine Rollen hinterlegt.</p>
         </section>
       </main>
     );
@@ -128,7 +130,8 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
         <section className="w-full rounded-xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-zinc-900">Rolle fehlt</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Mindestens eine in der Einladung angegebene Organisations-Rolle ist fuer diesen Mandanten in der
+            
+            Mindestens eine in der Einladung angegebene Organisations-Rolle ist für diesen Mandanten in der
             Datenbank nicht vorhanden, z. B. weil sie nie eingerichtet wurde, der Rollencode nicht passt oder
             die Einladung veraltet ist. Bitte die Administration kontaktieren.
           </p>
@@ -225,7 +228,8 @@ export default async function AcceptInvitePage({ searchParams }: AcceptInvitePag
           <section className="w-full rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
             <h1 className="text-2xl font-semibold text-zinc-900">Zugriff aktiviert, Status nicht aktualisiert</h1>
             <p className="mt-2 text-sm text-zinc-600">
-              Du solltest die App nutzen koennen. Die Einladung konnte in der Datenbank nicht als angenommen markiert
+              
+              Du solltest die App nutzen können. Die Einladung konnte in der Datenbank nicht als angenommen markiert
               werden — bitte die Administration informieren, falls du noch unter «offene Einladungen» gesehen wirst.
             </p>
             <p className="mt-3 break-words font-mono text-xs text-zinc-500">{inviteUpdateError.message}</p>

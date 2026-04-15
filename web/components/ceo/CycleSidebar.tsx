@@ -206,6 +206,16 @@ export function CycleSidebar({
               {item.label}
             </Link>
           ))}
+          {permissions["strategy-cycle"]?.read ? (
+            <Link
+              href="/unternehmensinfo"
+              className={cycleLinkClass(
+                pathname === "/unternehmensinfo" || pathname.startsWith("/unternehmensinfo/")
+              )}
+            >
+              Unternehmensinfo
+            </Link>
+          ) : null}
         </div>
       </div>
 

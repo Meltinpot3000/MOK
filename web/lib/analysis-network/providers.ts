@@ -166,9 +166,9 @@ function buildPrompt(
     [
     "Beurteile die Beziehung zwischen zwei strategischen Analyse-Findings mit drei getrennten Scores.",
     "Antwortformat exakt als JSON-Objekt ohne Markdown.",
-    'Schema: {"proximityScore":0-1,"supportScore":0-1,"repulsionScore":0-1,"directionHint":"none|causes|depends_on","suggestedLinkType":"related_to|causes|supports|contradicts|amplifies|depends_on|duplicates","explanation":"kurze Begruendung <= 220 Zeichen"}',
+    'Schema: {"proximityScore":0-1,"supportScore":0-1,"repulsionScore":0-1,"directionHint":"none|causes|depends_on","suggestedLinkType":"related_to|causes|supports|contradicts|amplifies|depends_on|duplicates","explanation":"kurze Begr\u00FCndung <= 220 Zeichen"}',
     "Regeln:",
-    "- proximityScore = semantische Naehe/Verwandtschaft",
+    "- proximityScore = semantische N\u00E4he/Verwandtschaft",
     "- supportScore = wie stark A und B sich foerdern/verstaerken",
     "- repulsionScore = wie stark A und B sich widersprechen/ausbremsen",
     "- directionHint nur setzen, wenn Kausalitaet/Abhaengigkeit klar erkennbar ist",
@@ -204,7 +204,7 @@ function buildQualityPrompt(entry: QualityEntryInput, strategyReferenceText?: st
     "- strategicValue=false, wenn Aussage inhaltlich leer, zu generisch, ohne strategische Implikation oder als Test/Platzhalter erkennbar ist",
     "- Wenn strategicValue=false, dann qualityScore=0 und alle Teil-Scores=0",
     "- impactScore: strategische Relevanz aus impact/inhalt",
-    "- certaintyScore: Verlaesslichkeit (niedrige Unsicherheit => hoher Score)",
+    "- certaintyScore: Verl\u00E4sslichkeit (niedrige Unsicherheit => hoher Score)",
     "- evidenceScore: Belastbarkeit der Beschreibung/Evidenz",
     "- structureScore: Klarheit/Struktur/Subtyp-Passung",
     "",
@@ -229,7 +229,7 @@ function buildClusterPrompt(input: {
   existingChallengeTitles?: string[];
 }): string {
   const lines = [
-    "Verbessere Label und Summary fuer einen strategischen Cluster.",
+    "Verbessere Label und Summary f\u00FCr einen strategischen Cluster.",
     "Antwort nur als valides JSON.",
     'Schema: {"label":"kurz","summary":"max 220 Zeichen","scoreAdjustment":-0.2..0.2,"explanation":"max 160 Zeichen"}',
     "",
@@ -351,7 +351,7 @@ function buildGraphLayoutPrompt(input: {
   }));
   return withStrategyReference(
     [
-      "Berechne eine strategisch sinnvolle 3D-Layout-Position fuer alle Knoten.",
+      "Berechne eine strategisch sinnvolle 3D-Layout-Position f\u00FCr alle Knoten.",
       "Antwort nur als valides JSON.",
       'Schema: {"layoutVersion":"analysis-graph-layout-v1","nodes":[{"id":"...","x":-1..1,"y":-1..1,"z":-1..1,"confidence":0..1}],"globalReasoning":"max 240 Zeichen"}',
       "Regeln:",
@@ -359,7 +359,7 @@ function buildGraphLayoutPrompt(input: {
       "- x-Achse: extern (environment/competitor) eher negativ, intern (company/swot) eher positiv.",
       "- y-Achse: hoher Impact und geringere Unsicherheit eher hoch.",
       "- z-Achse: stark vernetzte Querschnittsthemen eher hoch.",
-      "- Semantisch nahe oder unterstuetzende Knoten naeher, widerspruechliche eher weiter entfernt.",
+      "- Semantisch nahe oder unterst\u00FCtzende Knoten naeher, widerspr\u00FCchliche eher weiter entfernt.",
       "- Keine Koordinaten ausserhalb [-1,1].",
       "",
       `NodesJSON: ${JSON.stringify(compactNodes)}`,
@@ -685,7 +685,7 @@ function buildQualityScoreFromJson(
     structureScore: hasStrategicValue ? Math.round(structureScore) : 0,
     hasStrategicValue,
     strategicValueReason: String(json.strategicValueReason ?? "").trim().slice(0, 180),
-    explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualitaetsbewertung",
+    explanation: String(json.explanation ?? "").trim().slice(0, 240) || "LLM-Qualit\u00E4tsbewertung",
     provider,
     model,
     promptVersion: QUALITY_PROMPT_VERSION,

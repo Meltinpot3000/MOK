@@ -22,7 +22,8 @@ export function PortfolioSummaryView({ portfolio }: PortfolioSummaryViewProps) {
   if (!portfolio) {
     return (
       <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-        Portfolio-Bewertung noch nicht verfuegbar. Fuehre die Objectives-Bewertung aus.
+        
+        Portfolio-Bewertung noch nicht verfügbar. Führe die Ziele-Bewertung aus.
       </div>
     );
   }

@@ -86,7 +86,7 @@ function pickDefaultCycle(cycles: PlanningCycle[]): PlanningCycle | null {
 
 const KNOWN_ORG_ROLE_LABELS_DE: Record<string, string> = {
   org_admin: "Organisations-Administration",
-  executive: "Geschaeftsleitung",
+  executive: "Gesch\u00E4ftsleitung",
   department_lead: "Bereichsleitung",
   team_member: "Teammitglied",
 };

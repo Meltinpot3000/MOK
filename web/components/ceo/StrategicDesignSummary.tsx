@@ -31,7 +31,7 @@ function getCellTone(status: CorrelationStatus): string {
 }
 
 function getStatusLabel(status: CorrelationStatus): string {
-  if (status === "green") return "Gruen";
+  if (status === "green") return "Gr\u00FCn";
   if (status === "yellow") return "Gelb";
   if (status === "red") return "Rot";
   return "Unklar";
@@ -95,11 +95,12 @@ export function StrategicDesignSummary({
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Zusammenfassung Strategisches Design</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Matrix-first Sicht auf die Korrelation von Objectives, Herausforderungen und Stossrichtungen.
+          
+          Matrix-first Sicht auf die Korrelation von Zielen, Herausforderungen und Stoßrichtungen.
         </p>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="brand-surface rounded-md p-3">
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Gut korrelierte Objectives</p>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Gut korrelierte Ziele</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{summary.goodObjectivePercent}%</p>
           </div>
           <div className="brand-surface rounded-md p-3">
@@ -136,13 +137,15 @@ export function StrategicDesignSummary({
       </article>
 
       <article className="brand-card p-6">
-        <h3 className="text-base font-semibold text-zinc-900">Korrelationen: Herausforderungen x Objectives</h3>
+        <h3 className="text-base font-semibold text-zinc-900">Korrelationen: Herausforderungen × Ziele</h3>
         <p className="mt-1 text-xs text-zinc-600">
-          Klick auf eine Matrix-Zelle oeffnet die verknuepften Stossrichtungen mit Auto-Status und optionalem Override.
+          
+          Klick auf eine Matrix-Zelle oeffnet die verknüpften Stoßrichtungen mit Auto-Status und optionalem Override.
         </p>
         {summary.objectives.length === 0 || summary.challenges.length === 0 ? (
           <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
-            Fuer diese Ansicht werden mindestens ein Objective und eine strategische Herausforderung benoetigt.
+            
+            Für diese Ansicht werden mindestens ein Ziel und eine strategische Herausforderung benoetigt.
           </p>
         ) : (
           <div className="mt-4 overflow-x-auto">
@@ -252,7 +255,7 @@ export function StrategicDesignSummary({
                           >
                             <div className="font-semibold text-zinc-900">{cell.score}</div>
                             <div className="mt-1 text-zinc-600">{getStatusLabel(cell.status)}</div>
-                            <div className="mt-1 text-zinc-500">{cell.directionCount} Stossrichtungen</div>
+                            <div className="mt-1 text-zinc-500">{cell.directionCount}  Stoßrichtungen</div>
                           </button>
                         </td>
                       );
@@ -269,7 +272,7 @@ export function StrategicDesignSummary({
         <div className="brand-card p-6">
           <h3 className="text-base font-semibold text-zinc-900">Detailpanel zur Matrix-Zelle</h3>
           {!selectedCell ? (
-            <p className="mt-3 text-sm text-zinc-600">Noch keine Korrelation auswaehlbar.</p>
+            <p className="mt-3 text-sm text-zinc-600">Noch keine Korrelation auswählbar.</p>
           ) : (
             <div className="mt-4 space-y-3">
               <div className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${getStatusBadge(selectedCell.status)}`}>
@@ -279,11 +282,12 @@ export function StrategicDesignSummary({
                 <span className="font-semibold">Herausforderung:</span> {selectedCell.challengeTitle}
               </p>
               <p className="text-sm text-zinc-700">
-                <span className="font-semibold">Objective:</span> {selectedCell.objectiveTitle}
+                <span className="font-semibold">Ziel:</span> {selectedCell.objectiveTitle}
               </p>
               {selectedCell.directions.length === 0 ? (
                 <p className="brand-surface rounded-md p-3 text-sm text-zinc-600">
-                  Keine direkte Direction-Verknuepfung fuer dieses Paar vorhanden.
+                  
+                  Keine direkte Direction-Verknüpfung für dieses Paar vorhanden.
                 </p>
               ) : (
                 selectedCell.directions.map((direction) => (
@@ -324,7 +328,7 @@ export function StrategicDesignSummary({
                           rows={2}
                           disabled={!canWrite}
                           className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                          placeholder="Begruendung fuer manuelles Override"
+                          placeholder="Begr\u00FCndung f\u00FCr manuelles Override"
                         />
                       </label>
                       <div className="flex flex-wrap gap-2">
@@ -360,7 +364,8 @@ export function StrategicDesignSummary({
         <div className="brand-card p-6">
           <h3 className="text-base font-semibold text-zinc-900">Interaktive Netzwerkansicht (fokussiert)</h3>
           <p className="mt-1 text-xs text-zinc-600">
-            Visualisiert fuer die ausgewaehlte Matrix-Zelle den Zusammenhang Objective ↔ Stossrichtung ↔ Herausforderung.
+            
+            Visualisiert für die ausgewählte Matrix-Zelle den Zusammenhang Ziel ↔ Stoßrichtung ↔ Herausforderung.
           </p>
           {!selectedCell ? (
             <p className="mt-3 text-sm text-zinc-600">Keine Auswahl vorhanden.</p>
@@ -369,7 +374,7 @@ export function StrategicDesignSummary({
               <svg viewBox="0 0 760 260" className="h-[260px] w-full">
                 <rect x="20" y="100" width="220" height="60" rx="10" className="fill-white stroke-zinc-300" />
                 <text x="130" y="125" textAnchor="middle" className="fill-zinc-700 text-[12px] font-semibold">
-                  Objective
+                  Ziel
                 </text>
                 <text x="130" y="145" textAnchor="middle" className="fill-zinc-600 text-[11px]">
                   {selectedCell.objectiveTitle}
@@ -416,7 +421,7 @@ export function StrategicDesignSummary({
                   ))}
                 </div>
               ) : (
-                <p className="mt-2 text-xs text-zinc-600">Keine verknuepfte Stossrichtung vorhanden.</p>
+                <p className="mt-2 text-xs text-zinc-600">Keine verknüpfte Stoßrichtung vorhanden.</p>
               )}
             </div>
           )}

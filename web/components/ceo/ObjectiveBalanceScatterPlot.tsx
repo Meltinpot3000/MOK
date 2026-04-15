@@ -73,7 +73,7 @@ function getScoreColorHex(score: number | null | undefined): string {
   return "#ef4444";
 }
 
-/** Berechnet Balance-Status aus der Verteilung der Objectives. */
+/** Berechnet Balance-Status aus der Verteilung der strategischen Ziele (Strategiezyklus). */
 function computeBalanceStatus(
   objectives: Objective[],
   getXBase: (o: Objective) => number,
@@ -146,7 +146,8 @@ export function ObjectiveBalanceScatterPlot({
   if (!hasData || objectives.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-sm text-zinc-600">
-        Keine Klassifikationsdaten. Fuehre die Objectives-Bewertung aus.
+        
+        Keine Klassifikationsdaten. Führe die Ziele-Bewertung aus.
       </div>
     );
   }

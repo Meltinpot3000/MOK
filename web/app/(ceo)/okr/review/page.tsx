@@ -10,6 +10,7 @@ import {
 } from "@/lib/okr/review-sessions";
 import { getOkrReviewSessionCheckInTracking } from "@/lib/okr/review-session-tracking";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
+import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrReviewSessionWorkspace } from "@/components/ceo/okr/OkrReviewSessionWorkspace";
 import { ReviewHeaderTrigger } from "@/components/ceo/strategy-review/ReviewHeaderTrigger";
@@ -30,10 +31,13 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card space-y-2 p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-        <h1 className="text-xl font-semibold text-zinc-900">OKR-Review</h1>
-        <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+      <section className="space-y-4">
+        <div className="brand-card space-y-2 p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+          <h1 className="text-xl font-semibold text-zinc-900">OKR-Review</h1>
+          <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+        </div>
+        <OkrAreaNav />
       </section>
     );
   }
@@ -125,6 +129,8 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
           {trigger ? <ReviewHeaderTrigger cycleInstanceId={cycle.id} trigger={trigger} /> : null}
         </div>
       </header>
+
+      <OkrAreaNav />
 
       {ctx.workspace.okrCycles.length > 0 ? (
         <OkrCycleCarousel cycles={ctx.workspace.okrCycles} selectedId={ctx.workspace.selectedOkrCycleId} />

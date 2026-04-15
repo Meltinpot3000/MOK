@@ -672,7 +672,7 @@ export default async function PlanningCyclesPage({ searchParams }: PlanningCycle
       ) : null}
 
       <section className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Aktive und naechste Periode</h2>
+        <h2 className="text-lg font-semibold text-zinc-900">Aktive und nächste Periode</h2>
         <p className="mt-1 text-xs text-zinc-500">
           {activeScheme
             ? `Anzeige fuer aktives Schema: ${activeScheme.name} (${activeScheme.code})`
@@ -712,7 +712,7 @@ export default async function PlanningCyclesPage({ searchParams }: PlanningCycle
                 </p>
               </div>
             ) : (
-              <p className="mt-2 text-sm text-zinc-600">Keine naechste Periode geplant.</p>
+              <p className="mt-2 text-sm text-zinc-600">Keine nächste Periode geplant.</p>
             )}
           </div>
         </div>

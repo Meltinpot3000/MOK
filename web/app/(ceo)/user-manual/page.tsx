@@ -164,6 +164,13 @@ export default function UserManualPage() {
             werden können.
           </li>
           <li>
+            <span className="font-medium text-zinc-900">Strategische Ziele / «Ziele» (Strategiezyklus):</span>{" "}
+            Langfristige Zielbilder im{" "}
+            <NavLink href="/strategy-cycle">Strategiezyklus</NavLink> (Navigationsreiter «Ziele»). In Texten und
+            der Oberfläche heißen sie «Ziele» oder «strategische Ziele». Das englische Wort «Objectives» wird hier
+            nicht verwendet.
+          </li>
+          <li>
             <span className="font-medium text-zinc-900">Jahresziele:</span> Konkreisierte Ziele innerhalb des
             Zyklus – die Brücke zwischen Richtung und messbarer Jahresplanung.
           </li>
@@ -172,9 +179,10 @@ export default function UserManualPage() {
             Erreichung der Ziele; häufig mit Reviews und Verantwortlichkeiten verknüpft.
           </li>
           <li>
-            <span className="font-medium text-zinc-900">OKR (Objectives & Key Results):</span> Rahmenwerk für
-            Ziele und messbare Ergebnisse im OKR-Arbeitsbereich (<NavLink href="/okr/dashboard">OKR-Dashboard</NavLink>
-            , Planung, Tracking, Review).
+            <span className="font-medium text-zinc-900">OKR (Objectives &amp; Key Results):</span> Rahmenwerk im
+            OKR-Arbeitsbereich (<NavLink href="/okr/dashboard">OKR-Dashboard</NavLink>
+            , Planung, Tracking, Review). Dort bezeichnet «Objectives» (OKR-Objectives) die Zielebene des OKR-Modells
+            — bewusst getrennt von den strategischen Zielen im Strategiezyklus.
           </li>
           <li>
             <span className="font-medium text-zinc-900">Reviewzyklus:</span> Formalisierter Prüfrhythmus für
@@ -216,10 +224,10 @@ export default function UserManualPage() {
               <NavLink href="/strategy-cycle">Strategiezyklus</NavLink>
             </h3>
             <p className="mt-1.5 text-sm text-zinc-700">
-              Kernarbeitsbereich für die inhaltliche Strategiearbeit: Challenges, Bewertungen, Verknüpfungen mit
-              Stoßrichtungen und weiterführende Sichten (z. B. Strategiematrix unter{" "}
-              <NavLink href="/strategy-matrix">/strategy-matrix</NavLink>, sofern freigeschaltet). Hier entsteht
-              die Begründung, <em>warum</em> bestimmte Jahresziele und Initiativen Priorität haben.
+              Kernarbeitsbereich für die inhaltliche Strategiearbeit: Challenges, strategische Ziele (Reiter «Ziele»),
+              Bewertungen, Verknüpfungen mit Stoßrichtungen und weiterführende Sichten (z. B. Strategiematrix unter{" "}
+              <NavLink href="/strategy-matrix">/strategy-matrix</NavLink>, sofern freigeschaltet). Hier entsteht die
+              Begründung, <em>warum</em> bestimmte Jahresziele und Initiativen Priorität haben.
             </p>
           </div>
           <div>
@@ -280,6 +288,7 @@ export default function UserManualPage() {
             <p className="mt-1.5 text-sm text-zinc-700">
               Hier werden Einheiten, Zuständigkeiten und Kontextdaten gepflegt. Über die Organisationsnavigation
               erreichst du je nach Konfiguration auch{" "}
+              <NavLink href="/unternehmensinfo">Unternehmensinfo</NavLink>,{" "}
               <NavLink href="/responsibles">Verantwortliche</NavLink>,{" "}
               <NavLink href="/industries">Branchen</NavLink>,{" "}
               <NavLink href="/business-models">Geschäftsmodelle</NavLink> und{" "}

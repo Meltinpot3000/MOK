@@ -11,8 +11,9 @@ export default function NoAccessPage() {
         worden sein.
       </p>
       <p className="mt-3 text-sm text-zinc-600">
-        Technische Pruefung: In der Datenbank <code className="rounded bg-zinc-100 px-1">app.organization_memberships</code>{" "}
-        (status active) und <code className="rounded bg-zinc-100 px-1">rbac.member_roles</code> fuer deine Mitgliedschaft.
+        
+        Technische Prüfung: In der Datenbank <code className="rounded bg-zinc-100 px-1">app.organization_memberships</code>{" "}
+        (status active) und <code className="rounded bg-zinc-100 px-1">rbac.member_roles</code>  für deine Mitgliedschaft.
       </p>
       <Link
         href="/dashboard"

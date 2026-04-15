@@ -144,7 +144,7 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
 
   const statusRaw = String(formData.get("status") ?? "").trim();
   if (!INITIATIVE_STATUSES.includes(statusRaw as (typeof INITIATIVE_STATUSES)[number])) {
-    return { error: "Ungueltiger Status" };
+    return { error: "Ung\u00FCltiger Status" };
   }
   const status = statusRaw as (typeof INITIATIVE_STATUSES)[number];
 
@@ -163,7 +163,7 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
   if (overrideRaw === "on_track" || overrideRaw === "at_risk" || overrideRaw === "off_track") {
     execution_health_override = overrideRaw;
   } else if (overrideRaw !== "" && overrideRaw !== "none") {
-    return { error: "Ungueltige Ampel-Override" };
+    return { error: "Ung\u00FCltige Ampel-Override" };
   }
 
   const end_date = parseOptionalDate(String(formData.get("end_date") ?? ""));
@@ -193,7 +193,7 @@ export async function applyInitiativeReviewUpdate(formData: FormData) {
       .eq("organization_id", context.organizationId)
       .eq("id", owner_membership_id)
       .maybeSingle();
-    if (!ownerRow) return { error: "Ungueltiger Owner" };
+    if (!ownerRow) return { error: "Ung\u00FCltiger Owner" };
   }
 
   const row = current as {

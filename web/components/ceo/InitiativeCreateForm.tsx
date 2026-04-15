@@ -144,7 +144,7 @@ export function InitiativeCreateForm({
     if (!Number.isFinite(p) || p < 0 || p > 100) {
       return "Fortschritt muss eine Zahl zwischen 0 und 100 sein.";
     }
-    if (priority < 1 || priority > 5) return "Prioritaet muss zwischen 1 und 5 liegen.";
+    if (priority < 1 || priority > 5) return "Priorit\u00E4t muss zwischen 1 und 5 liegen.";
     if (startDate && endDate && startDate > endDate) {
       return "Das Enddatum darf nicht vor dem Startdatum liegen.";
     }
@@ -255,7 +255,7 @@ export function InitiativeCreateForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-zinc-700">Prioritaet (1–5)</label>
+        <label className="mb-1 block text-xs font-medium text-zinc-700">Priorität (1–5)</label>
         <select
           value={priority}
           onChange={(e) => setPriority(Number(e.target.value))}
@@ -331,7 +331,7 @@ export function InitiativeCreateForm({
       </div>
 
       <div className="rounded-md border border-zinc-200 bg-zinc-50/50 p-3">
-        <p className="mb-2 text-xs font-semibold text-zinc-800">Jahresziele verknuepfen</p>
+        <p className="mb-2 text-xs font-semibold text-zinc-800">Jahresziele verknüpfen</p>
         <div className="flex flex-wrap gap-2">
           <select
             value={pickTarget}
@@ -373,12 +373,12 @@ export function InitiativeCreateForm({
             ))}
           </div>
         ) : (
-          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Jahresziele verknuepft.</p>
+          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Jahresziele verknüpft.</p>
         )}
       </div>
 
       <div className="rounded-md border border-zinc-200 bg-zinc-50/50 p-3">
-        <p className="mb-2 text-xs font-semibold text-zinc-800">Key Results verknuepfen</p>
+        <p className="mb-2 text-xs font-semibold text-zinc-800">Key Results verknüpfen</p>
         <div className="flex flex-wrap gap-2">
           <select
             value={pickKr}
@@ -426,7 +426,7 @@ export function InitiativeCreateForm({
             })}
           </div>
         ) : (
-          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Key Results verknuepft.</p>
+          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Key Results verknüpft.</p>
         )}
       </div>
 
@@ -447,7 +447,8 @@ export function InitiativeCreateForm({
           }}
           className="w-full rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 hover:bg-zinc-50"
         >
-          Neu anlegen oder Zuruecksetzen
+          
+          Neu anlegen oder Zurücksetzen
         </button>
       ) : null}
     </form>

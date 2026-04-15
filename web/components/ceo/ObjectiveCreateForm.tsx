@@ -28,13 +28,13 @@ export function ObjectiveCreateForm({ canWrite, action }: ObjectiveCreateFormPro
   return (
     <form action={action} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
       <label className="text-xs text-zinc-600 md:col-span-2">
-        Objective Titel
+        Titel
         <input
           name="title"
           required
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="Neues Objective"
+          placeholder="Neues Ziel"
           className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
         />
       </label>
@@ -62,7 +62,7 @@ export function ObjectiveCreateForm({ canWrite, action }: ObjectiveCreateFormPro
         />
       </label>
       <label className="text-xs text-zinc-600">
-        Importance (1-5)
+        Gewicht (1–5)
         <input
           type="number"
           name="importance_score"
@@ -94,7 +94,7 @@ export function ObjectiveCreateForm({ canWrite, action }: ObjectiveCreateFormPro
           disabled={!canWrite || !canSubmit}
           className="brand-btn px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Objective speichern
+          Ziel speichern
         </button>
       </div>
     </form>

@@ -94,7 +94,8 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategiezyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Strategie-Matrix</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Bearbeite Zusammenhaenge zwischen Herausforderungen, Stossrichtungen und Jahreszielen in einer Ansicht.
+          
+          Bearbeite Zusammenhänge zwischen Herausforderungen, Stoßrichtungen und Jahreszielen in einer Ansicht.
         </p>
         <p className="mt-1 text-xs text-zinc-500">
           Zyklus: {selectedCycle.name} ({selectedCycle.code})
@@ -140,11 +141,11 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   ))}
                 </select>
                 <input name="display_order" type="number" defaultValue={data.challenges.length + 1} className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
-                <button type="submit" disabled={!canWrite || data.hiddenChallenges.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Auswaehlen und importieren</button>
+                <button type="submit" disabled={!canWrite || data.hiddenChallenges.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Auswählen und importieren</button>
               </form>
 
               <form action={promoteAnalysisToChallenge} className="space-y-2">
-                <p className="text-xs font-medium text-zinc-700">Aus Analyse uebernehmen</p>
+                <p className="text-xs font-medium text-zinc-700">Aus Analyse übernehmen</p>
                 <select name="analysis_entry_id" className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm">
                   <option value="">Analysebefund waehlen</option>
                   {data.analysisSuggestions.map((entry) => (
@@ -154,14 +155,15 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   ))}
                 </select>
                 <input name="display_order" type="number" defaultValue={data.challenges.length + 1} className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
-                <button type="submit" disabled={!canWrite || data.analysisSuggestions.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Als Herausforderung uebernehmen</button>
+                <button type="submit" disabled={!canWrite || data.analysisSuggestions.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Als Herausforderung übernehmen</button>
               </form>
             </div>
           </details>
 
           <details className="brand-surface p-3" open>
             <summary className="cursor-pointer text-sm font-semibold text-zinc-900">
-              Stossrichtung hinzufuegen
+              
+              Stoßrichtung hinzufuegen
             </summary>
             <div className="mt-3 grid grid-cols-1 gap-3">
               <form action={createDirection} className="space-y-2">
@@ -179,7 +181,8 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   <input name="grouping" placeholder="Gruppierung" className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
                 </div>
                 <p className="text-[11px] text-zinc-500">
-                  Prioritaet (Score) wird aus den vier Bewertungen im Strategiezyklus berechnet; bei Neuanlage hier zunaechst 3,00 (Default-Bewertungen).
+                  
+                  Priorität (Score) wird aus den vier Bewertungen im Strategiezyklus berechnet; bei Neuanlage hier zunaechst 3,00 (Default-Bewertungen).
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <select name="status" defaultValue="draft" className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm">
@@ -191,13 +194,13 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   </select>
                   <input name="display_order" type="number" defaultValue={data.directions.length + 1} className="rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
                 </div>
-                <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">Stossrichtung anlegen</button>
+                <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">Stoßrichtung anlegen</button>
               </form>
 
               <form action={importExistingDirection} className="space-y-2">
                 <p className="text-xs font-medium text-zinc-700">Vorhandene waehlen</p>
                 <select name="direction_id" className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm">
-                  <option value="">Vorhandene Stossrichtung waehlen</option>
+                  <option value="">Vorhandene Stoßrichtung waehlen</option>
                   {data.hiddenDirections.map((direction) => (
                     <option key={direction.id} value={direction.id}>
                       {direction.title}
@@ -205,7 +208,7 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                   ))}
                 </select>
                 <input name="display_order" type="number" defaultValue={data.directions.length + 1} className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm" />
-                <button type="submit" disabled={!canWrite || data.hiddenDirections.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Auswaehlen und importieren</button>
+                <button type="submit" disabled={!canWrite || data.hiddenDirections.length === 0} className="brand-btn-secondary px-3 py-1.5 text-xs">Auswählen und importieren</button>
               </form>
             </div>
           </details>
@@ -216,9 +219,11 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
             <thead>
               <tr className="border-b border-zinc-200 align-top text-left">
                 <th className="py-2 pr-3 min-w-[280px]">
-                  Strategische Stossrichtung (Zeilen)
+                  
+                  Strategische Stoßrichtung (Zeilen)
                   <p className="mt-1 max-w-[280px] text-[11px] font-normal text-zinc-500">
-                    Nur Genehmigt, Aktiv oder Pausiert. Entwuerfe und Abgeschlossene sind ausgeblendet.
+                    
+                    Nur Genehmigt, Aktiv oder Pausiert. Entwürfe und Abgeschlossene sind ausgeblendet.
                   </p>
                 </th>
                 {data.challenges.map((challenge) => (
@@ -262,8 +267,8 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                     className="py-6 text-sm text-zinc-600"
                   >
                     {data.directions.length === 0
-                      ? "Keine strategischen Stossrichtungen im Dashboard."
-                      : "Keine Stossrichtung mit Status Genehmigt, Aktiv oder Pausiert — diese Matrix zeigt nur diese Status."}
+                      ? "Keine strategischen Sto\u00DFrichtungen im Dashboard."
+                      : "Keine Sto\u00DFrichtung mit Status Genehmigt, Aktiv oder Pausiert \u2014 diese Matrix zeigt nur diese Status."}
                   </td>
                 </tr>
               ) : null}
@@ -284,7 +289,7 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         <span
                           className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium leading-none text-zinc-600"
-                          title="Status der Stossrichtung"
+                          title="Status der Sto\u00DFrichtung"
                         >
                           {STRATEGIC_DIRECTION_STATUS_LABELS_DE[dirStatus]}
                         </span>
@@ -318,7 +323,8 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                           <input name="display_order" type="number" defaultValue={visibleDirections.findIndex((item) => item.id === direction.id) + 1} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
                         </div>
                         <p className="text-[11px] text-zinc-500">
-                          Prioritaet (Score): {Number(direction.priority ?? 0).toFixed(2)} — wird aus Bewertungen im Strategiezyklus neu berechnet, wenn du die Zeile speicherst.
+                          
+                          Priorität (Score): {Number(direction.priority ?? 0).toFixed(2)} — wird aus Bewertungen im Strategiezyklus neu berechnet, wenn du die Zeile speicherst.
                         </p>
                         <div className="text-xs text-zinc-500">
                           Verantwortlich: {direction.owner_membership_id ? ownerNameByMembership.get(direction.owner_membership_id) ?? "-" : "nicht gesetzt"}
@@ -340,7 +346,7 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                       <form action={addComment} className="mt-2 space-y-1">
                         <input type="hidden" name="object_type" value="direction" />
                         <input type="hidden" name="object_id" value={direction.id} />
-                        <input name="comment_text" placeholder="Kommentar zur Stossrichtung" className="w-full rounded border border-zinc-300 px-2 py-1 text-xs" />
+                        <input name="comment_text" placeholder="Kommentar zur Sto\u00DFrichtung" className="w-full rounded border border-zinc-300 px-2 py-1 text-xs" />
                         <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1 text-xs">Kommentar</button>
                       </form>
                       {(commentsByObject.get(`direction__${direction.id}`) ?? []).slice(0, 2).map((comment, idx) => (

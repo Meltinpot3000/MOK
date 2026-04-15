@@ -125,7 +125,7 @@ export function ObjectivesTable({
     },
     {
       id: "importance_score",
-      label: "Importance",
+      label: "Gewicht",
       defaultVisible: true,
       sortValue: (o: Objective) => o.importance_score ?? null,
       render: (o: Objective) => String(o.importance_score ?? "-"),
@@ -200,7 +200,7 @@ export function ObjectivesTable({
     },
     {
       id: "business_models",
-      label: "Geschaeftsmodelle",
+      label: "Gesch\u00E4ftsmodelle",
       defaultVisible: true,
       sortValue: (o: Objective) => {
         const ids = businessModelIdsByObjective[o.id] ?? [];
@@ -236,7 +236,7 @@ export function ObjectivesTable({
       rows={objectives}
       getRowId={(o) => o.id}
       expandLabel="Details"
-      emptyMessage="Keine Objectives vorhanden."
+      emptyMessage="Keine Ziele vorhanden."
       renderExpandedContent={(objective) => {
         const linkedIndustryIds = new Set(
           industryIdsByObjective[objective.id] ?? []
@@ -251,8 +251,8 @@ export function ObjectivesTable({
               <ConfirmBeforeSubmitForm
                 action={actions.deleteObjectiveInCycle}
                 className="inline"
-                title="Objective löschen?"
-                description="Das Objective wird aus diesem Planungszyklus entfernt. Verknüpfungen und Bewertungen können verloren gehen."
+                title="Ziel löschen?"
+                description="Das Ziel wird aus diesem Planungszyklus entfernt. Verknüpfungen und Bewertungen können verloren gehen."
                 confirmLabel="Löschen"
               >
                 <input type="hidden" name="objective_id" value={objective.id} />
@@ -289,7 +289,7 @@ export function ObjectivesTable({
                 />
               </label>
               <label className="text-xs text-zinc-600">
-                Importance (1-5)
+                Gewicht (1–5)
                 <input
                   type="number"
                   name="importance_score"
@@ -328,7 +328,7 @@ export function ObjectivesTable({
                   disabled={!canWrite}
                   className="brand-btn px-3 py-1.5 text-xs"
                 >
-                  Objective aktualisieren
+                  Ziel aktualisieren
                 </button>
               </div>
             </form>
@@ -359,7 +359,7 @@ export function ObjectivesTable({
                 })}
               </PillSection>
 
-              <PillSection title="Geschaeftsmodelle">
+              <PillSection title="Gesch\u00E4ftsmodelle">
                 {businessModels.map((model) => {
                   const isLinked = linkedBusinessModelIds.has(model.id);
                   return (

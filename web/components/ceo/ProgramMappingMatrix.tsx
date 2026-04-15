@@ -92,7 +92,7 @@ type MatrixColHeaderProps = {
 function MatrixColumnGroupHeaderTh(p: MatrixColHeaderProps) {
   const overlapShort = challengeColumnOverlapShortLabel(p.redundancyBand);
   const nDir = p.addressingDirectionsCount;
-  const dirWord = nDir === 1 ? "Stossrichtung" : "Stossrichtungen";
+  const dirWord = nDir === 1 ? "Sto\u00DFrichtung" : "Sto\u00DFrichtungen";
   const metaTone = redundancyBandMetaTextClass(p.redundancyBand);
   const shell =
     "min-h-[8.5rem] min-w-[120px] max-w-[min(22rem,32vw)] border border-zinc-200 bg-zinc-50 p-0 align-top text-left text-xs font-semibold text-zinc-800";
@@ -179,7 +179,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
 
   const headerHint = useMemo(
     () =>
-      "Zeilen: nur Stossrichtungen mit Status Genehmigt, Aktiv oder Pausiert (nach Σ aller Zell-Scores). Zelle anklicken: Abdeckung 🌱/⚡/🔥 setzen oder Abwaehlen. Score passt sich nach Speichern an. Gruppenzeile oben: ± mit Strich und Gruppenname. Unter dem Spaltentitel: Zeile (n Stossrichtungen) in gruen/gelb/rot je nach Ueberdeckung der Spalte.",
+      "Zeilen: nur Sto\u00DFrichtungen mit Status Genehmigt, Aktiv oder Pausiert (nach \u03A3 aller Zell-Scores). Zelle anklicken: Abdeckung \uD83C\uDF31/\u26A1/\uD83D\uDD25 setzen oder Abwaehlen. Score passt sich nach Speichern an. Gruppenzeile oben: \u00B1 mit Strich und Gruppenname. Unter dem Spaltentitel: Zeile (n Sto\u00DFrichtungen) in gr\u00FCn/gelb/rot je nach Ueberdeckung der Spalte.",
     []
   );
 
@@ -199,7 +199,8 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
           <span className="rounded border border-zinc-300 bg-zinc-100 px-2 py-1 text-zinc-800">niedrig</span>
           <span className="hidden h-4 w-px bg-zinc-200 sm:inline" aria-hidden />
           <span className="whitespace-nowrap rounded ring-2 ring-green-600 ring-offset-1 px-2 py-1 text-green-900">
-            gruener Ring: formal verknuepft
+            
+            grüner Ring: formal verknüpft
           </span>
         </div>
       </div>
@@ -212,21 +213,24 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
             {insights.totalChallenges})
           </span>
           <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">
-            Matrix-Ueberlappung (5+ Stossrichtungen): {insights.matrixCriticalOverlapChallengeCount}/
+            
+            Matrix-Ueberlappung (5+ Stoßrichtungen): {insights.matrixCriticalOverlapChallengeCount}/
             {insights.totalChallenges} Herausforderung(en)
           </span>
           <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">
-            Formale Mehrfach-Verknuepfung (Links): {insights.redundancyHighChallengeCount}
+            
+            Formale Mehrfach-Verknüpfung (Links): {insights.redundancyHighChallengeCount}
           </span>
           <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">
-            Objectives im Zyklus: {model.totalObjectives}
+            Ziele im Zyklus: {model.totalObjectives}
           </span>
         </div>
       ) : null}
 
       {isEmpty ? (
         <p className="mt-4 brand-surface p-3 text-sm text-zinc-600">
-          Fuer die Matrix werden mindestens eine strategische Stossrichtung sowie mindestens eine Herausforderung oder ein Objective im Zyklus benoetigt.
+          
+          Für die Matrix werden mindestens eine strategische Stoßrichtung sowie mindestens eine Herausforderung oder ein Ziel im Zyklus benoetigt.
         </p>
       ) : (
         <div className="mt-4 overflow-x-auto">
@@ -273,7 +277,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         className="shrink-0 rounded border border-violet-400 bg-white px-2 py-0.5 text-xs font-semibold leading-none text-violet-900 tabular-nums hover:bg-violet-100/80"
                         title={
                           objectivesExpanded
-                            ? "Objectives in Sammelspalte zusammenfassen"
+                            ? "Ziele in Sammelspalte zusammenfassen"
                             : `${nObjectiveCols} Einzelspalten anzeigen`
                         }
                         aria-expanded={objectivesExpanded}
@@ -282,7 +286,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                       </button>
                       <div className="h-0.5 min-w-[6px] flex-1 rounded-full bg-violet-400" aria-hidden />
                       <span className="shrink-0 whitespace-nowrap rounded bg-violet-50/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-900">
-                        Objectives
+                        Ziele
                       </span>
                       <div className="h-0.5 min-w-[6px] flex-1 rounded-full bg-violet-400" aria-hidden />
                     </div>
@@ -291,7 +295,8 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
               </tr>
               <tr>
                 <th className="sticky left-0 z-20 border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs font-semibold text-zinc-700">
-                  Stossrichtung
+                  
+                  Stoßrichtung
                 </th>
                 {nChallengeCols > 0 ? (
                   challengesExpanded ? (
@@ -312,7 +317,8 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         Σ Punkte (Matrix): {challengeGroupMatrixTotals.scoreSum}
                       </div>
                       <div className="mt-0.5 text-[10px] font-normal text-slate-600">
-                        Verknuepfungen: {challengeGroupMatrixTotals.linkedCount}
+                        
+                        Verknüpfungen: {challengeGroupMatrixTotals.linkedCount}
                       </div>
                       <div className="mt-0.5 text-[9px] font-normal text-slate-500">
                         {nChallengeCols} Elemente gruppiert
@@ -334,12 +340,13 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                     ))
                   ) : (
                     <th className="max-w-[120px] border border-violet-300 bg-violet-100/90 px-2 py-2 text-left text-xs font-semibold text-violet-950">
-                      <span className="leading-tight">Objectives (Sammel)</span>
+                      <span className="leading-tight">Ziele (Sammel)</span>
                       <div className="mt-1 text-[10px] font-normal text-violet-900">
                         Σ Punkte (Matrix): {objectiveGroupMatrixTotals.scoreSum}
                       </div>
                       <div className="mt-0.5 text-[10px] font-normal text-violet-800">
-                        Verknuepfungen: {objectiveGroupMatrixTotals.linkedCount}
+                        
+                        Verknüpfungen: {objectiveGroupMatrixTotals.linkedCount}
                       </div>
                       <div className="mt-0.5 text-[9px] font-normal text-violet-700/90">
                         {nObjectiveCols} Elemente gruppiert
@@ -365,7 +372,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         </div>
                         <span
                           className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium leading-none text-zinc-600"
-                          title="Status der Stossrichtung"
+                          title="Status der Sto\u00DFrichtung"
                         >
                           {STRATEGIC_DIRECTION_STATUS_LABELS_DE[row.directionStatus]}
                         </span>
@@ -383,7 +390,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                             ) : null}
                             {nObjectiveCols > 0 ? (
                               <span className={addressedLinkCountToneClass(objectiveStats.linkedCount)}>
-                                Obj {objectiveStats.linkedCount}/{objectiveStats.total}
+                                Ziele {objectiveStats.linkedCount}/{objectiveStats.total}
                               </span>
                             ) : null}
                           </div>
@@ -427,9 +434,10 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                             </span>
                           </div>
                           <div className="mt-1 text-[10px] font-medium text-slate-700">
-                            Unterstuetzer: {challengeStats.linkedCount} / {challengeStats.total}
+                            
+                            Unterstützer: {challengeStats.linkedCount} / {challengeStats.total}
                           </div>
-                          <div className="mt-0.5 text-[9px] text-slate-500">formal verknuepft / Spalten</div>
+                          <div className="mt-0.5 text-[9px] text-slate-500">formal verknüpft / Spalten</div>
                         </td>
                       )
                     ) : null}
@@ -475,9 +483,10 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                             </span>
                           </div>
                           <div className="mt-1 text-[10px] font-medium text-violet-900">
-                            Unterstuetzer: {objectiveStats.linkedCount} / {objectiveStats.total}
+                            
+                            Unterstützer: {objectiveStats.linkedCount} / {objectiveStats.total}
                           </div>
-                          <div className="mt-0.5 text-[9px] text-violet-700/90">formal verknuepft / Spalten</div>
+                          <div className="mt-0.5 text-[9px] text-violet-700/90">formal verknüpft / Spalten</div>
                         </td>
                       )
                     ) : null}

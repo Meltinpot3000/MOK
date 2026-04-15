@@ -6,6 +6,7 @@ import {
   fetchStrategyReviewFeedbackEntries,
   fetchStrategyReviewRow,
 } from "@/lib/strategy-review/queries";
+import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
 import { StrategyReviewProcedureShell } from "@/components/ceo/strategy-review/StrategyReviewProcedureShell";
 
 type PageProps = {
@@ -25,9 +26,12 @@ export default async function StrategyReviewProcedurePage({ searchParams }: Page
   const cycle = await getActivePlanningCycle(context.organizationId, preferredId);
   if (!cycle) {
     return (
-      <section className="brand-card p-6">
-        <h1 className="text-xl font-semibold text-zinc-900">Strategy Review</h1>
-        <p className="mt-2 text-sm text-zinc-600">Keine passende Zyklus-Instanz.</p>
+      <section className="space-y-4">
+        <div className="brand-card p-6">
+          <h1 className="text-xl font-semibold text-zinc-900">Strategy Review</h1>
+          <p className="mt-2 text-sm text-zinc-600">Keine passende Zyklus-Instanz.</p>
+        </div>
+        <OkrAreaNav />
       </section>
     );
   }
@@ -42,6 +46,17 @@ export default async function StrategyReviewProcedurePage({ searchParams }: Page
 
   return (
     <section className="space-y-4">
+      <article className="brand-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Strategy Review</h1>
+        <p className="mt-1 text-sm text-zinc-600">
+          Geführter Ablauf mit Ankündigung, Pre-Read, Meeting und Release.
+        </p>
+        <p className="mt-2 text-xs text-zinc-500">
+          Planungszyklus: {cycle.name} ({cycle.start_date} – {cycle.end_date})
+        </p>
+      </article>
+      <OkrAreaNav />
       <StrategyReviewProcedureShell
         cycleInstanceId={cycle.id}
         cycleLabel={cycle.name}
@@ -50,6 +65,7 @@ export default async function StrategyReviewProcedurePage({ searchParams }: Page
         review={review}
         membershipId={context.membershipId}
         canWrite={pageAccess.canWrite}
+        hidePageHeader
         feedbackRows={
           feedbackRows as Array<{
             id: string;

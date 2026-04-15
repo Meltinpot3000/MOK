@@ -763,6 +763,7 @@ async function getWorkspaceContextOrRedirect(): Promise<WorkspaceContext> {
 function done(path = "/strategy-cycle"): never {
   revalidatePath("/strategy-cycle");
   revalidatePath("/strategy-matrix");
+  revalidatePath("/unternehmensinfo");
   redirect(path);
 }
 
@@ -770,6 +771,7 @@ function done(path = "/strategy-cycle"): never {
 function finishOrRedirect(formData: FormData, path: string): void {
   revalidatePath("/strategy-cycle");
   revalidatePath("/strategy-matrix");
+  revalidatePath("/unternehmensinfo");
   if (formData.get("_noRedirect") === "1") return;
   redirect(path);
 }
@@ -1072,7 +1074,7 @@ export async function saveStrategyReferenceText(formData: FormData) {
     .eq("organization_id", context.organizationId);
 
   await invalidateStrategicContextCache(supabase, context.organizationId);
-  done("/strategy-cycle?l1=unternehmensinfo&success=strategy-reference-saved");
+  done("/unternehmensinfo?success=strategy-reference-saved");
 }
 
 export async function saveCompanyKennzahlen(formData: FormData) {
@@ -1085,10 +1087,10 @@ export async function saveCompanyKennzahlen(formData: FormData) {
     ...brandingConfig,
     company_info_organizationsform: String(formData.get("company_info_organizationsform") ?? "").trim().slice(0, 80),
     company_info_organizationsform_other: String(formData.get("company_info_organizationsform_other") ?? "").trim().slice(0, 200),
-    company_info_unternehmensgroesse: String(formData.get("company_info_unternehmensgroesse") ?? "").trim().slice(0, 50),
+    company_info_unternehmensgroesse: String(formData.get("company_info_unternehmensgr\u00F6\u00DFe") ?? "").trim().slice(0, 50),
     company_info_industriekontext: String(formData.get("company_info_industriekontext") ?? "").trim().slice(0, 80),
     company_info_industriekontext_other: String(formData.get("company_info_industriekontext_other") ?? "").trim().slice(0, 200),
-    company_info_kern_wertschoepfung: String(formData.get("company_info_kern_wertschoepfung") ?? "").trim().slice(0, 50),
+    company_info_kern_wertschoepfung: String(formData.get("company_info_kern_wertsch\u00F6pfung") ?? "").trim().slice(0, 50),
     company_info_wichtigstes_produkt_oder_dienstleistung: String(formData.get("company_info_wichtigstes_produkt_oder_dienstleistung") ?? "").trim().slice(0, 500),
     company_info_transformation_status: String(formData.get("company_info_transformation_status") ?? "").trim().slice(0, 50),
     company_info_marktregionen: marktregionen,
@@ -1102,7 +1104,7 @@ export async function saveCompanyKennzahlen(formData: FormData) {
     .eq("organization_id", context.organizationId);
 
   await invalidateStrategicContextCache(supabase, context.organizationId);
-  done("/strategy-cycle?l1=unternehmensinfo&l2=kennwerte&success=company-kennzahlen-saved");
+  done("/unternehmensinfo?l2=kennwerte&success=company-kennzahlen-saved");
 }
 
 export async function updateAnalysisEntry(formData: FormData) {
@@ -1934,7 +1936,7 @@ export async function executeObjectiveEvaluationBackfill(params: {
   const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
   if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) {
     throw new Error(
-      "Objective-Bewertung in der Systemkonfiguration (LLM-Nutzung) nicht aktiviert: «LLM global aktivieren» oder «Objectives-Bewertung» ist aus."
+      "Ziel-Bewertung in der Systemkonfiguration (LLM-Nutzung) nicht aktiviert: «LLM global aktivieren» oder «Ziele-Bewertung» ist aus."
     );
   }
 
@@ -2047,10 +2049,10 @@ export async function executeObjectiveEvaluationBackfill(params: {
           .eq("cycle_instance_id", params.cycleId)
           .select("id");
         if (rowUpd.error) {
-          throw new Error(`Objective ${obj.id}: Speichern fehlgeschlagen (${rowUpd.error.message})`);
+          throw new Error(`Ziel ${obj.id}: Speichern fehlgeschlagen (${rowUpd.error.message})`);
         }
         if (!rowUpd.data?.length) {
-          throw new Error(`Objective ${obj.id}: Update hat keine Zeile getroffen`);
+          throw new Error(`Ziel ${obj.id}: Update hat keine Zeile getroffen`);
         }
         objectivesWithClassifications.push({
           id: obj.id,
@@ -3979,11 +3981,11 @@ export async function generateMatrixProgramProposalAction(input: {
       .maybeSingle(),
   ]);
   if (chErr || !chRow) return { ok: false, error: "Herausforderung nicht gefunden." };
-  if (dirErr || !dirRow) return { ok: false, error: "Stossrichtung nicht gefunden." };
+  if (dirErr || !dirRow) return { ok: false, error: "Sto\u00DFrichtung nicht gefunden." };
   if (!isStrategicDirectionActiveForPrograms(dirRow.status)) {
     return {
       ok: false,
-      error: "KI-Programmvorschlag nur fuer Stossrichtungen mit Status «Aktiv».",
+      error: "KI-Programmvorschlag nur f\u00FCr Sto\u00DFrichtungen mit Status \u00ABAktiv\u00BB.",
     };
   }
 
@@ -3996,7 +3998,7 @@ export async function generateMatrixProgramProposalAction(input: {
 
   const llmPolicy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
   if (!llmPolicy.llmEnabled || !isLlmFeatureEnabled(llmPolicy, "matrix_program_proposal")) {
-    return { ok: false, error: "KI-Vorschlag fuer Programme ist deaktiviert." };
+    return { ok: false, error: "KI-Vorschlag f\u00FCr Programme ist deaktiviert." };
   }
 
   const budgetStatus = await evaluateLlmBudgetStatus({
@@ -4005,7 +4007,7 @@ export async function generateMatrixProgramProposalAction(input: {
     policy: llmPolicy,
   });
   if (!budgetStatus.allowed) {
-    return { ok: false, error: "LLM-Budget ausgeschoepft oder gesperrt." };
+    return { ok: false, error: "LLM-Budget ausgesch\u00F6pft oder gesperrt." };
   }
 
   const kennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
@@ -4032,7 +4034,7 @@ export async function generateMatrixProgramProposalAction(input: {
     return {
       ok: false,
       error:
-        "KI konnte keinen Vorschlag erzeugen. Bitte GEMINI_API_KEY pruefen oder spaeter erneut versuchen.",
+        "KI konnte keinen Vorschlag erzeugen. Bitte GEMINI_API_KEY pr\u00FCfen oder spaeter erneut versuchen.",
     };
   }
 

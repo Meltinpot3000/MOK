@@ -80,7 +80,7 @@ async function fetchInitiativesForReviewCycle(
 
   if (isMissingReviewRollupColumnsError(first.error.message)) {
     console.warn(
-      "[getReviewCycleData] initiatives: Spalten weight/progress_percent/last_review_update_at fehlen — Fallback ohne Roll-up. Bitte Migration 0073_review_initiative_rollup.sql auf dieser Datenbank ausfuehren (gleiche DB wie NEXT_PUBLIC_SUPABASE / Service-Role)."
+      "[getReviewCycleData] initiatives: Spalten weight/progress_percent/last_review_update_at fehlen \u2014 Fallback ohne Roll-up. Bitte Migration 0073_review_initiative_rollup.sql auf dieser Datenbank ausf\u00FChren (gleiche DB wie NEXT_PUBLIC_SUPABASE / Service-Role)."
     );
     return supabase
       .schema("app")

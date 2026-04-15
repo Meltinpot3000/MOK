@@ -24,10 +24,10 @@ type BusinessModelsPageProps = {
 
 function getMessage(error?: string, success?: string) {
   if (error === "missing-name") return { type: "error", text: "Name ist erforderlich." };
-  if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung waehlen." };
+  if (error === "missing-link") return { type: "error", text: "Bitte g\u00FCltige Verkn\u00FCpfung waehlen." };
   if (error === "save-failed") return { type: "error", text: "Business Model konnte nicht gespeichert werden." };
   if (success === "saved") return { type: "success", text: "Business Model wurde gespeichert." };
-  if (success === "linked") return { type: "success", text: "Verknuepfung wurde gespeichert." };
+  if (success === "linked") return { type: "success", text: "Verkn\u00FCpfung wurde gespeichert." };
   if (success === "unlinked-industry") return { type: "success", text: "Industrie-Zuordnung wurde entfernt." };
   if (success === "unlinked") return { type: "success", text: "Zuordnung zur Organisationseinheit wurde entfernt." };
   return null;
@@ -81,8 +81,8 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
     <div className="space-y-6">
       <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Geschaeftsmodelle</h1>
-        <p className="mt-1 text-sm text-zinc-600">Erstelle Geschaeftsmodelle und verknupfe sie mit Industrien und Organisationseinheiten.</p>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Geschäftsmodelle</h1>
+        <p className="mt-1 text-sm text-zinc-600">Erstelle Geschäftsmodelle und verknupfe sie mit Industrien und Organisationseinheiten.</p>
       </header>
 
       <OrganizationTabs />
@@ -95,7 +95,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Neues Geschaeftsmodell</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Neues Geschäftsmodell</h2>
           <form action={createBusinessModel} className="mt-4 space-y-2">
             <label className="block space-y-1">
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Name</span>
@@ -161,30 +161,30 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
               <textarea name="revenue_streams" rows={2} placeholder="Einnahmequellen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselressourcen</span>
-              <textarea name="key_resources" rows={2} placeholder="Schluesselressourcen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schlüsselressourcen</span>
+              <textarea name="key_resources" rows={2} placeholder="Schl\u00FCsselressourcen eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselaktivitaeten</span>
-              <textarea name="key_activities" rows={2} placeholder="Schluesselaktivitaeten eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schlüsselaktivitäten</span>
+              <textarea name="key_activities" rows={2} placeholder="Schl\u00FCsselaktivit\u00E4ten eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schluesselpartner</span>
-              <textarea name="key_partners" rows={2} placeholder="Schluesselpartner eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Schlüsselpartner</span>
+              <textarea name="key_partners" rows={2} placeholder="Schl\u00FCsselpartner eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Kostenstruktur</span>
               <textarea name="cost_structure" rows={2} placeholder="Kostenstruktur eingeben" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
-            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Geschaeftsmodell speichern</button>
+            <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">Geschäftsmodell speichern</button>
           </form>
         </article>
 
         <article className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Geschaeftsmodelle ({models.length})</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Geschäftsmodelle ({models.length})</h2>
           <div className="mt-3 space-y-3">
             {models.length === 0 ? (
-              <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Eintraege vorhanden.</p>
+              <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Einträge vorhanden.</p>
             ) : (
               models.map((model) => {
                 const linkedIds = new Set(linkedIndustryIdsByModel.get(model.id) ?? []);
@@ -207,7 +207,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         .join(", ") || "-"}
                     </p>
                     <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknuepfen/entfernen</p>
+                      <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknüpfen/entfernen</p>
                       <div className="flex flex-wrap gap-2">
                         {industries.map((industry) => {
                           const isLinked = linkedIds.has(industry.id);
@@ -246,7 +246,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         defaultValue=""
                         className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
                       >
-                        <option value="">Organisationseinheit verknuepfen</option>
+                        <option value="">Organisationseinheit verknüpfen</option>
                         {orgUnits.map((unit) => (
                           <option key={unit.id} value={unit.id}>
                             {unit.code} - {unit.name}
@@ -258,7 +258,8 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         disabled={!canWrite}
                         className="brand-btn-secondary px-3 py-1.5 text-xs"
                       >
-                        Verknuepfen
+                        
+                        Verknüpfen
                       </button>
                     </form>
                     <div className="flex flex-wrap gap-2">

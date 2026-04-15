@@ -4,6 +4,7 @@ import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getOkrWorkspaceEffectiveCanWrite, getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
+import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrTrackingView } from "@/components/ceo/okr/OkrTrackingView";
 import {
@@ -28,10 +29,13 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card space-y-2 p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-        <h1 className="text-xl font-semibold text-zinc-900">OKR-Tracking</h1>
-        <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+      <section className="space-y-4">
+        <div className="brand-card space-y-2 p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+          <h1 className="text-xl font-semibold text-zinc-900">OKR-Tracking</h1>
+          <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
+        </div>
+        <OkrAreaNav />
       </section>
     );
   }
@@ -62,6 +66,8 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
         </p>
         <p className="mt-2 text-xs text-zinc-500">Planungszyklus: {cycle.name}</p>
       </article>
+
+      <OkrAreaNav />
 
       {!pageAccess.canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">Lesemodus: keine Check-ins oder KR-Edits.</p>

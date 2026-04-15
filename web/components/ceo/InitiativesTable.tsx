@@ -317,7 +317,7 @@ export function InitiativesTable({
     },
     {
       id: "priority",
-      label: "Prioritaet",
+      label: "Priorit\u00E4t",
       defaultVisible: false,
       sortValue: (i: InitiativeRow) => i.priority ?? null,
       render: (i: InitiativeRow) => (

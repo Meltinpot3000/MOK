@@ -107,8 +107,8 @@ export async function proposeMatrixProgramWithGemini(
 
   const objectiveLines = input.objectives.map((o) => `- id: ${o.id} | ${o.title}`).join("\n");
   const prompt = [
-    "Du bist ein strategischer Programm-Planer fuer ein Unternehmen.",
-    "Erzeuge einen Vorschlag fuer EIN strategisches PROGRAMM (kein OKR, kein Jahresziel, kein Einzel-Projekt).",
+    "Du bist ein strategischer Programm-Planer f\u00FCr ein Unternehmen.",
+    "Erzeuge einen Vorschlag f\u00FCr EIN strategisches PROGRAMM (kein OKR, kein Jahresziel, kein Einzel-Projekt).",
     "Antwort ausschliesslich als valides JSON, ohne Markdown.",
     "",
     "Schema:",
@@ -121,7 +121,7 @@ export async function proposeMatrixProgramWithGemini(
     "Regeln:",
     "- supported_objectives: nur IDs aus der Liste unten; leer lassen wenn keine passen.",
     "- program_description: 2-4 Saetze, umsetzungsnah, solution-agnostic auf Strategieebene.",
-    "- initiative_themes: 3-6 Kurzthemen fuer spätere Initiativen.",
+    "- initiative_themes: 3-6 Kurzthemen f\u00FCr sp\u00E4tere Initiativen.",
     "",
     `Strategische Herausforderung: ${input.challengeTitle}`,
     input.challengeDescription ? `Beschreibung Herausforderung: ${input.challengeDescription}` : "",
@@ -132,7 +132,7 @@ export async function proposeMatrixProgramWithGemini(
     `Matrix-Zellen-Score (0-100): ${input.cellScore}`,
     `Score-Hinweise: ${input.scoreExplanation}`,
     "",
-    "Verfuegbare Objectives (nur diese IDs verwenden):",
+    "Verf\u00FCgbare Ziele (nur diese IDs verwenden):",
     objectiveLines || "(keine)",
     "",
     "Unternehmenskontext (JSON):",

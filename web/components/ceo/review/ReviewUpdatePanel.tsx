@@ -78,7 +78,8 @@ export function ReviewUpdatePanel({
             Umsetzungsfortschritt (%)
           </label>
           <p className="mb-1 text-xs text-zinc-500">
-            Regulaer pflegen — rollt in den Stossrichtungsfortschritt ein.
+            
+            Regulär pflegen — rollt in den Stoßrichtungsfortschritt ein.
           </p>
           <input
             id={`prog-${initiative.id}`}
@@ -99,12 +100,13 @@ export function ReviewUpdatePanel({
             onClick={() => setWeightOpen((o) => !o)}
             className="text-left text-sm font-medium text-zinc-800"
           >
-            Gewichtung {weightOpen ? "ausblenden" : "anzeigen"} (selten aendern)
+            Gewichtung {weightOpen ? "ausblenden" : "anzeigen"}  (selten ändern)
           </button>
           {weightOpen ? (
             <div className="mt-2">
               <label className="text-xs text-zinc-600" htmlFor={`w-${initiative.id}`}>
-                Relative Bedeutung innerhalb der Stossrichtung
+                
+                Relative Bedeutung innerhalb der Stoßrichtung
               </label>
               <select
                 id={`w-${initiative.id}`}

@@ -132,7 +132,7 @@ export function AnalysisEntriesTable({
     },
     {
       id: "zone",
-      label: "Prioritaetszone",
+      label: "Priorit\u00E4tszone",
       defaultVisible: false,
       sortValue: (e: AnalysisEntryRow) =>
         getPriorityZone(e.impact_level, e.uncertainty_level),
@@ -149,7 +149,7 @@ export function AnalysisEntriesTable({
     },
     {
       id: "directions",
-      label: "Stossrichtungen",
+      label: "Sto\u00DFrichtungen",
       defaultVisible: true,
       sortValue: (e: AnalysisEntryRow) => directionCountByEntryId[e.id] ?? 0,
       render: (e: AnalysisEntryRow) => directionCountByEntryId[e.id] ?? 0,
@@ -163,7 +163,7 @@ export function AnalysisEntriesTable({
       getRowId={(e) => e.id}
       expandLabel="Details"
       rowIdPrefix="entry-"
-      emptyMessage="Keine Eintraege fuer die aktuellen Filter."
+      emptyMessage="Keine Eintr\u00E4ge f\u00FCr die aktuellen Filter."
       renderExpandedContent={(entry) => {
         const promotedChallengeId = promotedBySourceId.get(entry.id) ?? null;
         const pestelArea =
@@ -181,7 +181,8 @@ export function AnalysisEntriesTable({
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
-                  Qualitaetswert: {entry.quality_score}
+                  
+                  Qualitätswert: {entry.quality_score}
                 </span>
                 <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
                   Quelle: {entry.quality_source === "llm" ? "LLM" : "Rule-Fallback"}
@@ -317,7 +318,7 @@ export function AnalysisEntriesTable({
                 </button>
                 <AiWaitOverlay
                   title="AI Agent berechnet Qualitaet"
-                  description="Wir rechnen den Qualitaetswert neu und speichern ihn persistent."
+                  description="Wir rechnen den Qualit\u00E4tswert neu und speichern ihn persistent."
                 />
               </div>
             </form>
@@ -332,8 +333,8 @@ export function AnalysisEntriesTable({
                   className="brand-btn px-3 py-1.5 text-xs"
                 >
                   {promotedChallengeId
-                    ? "Bereits als Herausforderung uebernommen"
-                    : "Als Herausforderung uebernehmen"}
+                    ? "Bereits als Herausforderung \u00FCbernommen"
+                    : "Als Herausforderung \u00FCbernehmen"}
                 </button>
               </form>
               <ConfirmBeforeSubmitForm
@@ -364,7 +365,8 @@ export function AnalysisEntriesTable({
               <div className="flex flex-wrap gap-2">
                 {challengeOptions.length === 0 ? (
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-500">
-                    Keine Herausforderungen verfuegbar
+                    
+                    Keine Herausforderungen verfügbar
                   </span>
                 ) : (
                   challengeOptions.map((challenge) => {

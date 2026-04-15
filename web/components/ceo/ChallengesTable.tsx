@@ -77,7 +77,7 @@ export function ChallengesTable({
     },
     {
       id: "challenge_score",
-      label: "Challenge-Score",
+      label: "Herausforderungs-Score",
       defaultVisible: true,
       sortValue: (c: Challenge) =>
         c.challenge_score != null ? Number(c.challenge_score) : null,
@@ -88,7 +88,7 @@ export function ChallengesTable({
     },
     {
       id: "directions",
-      label: "Verknüpfte Stossrichtungen",
+      label: "Verkn\u00FCpfte Sto\u00DFrichtungen",
       defaultVisible: true,
       sortValue: (c: Challenge) => directionCountByChallengeId[c.id] ?? 0,
       render: (c: Challenge) =>
@@ -140,7 +140,7 @@ export function ChallengesTable({
     },
     {
       id: "business_models",
-      label: "Geschaeftsmodelle",
+      label: "Gesch\u00E4ftsmodelle",
       defaultVisible: true,
       sortValue: (c: Challenge) => {
         const ids = businessModelIdsByChallenge[c.id] ?? [];
@@ -189,11 +189,12 @@ export function ChallengesTable({
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                Verknüpfte Stossrichtungen:{" "}
+                
+                Verknüpfte Stoßrichtungen:{" "}
                 {directionCountByChallengeId[challenge.id] ?? 0}
               </span>
               <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                Challenge-Score:{" "}
+                Herausforderungs-Score:{" "}
                 {Number(challenge.challenge_score ?? 0).toFixed(2)}
               </span>
               <ConfirmBeforeSubmitForm
@@ -324,7 +325,7 @@ export function ChallengesTable({
                 })}
               </PillSection>
 
-              <PillSection title="Geschaeftsmodelle">
+              <PillSection title="Gesch\u00E4ftsmodelle">
                 {businessModels.map((model) => {
                   const isLinked = linkedBusinessModelIds.has(model.id);
                   return (

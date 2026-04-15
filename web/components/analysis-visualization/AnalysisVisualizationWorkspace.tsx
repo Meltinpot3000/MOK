@@ -9,6 +9,7 @@ import { GraphCanvas2D } from "@/components/analysis-visualization/GraphCanvas2D
 import { GraphCanvas3D } from "@/components/analysis-visualization/GraphCanvas3D";
 import { TerrainMap2D } from "@/components/analysis-visualization/TerrainMap2D";
 import { Toolbar } from "@/components/analysis-visualization/Toolbar";
+import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
 import type {
   PositionedNode,
   VisualizationEdge,
@@ -69,6 +70,17 @@ type AnalysisVisualizationWorkspaceProps = {
   strategicDirections: Array<{ id: string; title: string }>;
   llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number; reason?: string }>;
   canWrite: boolean;
+  /** Graph-Layout / Quality-Jobs direkt unter den Filtern (Zusammenfassung). */
+  graphMaintenanceActions?: {
+    recomputeGraphLayout: (formData: FormData) => Promise<void>;
+    backfillEntryQuality: (formData: FormData) => Promise<void>;
+    analysisType: string;
+    returnTo: string;
+    hasRunningGraphLayout: boolean;
+    hasRunningQualityBackfill: boolean;
+    staleGraphLayout: boolean;
+    staleQualityBackfill: boolean;
+  };
 };
 
 function hashToUnit(value: string): number {
@@ -304,6 +316,7 @@ export function AnalysisVisualizationWorkspace({
   strategicDirections,
   llmLayoutByEntryId,
   canWrite,
+  graphMaintenanceActions,
 }: AnalysisVisualizationWorkspaceProps) {
   const [viewMode, setViewMode] = useState<VisualizationViewMode>("constellation");
   const [showLabels, setShowLabels] = useState(true);
@@ -764,7 +777,7 @@ export function AnalysisVisualizationWorkspace({
       </div>
       {undoCandidate ? (
         <div className="mt-3 flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <span>Verbindung geloescht: {undoCandidate.linkType}</span>
+          <span>Verbindung gelöscht: {undoCandidate.linkType}</span>
           <button
             type="button"
             onClick={() => {
@@ -772,7 +785,8 @@ export function AnalysisVisualizationWorkspace({
             }}
             className="rounded border border-amber-400 bg-white px-2 py-1 text-xs"
           >
-            Rueckgaengig
+            
+            Rückgängig
           </button>
         </div>
       ) : null}
@@ -802,6 +816,55 @@ export function AnalysisVisualizationWorkspace({
           businessModels={availableDimensions.businessModels}
           operatingModels={availableDimensions.operatingModels}
         />
+
+        {graphMaintenanceActions ? (
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/80 p-3">
+            <p className="text-xs font-medium text-zinc-700">Graph-Berechnung</p>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Layout und Qualität der Analysepunkte. Die Schaltflächen sind nur aktiv, wenn eine Neuberechnung nötig ist.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <form action={graphMaintenanceActions.recomputeGraphLayout}>
+                <input type="hidden" name="analysis_type" value={graphMaintenanceActions.analysisType} />
+                <input type="hidden" name="return_to" value={graphMaintenanceActions.returnTo} />
+                <button
+                  type="submit"
+                  disabled={
+                    !canWrite ||
+                    graphMaintenanceActions.hasRunningGraphLayout ||
+                    !graphMaintenanceActions.staleGraphLayout
+                  }
+                  className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
+                >
+                  Graph-Layout jetzt neu berechnen
+                </button>
+                <AiWaitOverlay
+                  title="AI Agent ordnet den Graphen neu"
+                  description="Node-Positionen werden neu berechnet und persistent gespeichert."
+                />
+              </form>
+              <form action={graphMaintenanceActions.backfillEntryQuality}>
+                <input type="hidden" name="analysis_type" value={graphMaintenanceActions.analysisType} />
+                <input type="hidden" name="return_to" value={graphMaintenanceActions.returnTo} />
+                <button
+                  type="submit"
+                  disabled={
+                    !canWrite ||
+                    graphMaintenanceActions.hasRunningQualityBackfill ||
+                    !graphMaintenanceActions.staleQualityBackfill
+                  }
+                  className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
+                >
+                  Bestehende Punkte neu bewerten
+                </button>
+                <AiWaitOverlay
+                  title="AI Agent bewertet alle bestehenden Punkte"
+                  description="Wir rechnen Quality für alle vorhandenen Einträge neu und aktualisieren den Graph."
+                />
+              </form>
+            </div>
+          </div>
+        ) : null}
 
         <div className="-mx-6 relative">
           {viewMode === "table" ? (
@@ -922,7 +985,8 @@ export function AnalysisVisualizationWorkspace({
       </div>
       {viewMode === "terrain" ? (
         <p className="mt-3 text-xs text-zinc-500">
-          Terrain-Ebenen aktiv: Rohpunkte, Cluster/Bruecken, Herausforderungs-Ringe und Stossrichtungs-Marker ({strategicDirections.length} Stossrichtungen im Zyklus).
+          
+          Terrain-Ebenen aktiv: Rohpunkte, Cluster/Brücken, Herausforderungs-Ringe und Stoßrichtungs-Marker ({strategicDirections.length}  Stoßrichtungen im Zyklus).
         </p>
       ) : null}
     </section>

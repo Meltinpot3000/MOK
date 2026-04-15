@@ -88,8 +88,8 @@ function nodeLabel(typeName: string | null | undefined): string {
   const translations: Record<string, string> = {
     organization: "Organisation",
     division: "Bereich",
-    "business unit": "Geschaeftseinheit",
-    business_unit: "Geschaeftseinheit",
+    "business unit": "Gesch\u00E4ftseinheit",
+    business_unit: "Gesch\u00E4ftseinheit",
     function: "Funktion",
     department: "Abteilung",
     team: "Team",

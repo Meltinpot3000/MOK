@@ -84,7 +84,8 @@ export default function ProfilePage() {
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Konto</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Profil</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Angaben zu deinem Login und Passwort aendern.
+          
+          Angaben zu deinem Login und Passwort ändern.
         </p>
       </header>
 
@@ -106,7 +107,8 @@ export default function ProfilePage() {
             </div>
           </dl>
           <p className="mt-3 text-xs text-zinc-500">
-            Aenderungen an Name/E-Mail koennen je nach Organisationsrichtlinie nur in der Administration oder in
+            
+            Aenderungen an Name/E-Mail können je nach Organisationsrichtlinie nur in der Administration oder in
             Supabase erfolgen.
           </p>
         </section>
@@ -114,7 +116,7 @@ export default function ProfilePage() {
 
       {user ? (
         <section className="brand-card p-6">
-          <h2 className="text-lg font-semibold text-zinc-900">Passwort aendern</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Passwort ändern</h2>
           <p className="mt-1 text-sm text-zinc-600">
             Neues Passwort waehlen (mindestens 8 Zeichen). Du bleibst nach der Aenderung angemeldet.
           </p>

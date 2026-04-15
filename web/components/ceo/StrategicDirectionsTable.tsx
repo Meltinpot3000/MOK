@@ -111,7 +111,7 @@ export function StrategicDirectionsTable({
     },
     {
       id: "priority",
-      label: "Prioritaet (Score)",
+      label: "Priorit\u00E4t (Score)",
       defaultVisible: true,
       sortValue: (d: Direction) =>
         d.priority != null && d.priority !== "" ? Number(d.priority) : null,
@@ -179,7 +179,7 @@ export function StrategicDirectionsTable({
           <div className="space-y-1">
             <div
               className={`text-[10px] font-semibold tabular-nums ${addressedLinkCountToneClass(n)}`}
-              title="Anzahl verknuepfter Herausforderungen vs. alle im Zyklus (Farbe wie Strategie-Matrix)"
+              title="Anzahl verkn\u00FCpfter Herausforderungen vs. alle im Zyklus (Farbe wie Strategie-Matrix)"
             >
               HF {n}/{total}
             </div>
@@ -211,7 +211,7 @@ export function StrategicDirectionsTable({
     },
     {
       id: "objectives",
-      label: "Objectives",
+      label: "Ziele",
       defaultVisible: true,
       sortValue: (d: Direction) => (objectiveIdsByDirection[d.id] ?? []).length,
       render: (d: Direction) => {
@@ -224,9 +224,9 @@ export function StrategicDirectionsTable({
           <div className="space-y-1">
             <div
               className={`text-[10px] font-semibold tabular-nums ${addressedLinkCountToneClass(n)}`}
-              title="Anzahl verknuepfter Ziele vs. alle Objectives im Zyklus (Farbe wie Strategie-Matrix)"
+              title="Anzahl verkn\u00FCpfter Ziele vs. alle Ziele im Zyklus (Farbe wie Strategie-Matrix)"
             >
-              Obj {n}/{total}
+              Ziele {n}/{total}
             </div>
             <div className="flex flex-wrap gap-1">
               {linked.slice(0, MATRIX_TABLE_LINK_PILLS_MAX).map((o) => {
@@ -286,7 +286,7 @@ export function StrategicDirectionsTable({
     },
     {
       id: "business_models",
-      label: "Geschaeftsmodelle",
+      label: "Gesch\u00E4ftsmodelle",
       defaultVisible: true,
       sortValue: (d: Direction) => {
         const ids = businessModelIdsByDirection[d.id] ?? [];
@@ -322,7 +322,7 @@ export function StrategicDirectionsTable({
       rows={directions}
       getRowId={(d) => d.id}
       expandLabel="Details"
-      emptyMessage="Keine strategischen Stossrichtungen vorhanden."
+      emptyMessage="Keine strategischen Sto\u00DFrichtungen vorhanden."
       renderExpandedContent={(direction) => {
         const linkedChallengeIds = new Set(
           challengeIdsByDirection[direction.id] ?? []
@@ -351,7 +351,8 @@ export function StrategicDirectionsTable({
                 {coverage.total || 0})
               </span>
               <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
-                Prioritaet (Score):{" "}
+                
+                Priorität (Score):{" "}
                 {direction.priority != null && direction.priority !== ""
                   ? Number(direction.priority).toFixed(2)
                   : "—"}
@@ -460,7 +461,8 @@ export function StrategicDirectionsTable({
                 />
               </label>
               <p className="text-[11px] text-zinc-500 md:col-span-5">
-                Prioritaet (1–5) und Stossrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
+                
+                Priorität (1–5) und Stoßrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
               </p>
               <div className="md:col-span-5">
                 <button
@@ -468,13 +470,14 @@ export function StrategicDirectionsTable({
                   disabled={!canWrite}
                   className="brand-btn px-3 py-1.5 text-xs"
                 >
-                  Stossrichtung aktualisieren
+                  
+                  Stoßrichtung aktualisieren
                 </button>
               </div>
             </form>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PillSection title="Herausforderungen (Vorgaenger)">
+              <PillSection title="Herausforderungen (Vorg\u00E4nger)">
                 {challenges.map((challenge) => {
                   const isLinked = linkedChallengeIds.has(challenge.id);
                   const level = challengeCoverageByDirection[direction.id]?.[challenge.id] ?? null;
@@ -499,7 +502,7 @@ export function StrategicDirectionsTable({
                 })}
               </PillSection>
 
-              <PillSection title="Ziele (Objectives)">
+              <PillSection title="Strategische Ziele">
                 {objectives.map((objective) => {
                   const isLinked = linkedObjectiveIds.has(objective.id);
                   const level = objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
@@ -553,7 +556,7 @@ export function StrategicDirectionsTable({
                 })}
               </PillSection>
 
-              <PillSection title="Geschaeftsmodelle">
+              <PillSection title="Gesch\u00E4ftsmodelle">
                 {businessModels.map((model) => {
                   const isLinked = linkedBusinessModelIds.has(model.id);
                   return (

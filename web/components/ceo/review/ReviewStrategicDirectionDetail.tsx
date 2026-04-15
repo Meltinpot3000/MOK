@@ -41,9 +41,10 @@ export function ReviewStrategicDirectionDetail({
   return (
     <div className="space-y-4 border-t border-zinc-200 pt-4">
       <p className="text-sm text-zinc-600">
-        Status Stossrichtung:{" "}
+        
+        Status Stoßrichtung:{" "}
         <span className="font-medium text-zinc-800">{directionStatusLabelDe(summary.status)}</span>
-        {" · "}Prioritaet: {summary.priority}
+        {" · "}Priorität: {summary.priority}
       </p>
 
       <div className="flex flex-wrap items-center gap-3">

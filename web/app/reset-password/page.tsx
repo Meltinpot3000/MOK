@@ -51,7 +51,8 @@ export default function ResetPasswordPage() {
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Neues Passwort</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Passwort aktualisieren</h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Vergib ein neues Passwort fuer deinen Account.
+          
+          Vergib ein neues Passwort für deinen Account.
         </p>
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
@@ -97,7 +98,8 @@ export default function ResetPasswordPage() {
         </form>
 
         <p className="mt-4 text-sm text-zinc-600">
-          Kein gueltiger Link?{" "}
+          
+          Kein gültiger Link?{" "}
           <Link
             href="/forgot-password"
             className="font-medium text-zinc-900 underline underline-offset-2"

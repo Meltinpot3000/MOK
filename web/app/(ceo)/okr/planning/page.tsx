@@ -6,6 +6,7 @@ import {
   filterPlanningObjectivesForRead,
   loadPlanningReadBulkContext,
 } from "@/lib/okr/okr-tracking-filter";
+import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace";
 import { buildOkrPlanningEditFlags } from "@/app/(ceo)/okr/planning/build-okr-planning-edit-flags";
@@ -30,10 +31,13 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   const cycle = await getActivePlanningCycle(context.organizationId);
   if (!cycle) {
     return (
-      <section className="brand-card space-y-2 p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-        <h1 className="text-xl font-semibold text-zinc-900">OKR-Planung</h1>
-        <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
+      <section className="space-y-4">
+        <div className="brand-card space-y-2 p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
+          <h1 className="text-xl font-semibold text-zinc-900">OKR-Planung</h1>
+          <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
+        </div>
+        <OkrAreaNav />
       </section>
     );
   }
@@ -73,6 +77,8 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
           Erstelle OKRs und verknüpfe sie mit strategischen Zielen der Organisation.
         </p>
       </article>
+
+      <OkrAreaNav />
 
       {workspace.okrCycles.length > 0 ? (
         <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />

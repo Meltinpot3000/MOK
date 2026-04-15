@@ -96,23 +96,23 @@ function getStatusMessage(error?: string, success?: string, detail?: string) {
   if (error === "invite-missing-roles") {
     return {
       type: "error",
-      text: "Bitte mindestens eine Rolle (Checkbox) auswaehlen — ohne Rolle wird kein Zugang angelegt." as const,
+      text: "Bitte mindestens eine Rolle (Checkbox) ausw\u00E4hlen \u2014 ohne Rolle wird kein Zugang angelegt." as const,
     };
   }
   if (error === "invite-invalid-roles") {
     return {
       type: "error",
-      text: "Mindestens eine gewaehlte Rolle ist fuer diese Organisation ungueltig. Bitte Auswahl pruefen.",
+      text: "Mindestens eine gew\u00E4hlte Rolle ist f\u00FCr diese Organisation ung\u00FCltig. Bitte Auswahl pr\u00FCfen.",
     };
   }
   if (error === "invite-save-failed") {
     return {
       type: "error",
-      text: "Die Einladung konnte nicht gespeichert werden (Rechte oder Datenbank). Bitte erneut versuchen oder Administration/Supabase pruefen.",
+      text: "Die Einladung konnte nicht gespeichert werden (Rechte oder Datenbank). Bitte erneut versuchen oder Administration/Supabase pr\u00FCfen.",
     };
   }
   if (error === "missing-membership") {
-    return { type: "error", text: "Mitgliedschaft fehlt oder ist ungueltig." as const };
+    return { type: "error", text: "Mitgliedschaft fehlt oder ist ung\u00FCltig." as const };
   }
   if (error === "save-failed") {
     return { type: "error", text: "Zuordnung konnte nicht gespeichert werden." as const };
@@ -120,7 +120,7 @@ function getStatusMessage(error?: string, success?: string, detail?: string) {
   if (error === "missing-role") {
     return {
       type: "error",
-      text: "Mindestens eine gueltige Rolle muss ausgewaehlt werden (Checkboxen)." as const,
+      text: "Mindestens eine g\u00FCltige Rolle muss ausgew\u00E4hlt werden (Checkboxen)." as const,
     };
   }
   if (error === "role-save-failed") {
@@ -130,7 +130,7 @@ function getStatusMessage(error?: string, success?: string, detail?: string) {
     const base =
       "Die E-Mail konnte nicht erneut gesendet werden. Bitte den Anmeldelink aus der Liste manuell weitergeben.";
     const hint =
-      " In Supabase unter URL configuration zulaessige Redirects: Site-URL und z. B. https://ihre-domain/invite/oauth** (oder Projekt-Wildcard). Authentication: E-Mail-Provider aktiv.";
+      " In Supabase unter URL configuration zul\u00E4ssige Redirects: Site-URL und z. B. https://ihre-domain/invite/oauth** (oder Projekt-Wildcard). Authentication: E-Mail-Provider aktiv.";
     const tech = detail?.trim() ? ` Technische Meldung: ${detail.trim().slice(0, 500)}` : "";
     return {
       type: "error",
@@ -595,7 +595,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Benutzerliste</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Mehrere Organisations-Rollen pro Benutzer sind moeglich; Navigationsrechte aus allen Rollen werden vereinigt
+          
+          Mehrere Organisations-Rollen pro Benutzer sind möglich; Navigationsrechte aus allen Rollen werden vereinigt
           (effektives Recht ist die Summe).
         </p>
         <div className="mt-4 overflow-x-auto">
@@ -617,11 +618,13 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
         <h2 className="text-lg font-semibold text-zinc-900">Neuen Benutzerzugang anlegen</h2>
         {serviceRoleConfigured ? (
           <p className="mt-1 text-sm text-zinc-600">
-            Automatischer E-Mail-Versand ist aktiv. Benutzerzugaenge werden direkt zugestellt.
+            
+            Automatischer E-Mail-Versand ist aktiv. Benutzerzugänge werden direkt zugestellt.
           </p>
         ) : (
           <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Automatischer E-Mail-Versand ist derzeit deaktiviert. Benutzerzugaenge werden erstellt, aber nicht automatisch versendet.
+            
+            Automatischer E-Mail-Versand ist derzeit deaktiviert. Benutzerzugänge werden erstellt, aber nicht automatisch versendet.
           </p>
         )}
         <form action={createInvitation} className="mt-4 space-y-4">
@@ -674,7 +677,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
             >
               <legend className="px-1 text-sm font-medium text-zinc-800">Organisation-Rollen</legend>
               <p className="mt-0.5 text-xs text-zinc-600">
-                Mindestens eine Rolle. Nach Annahme der Einladung werden alle ausgewaehlten Rollen zugewiesen.
+                
+                Mindestens eine Rolle. Nach Annahme der Einladung werden alle ausgewählten Rollen zugewiesen.
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {roles.map((role) => (
@@ -712,19 +716,22 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Offene Einladungen</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Nur Einladungen mit Status «Offen». Abgeschlossene, abgelaufene oder widerrufene Eintraege stehen im
+          
+          Nur Einladungen mit Status «Offen». Abgeschlossene, abgelaufene oder widerrufene Einträge stehen im
           Archiv-Abschnitt darunter.
         </p>
         {serviceRoleConfigured ? (
           <p className="mt-2 text-sm text-zinc-600">
-            «Widerrufen» setzt die Einladung auf widerrufen, entfernt die Mandanten-Mitgliedschaft (und Rollen) fuer
+            
+            «Widerrufen» setzt die Einladung auf widerrufen, entfernt die Mandanten-Mitgliedschaft (und Rollen) für
             diese E-Mail und loescht den Supabase-Auth-Account, sofern der betroffene Nutzer in keiner anderen
             Organisation mehr eingetragen ist.
           </p>
         ) : (
           <p className="mt-2 text-sm text-amber-900">
+            
             Ohne konfigurierte Service-Role kann «Widerrufen» nur die Einladung in der Datenbank schliessen — keine
-            automatische Bereinigung von Mitgliedschaft oder Auth-User. Für eine vollstaendige Aufraeumung bitte{" "}
+            automatische Bereinigung von Mitgliedschaft oder Auth-User. Für eine vollständige Aufraeumung bitte{" "}
             <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">SUPABASE_SERVICE_ROLE_KEY</code> setzen.
           </p>
         )}
@@ -738,7 +745,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
           />
         </div>
         {invitationViews.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzerzugaenge vorhanden.</p>
+          <p className="mt-3 text-sm text-zinc-500">Noch keine Benutzerzugänge vorhanden.</p>
         ) : null}
         {invitationViews.length > 0 && pendingInvitationViews.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">Keine offenen Einladungen.</p>
@@ -758,7 +765,8 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
       ) : null}
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
-          Diese Rolle hat nur Leserechte fuer Benutzer.
+          
+          Diese Rolle hat nur Leserechte für Benutzer.
         </p>
       ) : null}
     </div>

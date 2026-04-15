@@ -77,7 +77,7 @@ export function InvitationsMembershipTable({
           return (
             <div>
               <div className="font-medium text-zinc-900">{displayName}</div>
-              <div className="text-zinc-500">{displayEmail ?? "E-Mail nicht verfuegbar"}</div>
+              <div className="text-zinc-500">{displayEmail ?? "E-Mail nicht verf\u00FCgbar"}</div>
               {row.title?.trim() ? (
                 <div className="mt-1 text-xs text-zinc-600">
                   Titel: <span className="font-medium text-zinc-800">{row.title}</span>
@@ -141,8 +141,9 @@ export function InvitationsMembershipTable({
                   className="mt-1 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
                 />
                 <p className="mt-1 text-xs text-zinc-500">
+                  
                   Ersetzt in dieser Organisation den Namen aus dem Login-Konto in Listen und Zuordnungen, wenn
-                  ausgefuellt.
+                  ausgefüllt.
                 </p>
               </div>
               <div>
@@ -159,7 +160,8 @@ export function InvitationsMembershipTable({
                   className="mt-1 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
                 />
                 <p className="mt-1 text-xs text-zinc-500">
-                  Rollenbezeichnung oder Funktion — getrennt vom persoenlichen Anzeigenamen.
+                  
+                  Rollenbezeichnung oder Funktion — getrennt vom persönlichen Anzeigenamen.
                 </p>
               </div>
               <fieldset disabled={!canWrite} className="min-w-0 space-y-1.5 border-0 p-0">

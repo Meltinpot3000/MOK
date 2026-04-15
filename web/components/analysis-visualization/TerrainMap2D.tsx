@@ -231,7 +231,7 @@ export function TerrainMap2D({
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-500" />Sonstige</span>
           <span className="border-l border-zinc-300 pl-2" />
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#dc2626" }} />widerspricht</span>
-          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />unterstuetzt/verstaerkt</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />unterstützt/verstaerkt</span>
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#64748b" }} />verbunden/verursacht/...</span>
         </div>
         <div className="pointer-events-none absolute right-3 top-3 z-10 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700 shadow-sm">

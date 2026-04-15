@@ -174,7 +174,7 @@ export function CoverageStrengthPillButton({
   const levelMeta = displayLevel ? COVERAGE_LEVEL_META[displayLevel] : null;
 
   const pickerInner = (
-    <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" role="listbox" aria-label="Abdeckungsstaerke">
+    <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" role="listbox" aria-label="Abdeckungsst\u00E4rke">
       {!(linkSelectionDisabled && displayLinked)
         ? COVERAGE_LEVEL_ORDER.map((key) => {
             const m = COVERAGE_LEVEL_META[key];
@@ -194,7 +194,7 @@ export function CoverageStrengthPillButton({
       {unlinkInPickerOnly && displayLinked ? (
         <button
           type="button"
-          title="Abwaehlen (Verknuepfung entfernen)"
+          title="Abwaehlen (Verkn\u00FCpfung entfernen)"
           className="rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium leading-none text-red-700 hover:bg-red-50"
           onClick={requestUnlink}
         >
@@ -242,8 +242,8 @@ export function CoverageStrengthPillButton({
             onClick={requestUnlink}
             disabled={!canWrite || isPending}
             className="shrink-0 self-end rounded px-0.5 pb-0.5 text-base leading-none text-red-600 hover:bg-red-100/80 disabled:opacity-50"
-            title="Verknuepfung entfernen"
-            aria-label="Verknuepfung entfernen"
+            title="Verkn\u00FCpfung entfernen"
+            aria-label="Verkn\u00FCpfung entfernen"
           >
             ×
           </button>

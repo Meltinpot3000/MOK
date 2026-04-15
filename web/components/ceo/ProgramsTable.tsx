@@ -383,7 +383,7 @@ export function ProgramsTable({
             <div>
               <p className="mb-2 text-xs font-semibold text-zinc-800">Zugehoerige Initiativen</p>
               {inits.length === 0 ? (
-                <p className="text-xs text-zinc-500">Keine Initiativen verknuepft.</p>
+                <p className="text-xs text-zinc-500">Keine Initiativen verknüpft.</p>
               ) : (
                 <div className="overflow-x-auto rounded border border-zinc-200">
                   <table className="min-w-full border-collapse text-xs">
@@ -397,7 +397,8 @@ export function ProgramsTable({
                           Fortschritt
                         </th>
                         <th className="border-b border-zinc-200 px-2 py-1.5 font-medium">
-                          Prioritaet
+                          
+                          Priorität
                         </th>
                       </tr>
                     </thead>

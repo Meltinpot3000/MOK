@@ -211,7 +211,7 @@ export default async function BrandingPage() {
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-sm font-medium text-zinc-700">Sekundaerfarbe</span>
+              <span className="mb-1 block text-sm font-medium text-zinc-700">Sekundärfarbe</span>
               <input
                 name="secondary_color"
                 defaultValue={preview.secondary}
@@ -292,7 +292,7 @@ export default async function BrandingPage() {
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
               >
                 <option value="draft">Entwurf</option>
-                <option value="published">Veroeffentlicht</option>
+                <option value="published">Veröffentlicht</option>
               </select>
             </label>
 
@@ -371,7 +371,8 @@ export default async function BrandingPage() {
                 Primaer
               </div>
               <div className="rounded-md p-3 text-xs text-white" style={{ backgroundColor: preview.secondary }}>
-                Sekundaer
+                
+                Sekundär
               </div>
               <div className="rounded-md p-3 text-xs text-white" style={{ backgroundColor: preview.accent }}>
                 Akzent
@@ -414,14 +415,16 @@ export default async function BrandingPage() {
             )}
           </div>
           <p className="mt-4 text-sm text-zinc-600">
-            Empfehlung: Markenauftritt als eigenen Admin-Menuepunkt fuehren (wie hier), damit Berechtigungen,
+            
+            Empfehlung: Markenauftritt als eigenen Admin-Menüpunkt führen (wie hier), damit Berechtigungen,
             Audit und CI-Deployment sauber getrennt sind.
           </p>
         </article>
       </section>
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
-          Diese Rolle hat nur Leserechte fuer den Markenauftritt.
+          
+          Diese Rolle hat nur Leserechte für den Markenauftritt.
         </p>
       ) : null}
     </div>

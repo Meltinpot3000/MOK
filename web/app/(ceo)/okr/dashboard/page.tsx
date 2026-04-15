@@ -5,13 +5,14 @@ import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
 import { OkrDashboardClient } from "@/components/ceo/okr/OkrDashboardClient";
+import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 
 function pageHeader() {
   return (
     <article className="brand-card p-6">
       <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
-      <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Dashboard</h1>
+      <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Übersicht</h1>
       <p className="mt-1 text-sm text-zinc-600">
         Gesamtblick auf aktuelle, vergangene und zukünftige OKR-Zyklen
       </p>
@@ -35,6 +36,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
+        <OkrAreaNav />
         <div className="brand-card p-6">
           <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
         </div>
@@ -56,6 +58,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
+        <OkrAreaNav />
         {cycleStrip}
         <div className="brand-card space-y-2 p-6">
           <p className="text-sm text-zinc-600">Kein OKR-Zeitraum verfügbar oder auswählbar.</p>
@@ -71,6 +74,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
+        <OkrAreaNav />
         {cycleStrip}
         <div className="brand-card p-6 text-sm text-zinc-600">
           <p>Keine OKR-Objectives in diesem Zeitraum.</p>
@@ -90,6 +94,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-4">
       {pageHeader()}
+      <OkrAreaNav />
       {cycleStrip}
 
       <OkrDashboardClient

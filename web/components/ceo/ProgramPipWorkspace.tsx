@@ -37,8 +37,9 @@ export function ProgramPipWorkspace({
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Programm erfassen</h2>
         <p className="mt-1 text-[11px] text-zinc-500">
+          
           Neue Programme hier anlegen. Bestehende Programme in der Tabelle rechts aufklappen und dort bearbeiten
-          (wie bei strategischen Stossrichtungen).
+          (wie bei strategischen Stoßrichtungen).
         </p>
         <ProgramCreateForm
           canWrite={canWrite}

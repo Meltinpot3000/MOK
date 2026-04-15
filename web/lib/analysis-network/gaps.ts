@@ -101,7 +101,7 @@ export function computeGapFindings(
       dimension: "network-integrity",
       gapType: "connectivity",
       severity: 2,
-      recommendation: "Inkonsistente Verbindungen im Netzwerk erkannt. Bitte Link-Entwuerfe pruefen.",
+      recommendation: "Inkonsistente Verbindungen im Netzwerk erkannt. Bitte Link-Entw\u00FCrfe pr\u00FCfen.",
       metadata: { invalidLinks: duplicates.length },
     });
   }

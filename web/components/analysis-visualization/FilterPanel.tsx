@@ -170,7 +170,7 @@ export function FilterPanel({
         <div className="space-y-3">
           <label className="block">
             <span className="mb-1 flex items-center justify-between text-xs text-zinc-600">
-              <span>Min Naehe</span>
+              <span>Min Nähe</span>
               <span className="text-zinc-700">{minProximity}%</span>
             </span>
             <input
@@ -185,7 +185,7 @@ export function FilterPanel({
           </label>
           <label className="block">
             <span className="mb-1 flex items-center justify-between text-xs text-zinc-600">
-              <span>Min Unterstuetzung</span>
+              <span>Min Unterstützung</span>
               <span className="text-zinc-700">{minSupport}%</span>
             </span>
             <input
@@ -223,7 +223,7 @@ export function FilterPanel({
             onToggle={(id) => setSelectedIndustryIds(toggleSelection(selectedIndustryIds, id))}
           />
           <MultiSelectChips
-            title="Geschaeftsmodell"
+            title="Gesch\u00E4ftsmodell"
             options={businessModels}
             selectedIds={selectedBusinessModelIds}
             onToggle={(id) => setSelectedBusinessModelIds(toggleSelection(selectedBusinessModelIds, id))}

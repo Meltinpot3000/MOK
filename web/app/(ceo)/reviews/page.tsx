@@ -14,8 +14,8 @@ type ReviewsPageProps = {
 };
 
 function getLinkStatus(error?: string, success?: string) {
-  if (error === "missing-link") return { type: "error" as const, text: "Bitte gueltige Verknuepfung auswaehlen." };
-  if (success === "linked") return { type: "success" as const, text: "Dimension wurde erfolgreich verknuepft." };
+  if (error === "missing-link") return { type: "error" as const, text: "Bitte g\u00FCltige Verkn\u00FCpfung ausw\u00E4hlen." };
+  if (success === "linked") return { type: "success" as const, text: "Dimension wurde erfolgreich verkn\u00FCpft." };
   return null;
 }
 
@@ -64,7 +64,8 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Reviewzyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Reviewzyklus</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Fuehrungsnahe Lage: Stossrichtungen, Handlungsbedarf und Initiativen — mit gewichtetem Fortschritt aus der
+          
+          Führungsnahe Lage: Stoßrichtungen, Handlungsbedarf und Initiativen — mit gewichtetem Fortschritt aus der
           Umsetzung.
         </p>
         <p className="mt-1 text-xs text-zinc-500">Zyklus: {cycle.name}</p>
@@ -87,7 +88,8 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
           Uebersicht
         </Link>
         <Link href="/reviews?tab=directions" className={tabClass("directions")}>
-          Stossrichtungen
+          
+          Stoßrichtungen
         </Link>
         <Link href="/reviews?tab=attention" className={tabClass("attention")}>
           Handlungsbedarf

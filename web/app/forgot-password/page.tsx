@@ -35,7 +35,7 @@ export default function ForgotPasswordPage() {
       resetErrorMessage = resetError?.message ?? null;
     } catch {
       resetErrorMessage =
-        "Die Anfrage konnte nicht gesendet werden. Bitte Supabase-URL/Key pruefen und Netzwerkverbindung testen.";
+        "Die Anfrage konnte nicht gesendet werden. Bitte Supabase-URL/Key pr\u00FCfen und Netzwerkverbindung testen.";
     }
 
     setLoading(false);
@@ -52,7 +52,7 @@ export default function ForgotPasswordPage() {
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
       <section className="w-full rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Passwort vergessen</p>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Passwort zuruecksetzen</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Passwort zurücksetzen</h1>
         <p className="mt-2 text-sm text-zinc-600">
           Gib deine E-Mail ein. Du bekommst einen Link, um ein neues Passwort zu setzen.
         </p>
@@ -80,7 +80,7 @@ export default function ForgotPasswordPage() {
             disabled={loading}
             className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
-            {loading ? "Sende Link..." : "Ruecksetzlink senden"}
+            {loading ? "Sende Link..." : "R\u00FCcksetzlink senden"}
           </button>
         </form>
 

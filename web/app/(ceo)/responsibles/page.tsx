@@ -55,7 +55,7 @@ type AssignableOrganizationUnit = {
 
 const RESPONSIBLE_ROLE_OPTIONS: Array<{ value: AssignmentType; label: string }> = [
   { value: "owner", label: "Hauptverantwortung" },
-  { value: "support", label: "Unterstuetzung" },
+  { value: "support", label: "Unterst\u00FCtzung" },
   { value: "stakeholder", label: "Stakeholder" },
 ];
 
@@ -82,7 +82,7 @@ function getStatusMessage(error?: string, success?: string, code?: string) {
     };
   }
   if (error === "missing-fields") {
-    return { type: "error", text: "Bitte alle Pflichtfelder ausfuellen." };
+    return { type: "error", text: "Bitte alle Pflichtfelder ausf\u00FCllen." };
   }
   if (error === "hierarchy-role-order") {
     return {
@@ -444,7 +444,8 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Verantwortliche</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Verknuepfe Benutzer aus dem Kontingent mit Organisationseinheiten und Reporting-Linien. Stammdaten pflegst
+          
+          Verknüpfe Benutzer aus dem Kontingent mit Organisationseinheiten und Reporting-Linien. Stammdaten pflegst
           du unter Benutzerliste und Einladungen.
         </p>
       </header>

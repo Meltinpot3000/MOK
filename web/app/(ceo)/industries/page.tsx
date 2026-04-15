@@ -25,7 +25,7 @@ function getMessage(error?: string, success?: string) {
   if (success === "saved") return { type: "success", text: "Industrie wurde gespeichert." };
   if (success === "linked") return { type: "success", text: "Industrie wurde Organisationseinheit zugeordnet." };
   if (success === "unlinked") return { type: "success", text: "Zuordnung zur Organisationseinheit wurde entfernt." };
-  if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung waehlen." };
+  if (error === "missing-link") return { type: "error", text: "Bitte g\u00FCltige Verkn\u00FCpfung waehlen." };
   return null;
 }
 
@@ -134,7 +134,8 @@ export default async function IndustriesPage({ searchParams }: IndustriesPagePro
                   </p>
                   <div className="mt-2 space-y-1">
                     <p className="text-[11px] uppercase tracking-wide text-zinc-500">
-                      Organisationseinheiten verknuepfen/entfernen
+                      
+                      Organisationseinheiten verknüpfen/entfernen
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {orgUnits.map((unit) => {

@@ -11,7 +11,7 @@ type CyclePulseOverviewProps = {
 type LevelSnapshot = {
   label: string;
   cycle: PlanningCycle | null;
-  status: "laufend" | "naechster" | "letzter" | "leer";
+  status: "laufend" | "n\u00E4chster" | "letzter" | "leer";
   progressPercent: number;
 };
 
@@ -39,7 +39,7 @@ function pickCycle(
   }
 
   const next = ordered.find((cycle) => toTime(cycle.start_date) > nowMs);
-  if (next) return { cycle: next, status: "naechster", progressPercent: 0 };
+  if (next) return { cycle: next, status: "n\u00E4chster", progressPercent: 0 };
 
   const previous = [...ordered].reverse().find((cycle) => toTime(cycle.end_date) <= nowMs);
   if (previous) return { cycle: previous, status: "letzter", progressPercent: 100 };

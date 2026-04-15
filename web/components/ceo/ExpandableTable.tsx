@@ -63,7 +63,7 @@ export function ExpandableTable<T>({
   rows,
   getRowId,
   renderExpandedContent,
-  emptyMessage = "Keine Eintraege vorhanden.",
+  emptyMessage = "Keine Eintr\u00E4ge vorhanden.",
   expandLabel = "Details",
   rowIdPrefix,
   selectedRowId = null,

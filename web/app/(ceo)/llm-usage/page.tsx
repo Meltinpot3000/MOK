@@ -180,16 +180,19 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Systemkonfiguration und -information</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Systemkonfiguration und -information</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Zentrale Uebersicht und Konfiguration fuer LLM-Verbrauch, Feature-Freigaben und Modell-Health.
+          
+          Zentrale Uebersicht und Konfiguration für LLM-Verbrauch, Feature-Freigaben und Modell-Health.
         </p>
         {params.success === "health-checked" ? (
           <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            Modell-Health-Check erfolgreich ausgefuehrt.
+            
+            Modell-Health-Check erfolgreich ausgeführt.
           </p>
         ) : null}
         {params.error === "read-only" ? (
           <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Nur Benutzer mit Schreibrechten koennen den manuellen Health-Check ausfuehren.
+            
+            Nur Benutzer mit Schreibrechten können den manuellen Health-Check ausführen.
           </p>
         ) : null}
         {params.success === "config-saved" ? (
@@ -223,7 +226,8 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.quality_scoring}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Qualitaetsbewertung
+              
+              Qualitätsbewertung
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -268,7 +272,8 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.challenge_recommendation}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Empfehlungslogik fuer Herausforderungen
+              
+              Empfehlungslogik für Herausforderungen
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -277,7 +282,8 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
                 defaultChecked={llmPolicy.featureFlags.model_health_checks}
                 className="h-4 w-4 rounded border-zinc-300"
               />
-              Modell-Gesundheitspruefungen
+              
+              Modell-Gesundheitsprüfungen
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
@@ -342,7 +348,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Qualitaetsbewertung</span>
+              <span className="mb-1 block text-xs text-zinc-600">Qualitätsbewertung</span>
               <input
                 type="number"
                 min={64}
@@ -397,7 +403,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Empfehlungslogik fuer Herausforderungen</span>
+              <span className="mb-1 block text-xs text-zinc-600">Empfehlungslogik für Herausforderungen</span>
               <input
                 type="number"
                 min={64}
@@ -408,7 +414,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-zinc-600">Modell-Gesundheitspruefungen</span>
+              <span className="mb-1 block text-xs text-zinc-600">Modell-Gesundheitsprüfungen</span>
               <input
                 type="number"
                 min={64}
@@ -491,7 +497,8 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
               disabled={!pageAccess.canWrite}
               className="brand-btn px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Jetzt pruefen
+              
+              Jetzt prüfen
             </button>
           </form>
         </div>
@@ -577,7 +584,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
         <form className="mt-3 flex flex-wrap items-end gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
           <input type="hidden" name="days" value={String(days)} />
           <label className="min-w-[280px] flex-1">
-            <span className="mb-1 block text-xs text-zinc-600">JSON-Datei auswaehlen</span>
+            <span className="mb-1 block text-xs text-zinc-600">JSON-Datei auswählen</span>
             <select
               name="log_file"
               defaultValue={selectedLogFile}
@@ -606,7 +613,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
         {selectedLogFile ? (
           <div className="mt-3 space-y-2">
             <div className="brand-surface p-3 text-xs text-zinc-700">
-              <p className="font-medium text-zinc-900">Ausgewaehlte Datei</p>
+              <p className="font-medium text-zinc-900">Ausgewählte Datei</p>
               <p className="mt-1 break-all">{selectedLogFile}</p>
               {selectedLogBytes != null ? <p className="mt-1">Groesse: {selectedLogBytes.toLocaleString("de-CH")} Zeichen</p> : null}
             </div>
@@ -654,7 +661,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
         <h2 className="text-lg font-semibold text-zinc-900">Verbrauch nach Feature</h2>
         <div className="mt-3 space-y-2">
           {featureRows.length === 0 ? (
-            <p className="text-sm text-zinc-600">Keine Daten im gewaehlten Zeitraum.</p>
+            <p className="text-sm text-zinc-600">Keine Daten im gewählten Zeitraum.</p>
           ) : (
             featureRows.map(([feature, values]) => (
               <div key={feature} className="brand-surface flex items-center justify-between p-3 text-sm">
@@ -672,7 +679,7 @@ export default async function LlmUsagePage({ searchParams }: LlmUsagePageProps) 
         <h2 className="text-lg font-semibold text-zinc-900">Verbrauch nach Provider/Modell</h2>
         <div className="mt-3 space-y-2">
           {modelRows.length === 0 ? (
-            <p className="text-sm text-zinc-600">Keine Daten im gewaehlten Zeitraum.</p>
+            <p className="text-sm text-zinc-600">Keine Daten im gewählten Zeitraum.</p>
           ) : (
             modelRows.map(([model, values]) => (
               <div key={model} className="brand-surface flex items-center justify-between p-3 text-sm">

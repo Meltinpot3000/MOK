@@ -25,7 +25,8 @@ export function ReviewAttentionRequired({
       ) : null}
       {list.length === 0 ? (
         <p className={`text-sm text-zinc-600 ${showHeading ? "mt-4" : "mt-0"}`}>
-          Keine Eintraege nach den aktuellen Regeln.
+          
+          Keine Einträge nach den aktuellen Regeln.
         </p>
       ) : (
         <ul className={`space-y-3 ${showHeading ? "mt-4" : "mt-0"}`}>

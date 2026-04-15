@@ -61,7 +61,7 @@ export async function trySendInviteEmailViaSupabase(
 
   const anon = createSupabaseAnonAuthClient();
   if (!anon) {
-    return { ok: false, message: "NEXT_PUBLIC_SUPABASE_URL oder ANON_KEY fehlt fuer Magic-Link." };
+    return { ok: false, message: "NEXT_PUBLIC_SUPABASE_URL oder ANON_KEY fehlt f\u00FCr Magic-Link." };
   }
 
   const { error: otpError } = await anon.auth.signInWithOtp({
@@ -110,7 +110,7 @@ export async function tryResendInviteEmailViaSupabase(
 
   const anon = createSupabaseAnonAuthClient();
   if (!anon) {
-    return { ok: false, message: "NEXT_PUBLIC_SUPABASE_URL oder ANON_KEY fehlt fuer Magic-Link." };
+    return { ok: false, message: "NEXT_PUBLIC_SUPABASE_URL oder ANON_KEY fehlt f\u00FCr Magic-Link." };
   }
 
   const magicAny = await anon.auth.signInWithOtp({

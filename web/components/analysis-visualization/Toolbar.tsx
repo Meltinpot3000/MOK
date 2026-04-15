@@ -103,7 +103,8 @@ export function Toolbar({
           checked={showDirectionLayer}
           onChange={(event) => setShowDirectionLayer(event.target.checked)}
         />
-        Stossrichtungsebene
+        
+        Stoßrichtungsebene
       </label>
       <select
         value={linkScope}
@@ -111,7 +112,7 @@ export function Toolbar({
         className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
       >
         <option value="approved">Nur freigegebene</option>
-        <option value="draft">Nur Entwuerfe</option>
+        <option value="draft">Nur Entwürfe</option>
         <option value="both">Beide</option>
       </select>
     </div>

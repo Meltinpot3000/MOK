@@ -28,7 +28,7 @@ function coverageBandLabelDe(band: CoverageBand): string {
 function conflictTypeLabelDe(type: string): string {
   switch (type) {
     case "misaligned_direction":
-      return "Stossrichtung";
+      return "Sto\u00DFrichtung";
     case "unsupported_objective":
       return "Ziel";
     case "correlation_weak":
@@ -139,22 +139,23 @@ export function StrategicDesignDashboard({ insights }: Props) {
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Übersicht Strategisches Design</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Entscheidungsorientierte Kurzsicht: Fokus-Stossrichtungen, Lücken, Hinweise zu Zielen und Konflikten im
+          
+          Entscheidungsorientierte Kurzsicht: Fokus-Stoßrichtungen, Lücken, Hinweise zu Zielen und Konflikten im
           Modell. Technische Kennzahlen und Schwellen in den Tooltips erklärt.
         </p>
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="brand-surface rounded-md p-3" title={kpis.coverageExplanationDe}>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Challenge-Verankerung</p>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Herausforderungs-Verankerung</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">
               {kpis.coverageChallengeShare != null ? `${kpis.coverageChallengeShare}%` : "—"}
             </p>
-            <p className="mt-1 text-[11px] text-zinc-500">Mit mittlerer/starker Stossrichtungs-Kopplung</p>
+            <p className="mt-1 text-[11px] text-zinc-500">Mit mittlerer/starker Stoßrichtungs-Kopplung</p>
           </div>
           <div className="brand-surface rounded-md p-3">
             <p className="text-xs uppercase tracking-wide text-zinc-500">Kritische Lücken</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{kpis.criticalGaps}</p>
-            <p className="mt-1 text-[11px] text-zinc-500">Hohe Challenge-Scores ohne starken Anker</p>
+            <p className="mt-1 text-[11px] text-zinc-500">Hohe Herausforderungs-Scores ohne starken Anker</p>
           </div>
           <div className="brand-surface rounded-md p-3" title={kpis.focusExplanationDe}>
             <p className="text-xs uppercase tracking-wide text-zinc-500">Fokus-Konzentration</p>
@@ -189,10 +190,10 @@ export function StrategicDesignDashboard({ insights }: Props) {
       </article>
 
       <article className="brand-card p-6">
-        <h3 className="text-base font-semibold text-zinc-900">Fokus: führende Stossrichtungen</h3>
+        <h3 className="text-base font-semibold text-zinc-900">Fokus: führende Stoßrichtungen</h3>
         <p className="mt-1 text-xs text-zinc-600">Top 5 nach gewichtetem Score (Herausforderungen 70 %, Ziele 30 %).</p>
         {topDirections.length === 0 ? (
-          <p className="mt-4 text-sm text-zinc-600">Keine Stossrichtungen im Zyklus.</p>
+          <p className="mt-4 text-sm text-zinc-600">Keine Stoßrichtungen im Zyklus.</p>
         ) : (
           <ul className="mt-4 space-y-4">
             {topDirections.map((d) => (
@@ -212,7 +213,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
                 <div className="mt-3 space-y-2">
                   <div>
                     <div className="flex justify-between text-[11px] text-zinc-600">
-                      <span>Problemlast (Challenges)</span>
+                      <span>Problemlast (Herausforderungen)</span>
                       <span className="tabular-nums">{d.challengeImpact.toFixed(1)}</span>
                     </div>
                     <div className="mt-1 h-2 overflow-hidden rounded-full bg-zinc-100">
@@ -256,7 +257,8 @@ export function StrategicDesignDashboard({ insights }: Props) {
       <article className="brand-card p-6">
         <h3 className="text-base font-semibold text-zinc-900">Kritische Lücken: Herausforderungen</h3>
         <p className="mt-1 text-xs text-zinc-600">
-          Hoher Challenge-Score ohne stark verankerte Stossrichtung (normalisierte Link-Gewichte).
+          
+          Hoher Herausforderungs-Score ohne stark verankerte Stoßrichtung (normalisierte Link-Gewichte).
         </p>
         {unaddressedChallenges.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-600">Keine Einträge nach aktuellen Schwellen.</p>
@@ -316,7 +318,8 @@ export function StrategicDesignDashboard({ insights }: Props) {
       <article className="brand-card p-6">
         <h3 className="text-base font-semibold text-zinc-900">Ziele mit schwacher Problemverankerung</h3>
         <p className="mt-1 text-xs text-zinc-600">
-          Heuristik im Datenmodell: stark über Stossrichtungen angebunden, aber geringe Challenge-Basis — bitte
+          
+          Heuristik im Datenmodell: stark über Stoßrichtungen angebunden, aber geringe Herausforderungs-Basis — bitte
           Verknüpfungen prüfen, nicht die inhaltliche Zielpriorität automatisch verwerfen.
         </p>
         {limitedChallengeBackingObjectives.length === 0 ? (
@@ -327,7 +330,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
               <thead>
                 <tr className="border-b border-zinc-200 text-left text-xs font-semibold text-zinc-600">
                   <SortableTableHeader
-                    label="Objective"
+                    label="Ziel"
                     sortDirection={objSortCol === "title" ? objSortDir : null}
                     onRequestSort={() => requestObjSort("title")}
                     className="py-2 pr-3"
@@ -341,7 +344,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
                     buttonClassName="font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded px-0.5 -mx-0.5"
                   />
                   <SortableTableHeader
-                    label="Challenge-Basis (Summe)"
+                    label="Herausforderungs-Basis (Summe)"
                     sortDirection={objSortCol === "chBack" ? objSortDir : null}
                     onRequestSort={() => requestObjSort("chBack")}
                     className="py-2"

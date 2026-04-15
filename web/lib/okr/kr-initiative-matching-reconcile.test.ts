@@ -30,7 +30,7 @@ describe("kr-initiative-matching-reconcile", () => {
     expect(result.inserts).toEqual([]);
   });
 
-  it("raeumt stale Vorschlaege fuer none/pending/rejected auf", () => {
+  it("raeumt stale Vorschlaege f\u00FCr none/pending/rejected auf", () => {
     const result = reconcileKrInitiativeMatching({
       runId: "run-2",
       existingLinks: [
@@ -57,7 +57,7 @@ describe("kr-initiative-matching-reconcile", () => {
     ]);
   });
 
-  it("fasst accepted/manual nicht an und fuegt neue Vorschlaege ein", () => {
+  it("fasst accepted/manual nicht an und f\u00FCgt neue Vorschlaege ein", () => {
     const result = reconcileKrInitiativeMatching({
       runId: "run-3",
       existingLinks: [

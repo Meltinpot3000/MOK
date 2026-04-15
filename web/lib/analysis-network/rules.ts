@@ -9,7 +9,7 @@ const STOP_WORDS = new Set([
   "ein",
   "eine",
   "mit",
-  "fuer",
+  "f\u00FCr",
   "für",
   "von",
   "den",
@@ -31,11 +31,11 @@ const STOP_WORDS = new Set([
 const SUPPORT_HINTS = [
   "foerder",
   "förder",
-  "unterstuetz",
+  "unterst\u00FCtz",
   "unterstütz",
   "staerkt",
   "stärkt",
-  "ermoeglich",
+  "erm\u00F6glich",
   "ermöglich",
   "synergie",
   "positiv",
@@ -76,7 +76,7 @@ const DEPENDENCY_HINTS = [
 ];
 
 const CAUSE_HINTS = [
-  "fuehrt",
+  "f\u00FChrt",
   "führt",
   "treiber",
   "ursache",

@@ -9,7 +9,7 @@ export type InitiativeKrLinkContext = {
   okr_cycle_label: string | null;
 };
 
-/** Auswahloption KR + Objective fuer Initiative-Formular. */
+/** Auswahloption KR + Ziel fuer Initiative-Formular. */
 export type PipKeyResultOption = {
   id: string;
   title: string;
@@ -649,7 +649,7 @@ export async function getStrategyCycleWorkspaceData(
         key_result_id: kr.id,
         key_result_title: kr.title,
         objective_id: objId,
-        objective_title: objectiveTitleById.get(objId) ?? "Objective",
+        objective_title: objectiveTitleById.get(objId) ?? "Ziel",
         okr_cycle_label: okrCycl ? okrCycleLabelById.get(okrCycl) ?? null : null,
       };
     }

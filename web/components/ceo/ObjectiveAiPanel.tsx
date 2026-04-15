@@ -31,7 +31,7 @@ function getStatusLabel(status: string | null | undefined): string {
   if (status === "valid") return "Aktuell";
   if (status === "outdated") return "Veraltet";
   if (status === "failed") return "Fehlgeschlagen";
-  return "Nicht ausgefuehrt";
+  return "Nicht ausgef\u00FChrt";
 }
 
 function deExternalInternal(value: string): string {
@@ -67,7 +67,8 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
   if (status === "not_run") {
     return (
       <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-        Sentinel✨-Bewertung noch nicht ausgefuehrt.
+        
+        Sentinel✨-Bewertung noch nicht ausgeführt.
       </div>
     );
   }

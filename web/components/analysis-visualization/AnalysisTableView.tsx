@@ -39,9 +39,9 @@ function getAnalysisTypeLabel(type: string) {
 }
 
 function getPriorityZone(impact: number, uncertainty: number) {
-  if (impact >= 4 && uncertainty >= 4) return "Prioritaet A";
+  if (impact >= 4 && uncertainty >= 4) return "Priorit\u00E4t A";
   if (impact >= 4 || uncertainty >= 4) return "Beobachten";
-  return "Rueckstand";
+  return "R\u00FCckstand";
 }
 
 function sortValueFor(node: VisualizationNode, col: SortCol) {
@@ -111,16 +111,17 @@ export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProp
             {th("impact", "Wirkung")}
             {th("uncertainty", "Unsicherheit")}
             {th("qualityScore", "Qualitaet")}
-            {th("zone", "Prioritaetszone")}
+            {th("zone", "Priorit\u00E4tszone")}
             {th("challengeMapped", "Herausforderung")}
-            {th("directionCount", "Stossrichtungen")}
+            {th("directionCount", "Sto\u00DFrichtungen")}
           </tr>
         </thead>
         <tbody>
           {nodes.length === 0 ? (
             <tr>
               <td colSpan={9} className="px-2 py-3 text-zinc-600">
-                Keine Analysepunkte fuer die aktiven Filter.
+                
+                Keine Analysepunkte für die aktiven Filter.
               </td>
             </tr>
           ) : (

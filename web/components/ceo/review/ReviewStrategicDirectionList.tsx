@@ -28,13 +28,13 @@ export function ReviewStrategicDirectionList({
 }: ReviewStrategicDirectionListProps) {
   return (
     <section className="brand-card p-6">
-      <h2 className="text-lg font-semibold text-zinc-900">Stossrichtungen</h2>
+      <h2 className="text-lg font-semibold text-zinc-900">Stoßrichtungen</h2>
       <p className="mt-1 text-sm text-zinc-600">
         Fortschritt und Risiko aus aktiven Initiativen — ohne OKR-Mix in der Kennzahl.
       </p>
       <div className="mt-4 space-y-2">
         {summaries.length === 0 ? (
-          <p className="text-sm text-zinc-600">Keine Stossrichtungen im Zyklus.</p>
+          <p className="text-sm text-zinc-600">Keine Stoßrichtungen im Zyklus.</p>
         ) : (
           summaries.map((s) => {
             const targets = annualTargetsByDirectionId[s.directionId] ?? [];
@@ -46,7 +46,7 @@ export function ReviewStrategicDirectionList({
                     <div>
                       <p className="font-medium text-zinc-900">{s.title}</p>
                       <p className="text-xs text-zinc-500">
-                        {directionStatusLabelDe(s.status)} · Prioritaet {s.priority}
+                        {directionStatusLabelDe(s.status)}  · Priorität {s.priority}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-3 text-sm">
@@ -70,7 +70,7 @@ export function ReviewStrategicDirectionList({
                       </span>
                     </div>
                   </div>
-                  <p className="mt-2 text-xs text-zinc-500 group-open:hidden">Klicken fuer Details und Review.</p>
+                  <p className="mt-2 text-xs text-zinc-500 group-open:hidden">Klicken für Details und Review.</p>
                 </summary>
                 <div className="px-4 pb-4">
                   <ReviewStrategicDirectionDetail

@@ -24,10 +24,10 @@ type OperatingModelsPageProps = {
 
 function getMessage(error?: string, success?: string) {
   if (error === "missing-name") return { type: "error", text: "Name ist erforderlich." };
-  if (error === "missing-link") return { type: "error", text: "Bitte gueltige Verknuepfung waehlen." };
+  if (error === "missing-link") return { type: "error", text: "Bitte g\u00FCltige Verkn\u00FCpfung waehlen." };
   if (success === "saved") return { type: "success", text: "Betriebsmodell wurde gespeichert." };
-  if (success === "linked") return { type: "success", text: "Verknuepfung wurde gespeichert." };
-  if (success === "unlinked") return { type: "success", text: "Verknuepfung wurde entfernt." };
+  if (success === "linked") return { type: "success", text: "Verkn\u00FCpfung wurde gespeichert." };
+  if (success === "unlinked") return { type: "success", text: "Verkn\u00FCpfung wurde entfernt." };
   return null;
 }
 
@@ -77,7 +77,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
       <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Organisationsstruktur</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Betriebsmodelle</h1>
-        <p className="mt-1 text-sm text-zinc-600">Definiere Betriebsmodelle und ordne sie passend zu Industrien und Geschaeftsmodellen zu.</p>
+        <p className="mt-1 text-sm text-zinc-600">Definiere Betriebsmodelle und ordne sie passend zu Industrien und Geschäftsmodellen zu.</p>
       </header>
 
       <OrganizationTabs />
@@ -123,8 +123,8 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
               <textarea name="organization_design" rows={2} placeholder="Organisationsdesign" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Faehigkeiten</span>
-              <textarea name="capabilities" rows={2} placeholder="Faehigkeiten" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Fähigkeiten</span>
+              <textarea name="capabilities" rows={2} placeholder="F\u00E4higkeiten" className="w-full rounded-md border border-zinc-300 px-3 py-2 text-xs" />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-600">Technologie</span>
@@ -154,7 +154,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
           <h2 className="text-lg font-semibold text-zinc-900">Betriebsmodelle ({models.length})</h2>
           <div className="mt-3 space-y-3">
             {models.length === 0 ? (
-              <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Eintraege vorhanden.</p>
+              <p className="brand-surface p-3 text-sm text-zinc-600">Noch keine Einträge vorhanden.</p>
             ) : (
               models.map((model) => {
                 const industryIds = new Set(linkedIndustryIdsByModel.get(model.id) ?? []);
@@ -166,14 +166,14 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                     <p className="text-sm font-semibold text-zinc-900">{model.name} (v{model.version_no})</p>
                     <p className="text-xs text-zinc-600">Status: {model.status}</p>
                     <p className="text-xs text-zinc-600">Prozesse: {asList(model.processes) || "-"}</p>
-                    <p className="text-xs text-zinc-600">Faehigkeiten: {asList(model.capabilities) || "-"}</p>
+                    <p className="text-xs text-zinc-600">Fähigkeiten: {asList(model.capabilities) || "-"}</p>
                     <p className="text-xs text-zinc-600">Technologie: {asList(model.technology) || "-"}</p>
                     <p className="text-xs text-zinc-600">Industrien: {linkedIndustries.map((i) => i.name).join(", ") || "-"}</p>
-                    <p className="text-xs text-zinc-600">Geschaeftsmodelle: {linkedBusinessModels.map((bm) => bm.name).join(", ") || "-"}</p>
+                    <p className="text-xs text-zinc-600">Geschäftsmodelle: {linkedBusinessModels.map((bm) => bm.name).join(", ") || "-"}</p>
 
                     <div className="space-y-2">
                       <div className="space-y-1">
-                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknuepfen/entfernen</p>
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Industrien verknüpfen/entfernen</p>
                         <div className="flex flex-wrap gap-2">
                           {industries.map((industry) => {
                             const isLinked = industryIds.has(industry.id);
@@ -206,7 +206,7 @@ export default async function OperatingModelsPage({ searchParams }: OperatingMod
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Geschaeftsmodelle verknuepfen/entfernen</p>
+                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Geschäftsmodelle verknüpfen/entfernen</p>
                         <div className="flex flex-wrap gap-2">
                           {businessModels.map((bm) => {
                             const isLinked = bmIds.has(bm.id);

@@ -45,7 +45,7 @@ export function SidebarAccountMenu({ userDisplayLine, userEmail }: Props) {
         type="button"
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Konto-Menue oeffnen"
+        aria-label="Konto-Men\u00FC oeffnen"
         onClick={() => setOpen((v) => !v)}
         className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-zinc-800 text-xs font-semibold text-white shadow-sm ring-2 ring-zinc-100 hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
       >

@@ -330,8 +330,8 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
     const show = d.linkedChallengeTitles.slice(0, 3);
     const explain =
       d.objectiveAlignment > d.challengeImpact * 0.85
-        ? "Diese Stossrichtung verbindet Ziele und Herausforderungen relativ ausgewogen; sie taucht in der Priorisierung oben auf."
-        : "Hohe Problemlast ueber Herausforderungen praegt diese Stossrichtung im Modell; sie erscheint deshalb vorn in der Kurzliste.";
+        ? "Diese Sto\u00DFrichtung verbindet Ziele und Herausforderungen relativ ausgewogen; sie taucht in der Priorisierung oben auf."
+        : "Hohe Problemlast ueber Herausforderungen praegt diese Sto\u00DFrichtung im Modell; sie erscheint deshalb vorn in der Kurzliste.";
     return {
       directionId: d.directionId,
       title: d.title,
@@ -356,7 +356,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         coverage: cov,
         coverageBand: band,
         explanationDe:
-          "Priorisierte Herausforderung ohne stark verankerte Stossrichtung im Modell — strategische Folgeabschaetzung und Verknuepfungen pruefen.",
+          "Priorisierte Herausforderung ohne stark verankerte Sto\u00DFrichtung im Modell \u2014 strategische Folgeabsch\u00E4tzung und Verkn\u00FCpfungen pr\u00FCfen.",
       });
     }
   }
@@ -377,7 +377,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
       directionLinkageWeight,
       challengeBacking,
       explanationDe:
-        "Das Ziel ist ueber Stossrichtungen im Modell stark angebunden; die verknuepfte Challenge-Basis bleibt niedrig — Datenlage und fehlende Links pruefen, nicht die inhaltliche Prioritaet automatisch anzweifeln.",
+        "Das Ziel ist ueber Sto\u00DFrichtungen im Modell stark angebunden; die verkn\u00FCpfte Herausforderungs-Basis bleibt niedrig \u2014 Datenlage und fehlende Links pr\u00FCfen, nicht die inhaltliche Priorit\u00E4t automatisch anzweifeln.",
     });
   }
   limitedChallengeBackingObjectives.sort(
@@ -404,7 +404,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         challengeImpact: d.challengeImpact,
         objectiveAlignment: d.objectiveAlignment,
         explanationDe:
-          "Hohe Problemlast ueber Herausforderungen, aber geringe Anbindung an Ziele ueber diese Stossrichtung — Alignment im Modell pruefen.",
+          "Hohe Problemlast ueber Herausforderungen, aber geringe Anbindung an Ziele ueber diese Sto\u00DFrichtung \u2014 Alignment im Modell pr\u00FCfen.",
         explanationEn: "High challenge impact but low objective support along this direction — review model linkage.",
       });
     }
@@ -423,7 +423,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         objectiveId: o.id,
         objectiveTitle: o.title,
         explanationDe:
-          "Wichtiges Ziel mit schwacher oder duenner Anbindung an Stossrichtungen im Modell — Unterstuetzung und Verknuepfungen pruefen.",
+          "Wichtiges Ziel mit schwacher oder d\u00FCnner Anbindung an Sto\u00DFrichtungen im Modell \u2014 Unterst\u00FCtzung und Verkn\u00FCpfungen pr\u00FCfen.",
         explanationEn: "Important objective with limited directional backing in the model — review links.",
       });
     }
@@ -499,11 +499,11 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
     averageObjectiveSupport,
     correlationConflictCount: correlationSummary.conflictCount,
     coverageExplanationDe:
-      "Anteil der Herausforderungen mit mindestens mittlerer oder starker Verankerung an einer Stossrichtung (normalisierte Link-Gewichte).",
+      "Anteil der Herausforderungen mit mindestens mittlerer oder starker Verankerung an einer Sto\u00DFrichtung (normalisierte Link-Gewichte).",
     focusExplanationDe:
-      "Anteil der Gesamt-Prioritaet der Stossrichtungen, der auf die drei staerksten Richtungen entfaellt.",
+      "Anteil der Gesamt-Priorit\u00E4t der Sto\u00DFrichtungen, der auf die drei staerksten Richtungen entfaellt.",
     objectiveSupportExplanationDe:
-      "Reifegrad der Zielanbindung der fuenf fuehrenden Stossrichtungen: Ist-Alignment relativ zum maximal moeglichen bei gleichen Zielen und starken Links.",
+      "Reifegrad der Zielanbindung der f\u00FCnf f\u00FChrenden Sto\u00DFrichtungen: Ist-Alignment relativ zum maximal m\u00F6glichen bei gleichen Zielen und starken Links.",
   };
 
   return {

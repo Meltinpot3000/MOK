@@ -39,7 +39,7 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   {
     id: "strategic-directions",
     href: "/strategic-directions",
-    label: "Strategische Stossrichtungen",
+    label: "Strategische Sto\u00DFrichtungen",
     section: "phase1",
   },
   { id: "annual-targets", href: "/annual-targets", label: "Jahresziele", section: "phase1" },

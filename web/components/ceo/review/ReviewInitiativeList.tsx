@@ -95,7 +95,7 @@ export function ReviewInitiativeList({
       },
       {
         id: "direction",
-        label: "Stossrichtung",
+        label: "Sto\u00DFrichtung",
         sortValue: (r) => directionSortLabel(r, directionNameById),
         render: (r) => (
           <span className="text-zinc-700">{directionSortLabel(r, directionNameById)}</span>
@@ -175,7 +175,8 @@ export function ReviewInitiativeList({
     <section className="brand-card p-6">
       <h2 className="text-lg font-semibold text-zinc-900">Initiativen</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        Operative Liste mit Gewichtung, Fortschritt und Review-Aktualitaet.
+        
+        Operative Liste mit Gewichtung, Fortschritt und Review-Aktualität.
       </p>
       <p className="mt-1 text-[11px] text-zinc-500">
         Zeile mit «+» aufklappen und dort bearbeiten. Neue Initiativen werden im Strategiezyklus erfasst, nicht hier.
@@ -183,7 +184,8 @@ export function ReviewInitiativeList({
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-xs text-zinc-600">
-          Stossrichtung
+          
+          Stoßrichtung
           <select
             value={directionFilter}
             onChange={(e) => setDirectionFilter(e.target.value)}
@@ -250,7 +252,7 @@ export function ReviewInitiativeList({
           rows={filtered}
           getRowId={(r) => r.id}
           expandLabel="Details"
-          emptyMessage="Keine Initiativen fuer die gewaehlten Filter."
+          emptyMessage="Keine Initiativen f\u00FCr die gew\u00E4hlten Filter."
           renderExpandedContent={(row) => (
             <ReviewUpdatePanel
               initiative={row}

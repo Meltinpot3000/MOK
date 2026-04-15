@@ -31,8 +31,6 @@ import {
   recomputeGaps,
   rejectLinkDraft,
   saveCorrelationStatusOverride,
-  saveStrategyReferenceText,
-  saveCompanyKennzahlen,
   linkStrategicChallengeToBusinessModelInCycle,
   linkStrategicChallengeToIndustryInCycle,
   linkStrategicDirectionToBusinessModelInCycle,
@@ -79,15 +77,7 @@ import {
 import { computeStrategicDesignCorrelationSummary } from "@/lib/strategy-cycle/correlation";
 import { computeStrategicDesignInsights } from "@/lib/strategy-cycle/strategic-design-insights";
 import { readStrategyReferenceFieldsFromBrandingConfig } from "@/lib/strategy-cycle/strategy-reference";
-import {
-  readCompanyKennzahlenFromBrandingConfig,
-  ORGFORM_OPTIONS,
-  UNTERNEHMENSGROESSE_OPTIONS,
-  INDUSTRIE_OPTIONS,
-  MARKTREGIONEN_OPTIONS,
-  KERN_WERTSCHOEPFUNG_OPTIONS,
-  TRANSFORMATION_STATUS_OPTIONS,
-} from "@/lib/strategy-cycle/company-info";
+import { readCompanyKennzahlenFromBrandingConfig } from "@/lib/strategy-cycle/company-info";
 import {
   getStrategyCycleWorkspaceData,
   type InitiativeKrLinkContext,
@@ -98,11 +88,12 @@ import {
   isLlmFeatureEnabled,
   type AnalysisNetworkLlmPolicy,
 } from "@/lib/analysis-network/policy";
-import { coerceStrategicContextOutput } from "@/lib/analysis-network/objective-evaluation-providers";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildProgramMatrix } from "@/lib/strategy-cycle/program-matrix";
 import { normalizeContributionLevel, type ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { ProgramMappingMatrix } from "@/components/ceo/ProgramMappingMatrix";
+import { StrategyCycleOverviewLoader } from "@/components/ceo/strategy-cycle/StrategyCycleOverviewLoader";
+import { buildAnalysisEntryOverviewStats } from "@/lib/strategy-cycle/analysis-entry-overview";
+import { computeAnalysisNetworkStaleFlags } from "@/lib/strategy-cycle/analysis-network-stale";
 
 type StrategyCycleViewPageProps = {
   searchParams: Promise<{
@@ -128,20 +119,11 @@ const STRATEGY_CYCLE_TABS = [
 ] as const;
 
 const L1_TABS = [
-  "unternehmensinfo",
+  "overview",
   "objectives",
   "corporate-strategy",
   "strategic-directions",
   "pips",
-] as const;
-const UNTERNEHMENSINFO_TABS = [
-  "kennwerte",
-  "mission",
-  "vision",
-  "werte",
-  "kultur",
-  "leadership",
-  "sentinel-zusammenfassung",
 ] as const;
 const STRATEGIC_DESIGN_TABS = ["dashboard", "summary", "challenges", "design", "strategy-matrix"] as const;
 const PIP_TABS = ["programme", "initiativen"] as const;
@@ -167,7 +149,7 @@ const PESTEL_AREA_META: Array<{ key: string; label: string; tintPercent: number 
 
 /** Pending ohne Fortschritt: nach dieser Zeit Button wieder frei. */
 const BACKGROUND_JOB_PENDING_STALE_MS = 20 * 60 * 1000;
-/** Running: lange Laeufe (viele Objectives/Entries) erlauben; danach als haengend behandeln. */
+/** Running: lange Laeufe (viele Ziele/Entries) erlauben; danach als haengend behandeln. */
 const BACKGROUND_JOB_RUNNING_STALE_MS = 90 * 60 * 1000;
 
 type BackgroundJobRow = {
@@ -205,13 +187,13 @@ function ObjectiveEvaluationDisabledNotice({ policy }: { policy: AnalysisNetwork
   if (!policy.llmEnabled) {
     return (
       <p className="mt-2 text-xs text-zinc-600">
-        Sentinel✨ Objective-Bewertung: LLM ist global aus. {who} «LLM global aktivieren» einschalten.
+        Sentinel✨ Ziel-Bewertung: LLM ist global aus. {who} «LLM global aktivieren» einschalten.
       </p>
     );
   }
   return (
     <p className="mt-2 text-xs text-zinc-600">
-      Sentinel✨ Objective-Bewertung: Feature ist aus. {who} «Objectives-Bewertung» aktivieren (ggf.
+      Sentinel✨ Ziel-Bewertung: Feature ist aus. {who} «Ziele-Bewertung» aktivieren (ggf.
       zuerst «LLM global aktivieren»).
     </p>
   );
@@ -238,33 +220,12 @@ function getTabTitle(tab: string) {
   }
 }
 
-function getUnternehmensinfoSubTabLabel(tab: (typeof UNTERNEHMENSINFO_TABS)[number]) {
-  switch (tab) {
-    case "kennwerte":
-      return "Kennwerte";
-    case "mission":
-      return "Mission";
-    case "vision":
-      return "Vision";
-    case "werte":
-      return "Werte";
-    case "kultur":
-      return "Kultur";
-    case "leadership":
-      return "Leadership";
-    case "sentinel-zusammenfassung":
-      return "Sentinel✨ Zusammenfassung";
-    default:
-      return tab;
-  }
-}
-
 function getL1TabTitle(tab: string) {
   switch (tab) {
-    case "unternehmensinfo":
-      return "Unternehmensinfo";
+    case "overview":
+      return "Übersicht";
     case "objectives":
-      return "Objectives";
+      return "Ziele";
     case "corporate-strategy":
       return "Strategische Erkenntnisse";
     case "strategic-directions":
@@ -276,14 +237,20 @@ function getL1TabTitle(tab: string) {
   }
 }
 
+function truncateStrategyCycleTeaser(text: string, maxLen: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen).trimEnd()}…`;
+}
+
 function getStGallenHint(tab: string) {
   if (tab === "summary")
     return "Strategische Gesamtsicht mit Netzwerk und Tabellen-Scan aller Analysepunkte.";
   if (tab === "strategy-matrix")
-    return "Mapping-Matrix: strategische Herausforderungen und Stossrichtungen im Ueberblick (Score, Verknuepfung, Ueberschneidungen).";
-  if (tab === "environment") return "St. Gallen: Umwelt-Sphaeren und Anspruchsgruppen systematisch erfassen.";
-  if (tab === "company") return "St. Gallen: interne Faehigkeiten, Ressourcen und Prozesse bewerten.";
-  if (tab === "competitor") return "St. Gallen: Wettbewerbsposition und Differenzierungskraefte analysieren.";
+    return "Mapping-Matrix: strategische Herausforderungen und Sto\u00DFrichtungen im \u00DCberblick (Score, Verkn\u00FCpfung, \u00DCberschneidungen).";
+  if (tab === "environment") return "St. Gallen: Umwelt-Sph\u00E4ren und Anspruchsgruppen systematisch erfassen.";
+  if (tab === "company") return "St. Gallen: interne F\u00E4higkeiten, Ressourcen und Prozesse bewerten.";
+  if (tab === "competitor") return "St. Gallen: Wettbewerbsposition und Differenzierungskr\u00E4fte analysieren.";
   if (tab === "swot") return "St. Gallen: interne/ externe Faktoren als S-W-O-T verdichten.";
   return "Strategische Befunde strukturiert dokumentieren und priorisieren.";
 }
@@ -298,42 +265,42 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (error === "high-impact-justification")
     return {
       type: "error",
-      text: "Bei hoher Wirkung (4-5) braucht es eine belastbare Begruendung (mind. 40 Zeichen).",
+      text: "Bei hoher Wirkung (4-5) braucht es eine belastbare Begr\u00FCndung (mind. 40 Zeichen).",
     };
   if (error === "invalid-subtype")
-    return { type: "error", text: "Der Sub-Typ passt nicht zum ausgewaehlten Analysebereich." };
+    return { type: "error", text: "Der Sub-Typ passt nicht zum ausgew\u00E4hlten Analysebereich." };
   if (error === "not-found")
-    return { type: "error", text: "Analyse-Eintrag wurde nicht gefunden oder ist nicht mehr verfuegbar." };
+    return { type: "error", text: "Analyse-Eintrag wurde nicht gefunden oder ist nicht mehr verf\u00FCgbar." };
   if (error === "missing-link")
-    return { type: "error", text: "Bitte gueltige Verknuepfung auswaehlen." };
+    return { type: "error", text: "Bitte g\u00FCltige Verkn\u00FCpfung ausw\u00E4hlen." };
   if (error === "objective-not-linkable")
     return {
       type: "error",
-      text: "Nur Objectives mit Status «aktiv» oder «auffaellig» (at_risk) koennen mit einer Stossrichtung verknuepft werden.",
+      text: "Nur Ziele mit Status \u00ABaktiv\u00BB oder \u00ABauff\u00E4llig\u00BB (at_risk) k\u00F6nnen mit einer Sto\u00DFrichtung verkn\u00FCpft werden.",
     };
   if (error === "direction-active-requires-links")
     return {
       type: "error",
-      text: "Status «Aktiv» ist nur moeglich, wenn diese Stossrichtung mindestens eine strategische Herausforderung als Vorgaenger verknuepft hat (Datenbankregel).",
+      text: "Status \u00ABAktiv\u00BB ist nur m\u00F6glich, wenn diese Sto\u00DFrichtung mindestens eine strategische Herausforderung als Vorg\u00E4nger verkn\u00FCpft hat (Datenbankregel).",
     };
   if (error === "direction-update-failed")
     return {
       type: "error",
-      text: "Stossrichtung konnte nicht gespeichert werden (z. B. Berechtigung oder Validierung). Details siehe Server-Log.",
+      text: "Sto\u00DFrichtung konnte nicht gespeichert werden (z. B. Berechtigung oder Validierung). Details siehe Server-Log.",
     };
   if (error === "direction-not-found")
     return {
       type: "error",
-      text: "Stossrichtung wurde nicht gefunden oder gehoert nicht zum aktiven Planungszyklus — Speichern hatte keine Wirkung.",
+      text: "Sto\u00DFrichtung wurde nicht gefunden oder geh\u00F6rt nicht zum aktiven Planungszyklus \u2014 Speichern hatte keine Wirkung.",
     };
   if (error === "program-insert-failed")
-    return { type: "error", text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
+    return { type: "error", text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen pr\u00FCfen." };
   if (error === "program-duplicate-title")
     return { type: "error", text: "Ein Programm mit diesem Titel existiert bereits in diesem Zyklus." };
   if (error === "program-needs-active-initiative")
     return {
       type: "error",
-      text: "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugehoerige Initiative aktiv ist.",
+      text: "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugeh\u00F6rige Initiative aktiv ist.",
     };
   if (error === "program-invalid-dates")
     return {
@@ -341,40 +308,40 @@ function getStatusMessage(error: string | undefined, success: string | undefined
       text: "Das Enddatum darf nicht vor dem Startdatum liegen.",
     };
   if (error === "program-invalid-owner")
-    return { type: "error", text: "Der gewaehlte Sponsor gehoert nicht zu dieser Organisation." };
+    return { type: "error", text: "Der gew\u00E4hlte Sponsor geh\u00F6rt nicht zu dieser Organisation." };
   if (error === "program-invalid-sponsor-role")
     return {
       type: "error",
-      text: "Als Sponsor sind nur Personen mit Rolle Executive zulaessig.",
+      text: "Als Sponsor sind nur Personen mit Rolle Executive zul\u00E4ssig.",
     };
   if (error === "program-invalid-direction")
     return {
       type: "error",
-      text: "Die strategische Stossrichtung wurde nicht gefunden oder gehoert nicht zu diesem Zyklus.",
+      text: "Die strategische Sto\u00DFrichtung wurde nicht gefunden oder geh\u00F6rt nicht zu diesem Zyklus.",
     };
   if (error === "program-direction-not-active")
     return {
       type: "error",
-      text: "Nur Stossrichtungen mit Status «Aktiv» koennen fuer Programme verwendet werden.",
+      text: "Nur Sto\u00DFrichtungen mit Status \u00ABAktiv\u00BB k\u00F6nnen f\u00FCr Programme verwendet werden.",
     };
   if (error === "program-update-failed")
     return {
       type: "error",
-      text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen und Eingaben pruefen.",
+      text: "Programm konnte nicht gespeichert werden. Bitte Berechtigungen und Eingaben pr\u00FCfen.",
     };
   if (error === "program-update-invalid-status")
-    return { type: "error", text: "Ungueltiger Programm-Status." };
+    return { type: "error", text: "Ung\u00FCltiger Programm-Status." };
   if (error === "initiative-invalid-status")
-    return { type: "error", text: "Ungueltiger Initiative-Status." };
+    return { type: "error", text: "Ung\u00FCltiger Initiative-Status." };
   if (error === "initiative-program-closed")
     return {
       type: "error",
-      text: "Geschlossene Programme koennen fuer neue oder geaenderte Initiativen nicht gewaehlt werden.",
+      text: "Geschlossene Programme k\u00F6nnen f\u00FCr neue oder geaenderte Initiativen nicht gewaehlt werden.",
     };
   if (error === "initiative-invalid-program")
-    return { type: "error", text: "Programm wurde nicht gefunden oder gehoert nicht zu diesem Zyklus." };
+    return { type: "error", text: "Programm wurde nicht gefunden oder geh\u00F6rt nicht zu diesem Zyklus." };
   if (error === "initiative-invalid-owner")
-    return { type: "error", text: "Der gewaehlte Owner gehoert nicht zu dieser Organisation." };
+    return { type: "error", text: "Der gew\u00E4hlte Owner geh\u00F6rt nicht zu dieser Organisation." };
   if (error === "initiative-invalid-dates")
     return {
       type: "error",
@@ -385,35 +352,35 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (error === "initiative-update-failed")
     return { type: "error", text: "Initiative konnte nicht gespeichert werden." };
   if (error === "initiative-update-missing-id")
-    return { type: "error", text: "Initiative-ID fehlt — bitte erneut auswaehlen." };
+    return { type: "error", text: "Initiative-ID fehlt \u2014 bitte erneut ausw\u00E4hlen." };
   if (error === "initiative-not-found")
     return { type: "error", text: "Initiative wurde nicht gefunden." };
   if (error === "objective-insert-failed")
-    return { type: "error", text: "Objective konnte nicht gespeichert werden. Bitte Berechtigungen pruefen." };
+    return { type: "error", text: "Ziel konnte nicht gespeichert werden. Bitte Berechtigungen pr\u00FCfen." };
   if (error === "ai-evaluation-disabled")
     return {
       type: "error",
-      text: "Sentinel✨ Objective-Bewertung ist nicht aktiviert. Bitte eine berechtigte Rolle, in der Systemkonfiguration (LLM-Nutzung) «LLM global aktivieren» und «Objectives-Bewertung» zu pruefen.",
+      text: "Sentinel\u2728 Ziel-Bewertung ist nicht aktiviert. Bitte eine berechtigte Rolle, in der Systemkonfiguration (LLM-Nutzung) \u00ABLLM global aktivieren\u00BB und \u00ABZiele-Bewertung\u00BB zu pr\u00FCfen.",
     };
   if (error === "company-profile-incomplete")
     return {
       type: "error",
-      text: "Unternehmensprofil fuer die KI-Bewertung unvollstaendig. Bitte Kennwerte/Unternehmensinfo ergaenzen.",
+      text: "Unternehmensprofil f\u00FCr die KI-Bewertung unvollst\u00E4ndig. Bitte Kennwerte/Unternehmensinfo erg\u00E4nzen.",
     };
   if (error === "llm-budget-exceeded")
-    return { type: "error", text: "LLM-Budget erreicht. Objective-Bewertung wurde nicht gestartet." };
+    return { type: "error", text: "LLM-Budget erreicht. Ziel-Bewertung wurde nicht gestartet." };
   if (success === "saved")
     return { type: "success", text: "Analyse-Eintrag wurde gespeichert." };
   if (success === "updated")
     return { type: "success", text: "Analyse-Eintrag wurde aktualisiert." };
   if (success === "deleted")
-    return { type: "success", text: "Analyse-Eintrag wurde geloescht." };
+    return { type: "success", text: "Analyse-Eintrag wurde gel\u00F6scht." };
   if (success === "promoted")
-    return { type: "success", text: "Eintrag wurde als strategische Herausforderung in die Matrix uebernommen." };
+    return { type: "success", text: "Eintrag wurde als strategische Herausforderung in die Matrix \u00FCbernommen." };
   if (success === "links-generated")
-    return { type: "success", text: "Link-Entwuerfe wurden neu generiert." };
+    return { type: "success", text: "Link-Entw\u00FCrfe wurden neu generiert." };
   if (success === "links-queued")
-    return { type: "success", text: "Link-Entwuerfe werden im Hintergrund generiert." };
+    return { type: "success", text: "Link-Entw\u00FCrfe werden im Hintergrund generiert." };
   if (success === "link-approved")
     return { type: "success", text: "Link-Entwurf wurde freigegeben." };
   if (success === "link-rejected")
@@ -423,39 +390,39 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "clusters-queued")
     return { type: "success", text: "Cluster werden im Hintergrund neu berechnet." };
   if (success === "gaps-recomputed")
-    return { type: "success", text: "Lueckenanalyse wurde neu berechnet." };
+    return { type: "success", text: "L\u00FCckenanalyse wurde neu berechnet." };
   if (success === "gaps-queued")
-    return { type: "success", text: "Lueckenanalyse wird im Hintergrund neu berechnet." };
+    return { type: "success", text: "L\u00FCckenanalyse wird im Hintergrund neu berechnet." };
   if (success === "graph-layout-recomputed")
     return { type: "success", text: "Graph-Layout wurde neu berechnet." };
   if (success === "quality-backfilled")
     return { type: "success", text: "Bestehende Analysepunkte wurden neu bewertet und im Graph aktualisiert." };
   if (success === "graph-layout-queued")
-    return { type: "success", text: "Graph-Layout Job wurde gestartet und laeuft im Hintergrund." };
+    return { type: "success", text: "Graph-Layout Job wurde gestartet und l\u00E4uft im Hintergrund." };
   if (success === "quality-backfill-queued")
-    return { type: "success", text: "Quality-Backfill Job wurde gestartet und laeuft im Hintergrund." };
+    return { type: "success", text: "Quality-Backfill Job wurde gestartet und l\u00E4uft im Hintergrund." };
   if (success === "cluster-promoted")
-    return { type: "success", text: "Cluster wurde als strategische Herausforderung uebernommen." };
+    return { type: "success", text: "Cluster wurde als strategische Herausforderung \u00FCbernommen." };
   if (success === "finding-linked")
     return { type: "success", text: "Befund wurde einer bestehenden Herausforderung zugeordnet." };
   if (success === "direction-created")
     return { type: "success", text: "Strategisches Design wurde erstellt." };
   if (success === "objective-created")
-    return { type: "success", text: "Objective wurde erstellt." };
+    return { type: "success", text: "Ziel wurde erstellt." };
   if (success === "objective-updated")
-    return { type: "success", text: "Objective wurde aktualisiert." };
+    return { type: "success", text: "Ziel wurde aktualisiert." };
   if (success === "objective-deleted")
-    return { type: "success", text: "Objective wurde geloescht." };
+    return { type: "success", text: "Ziel wurde gel\u00F6scht." };
   if (success === "objective-evaluation-complete")
-    return { type: "success", text: "Objectives wurden von Sentinel✨ bewertet." };
+    return { type: "success", text: "Ziele wurden von Sentinel✨ bewertet." };
   if (success === "objective-evaluation-backfill-queued")
-    return { type: "success", text: "Objectives werden im Hintergrund neu bewertet." };
+    return { type: "success", text: "Ziele werden im Hintergrund neu bewertet." };
   if (success === "challenge-created")
     return { type: "success", text: "Strategische Herausforderung wurde erstellt." };
   if (success === "challenge-deleted")
-    return { type: "success", text: "Strategische Herausforderung wurde geloescht." };
+    return { type: "success", text: "Strategische Herausforderung wurde gel\u00F6scht." };
   if (success === "direction-deleted")
-    return { type: "success", text: "Strategische Stossrichtung wurde geloescht." };
+    return { type: "success", text: "Strategische Sto\u00DFrichtung wurde gel\u00F6scht." };
   if (success === "initiative-created")
     return { type: "success", text: "Initiative wurde erstellt." };
   if (success === "initiative-updated")
@@ -467,18 +434,18 @@ function getStatusMessage(error: string | undefined, success: string | undefined
   if (success === "assessment-updated")
     return {
       type: "success",
-      text: "Stossrichtung wurde gespeichert (Bewertungen, Status, Text).",
+      text: "Sto\u00DFrichtung wurde gespeichert (Bewertungen, Status, Text).",
     };
   if (success === "linked")
-    return { type: "success", text: "Predecessor-Verknuepfung wurde gespeichert." };
+    return { type: "success", text: "Predecessor-Verkn\u00FCpfung wurde gespeichert." };
   if (success === "unlinked")
-    return { type: "success", text: "Predecessor-Verknuepfung wurde entfernt." };
+    return { type: "success", text: "Predecessor-Verkn\u00FCpfung wurde entfernt." };
   if (success === "strategy-reference-saved")
     return { type: "success", text: "Unternehmensinfo wurde gespeichert." };
   if (success === "company-kennzahlen-saved")
     return { type: "success", text: "Kennwerte wurden gespeichert." };
   if (success === "correlation-override-saved")
-    return { type: "success", text: "Status-Override fuer die Korrelation wurde gespeichert." };
+    return { type: "success", text: "Status-Override f\u00FCr die Korrelation wurde gespeichert." };
   if (success === "correlation-override-cleared")
     return { type: "success", text: "Status-Override wurde entfernt. Auto-Status ist wieder aktiv." };
   return null;
@@ -510,26 +477,30 @@ function readTriScores(metadata: unknown) {
 
 export default async function StrategyCycleViewPage({ searchParams }: StrategyCycleViewPageProps) {
   const resolvedSearchParams = await searchParams;
+  const requestedL1Early = String(resolvedSearchParams.l1 ?? "").trim();
+  if (requestedL1Early === "unternehmensinfo" || requestedL1Early === "mission-vision-culture-values") {
+    const sp = new URLSearchParams();
+    const l2 = resolvedSearchParams.l2 ?? resolvedSearchParams.tab;
+    if (l2) sp.set("l2", String(l2));
+    if (resolvedSearchParams.success) sp.set("success", String(resolvedSearchParams.success));
+    if (resolvedSearchParams.error) sp.set("error", String(resolvedSearchParams.error));
+    const q = sp.toString();
+    redirect(`/unternehmensinfo${q ? `?${q}` : ""}`);
+  }
   const legacyTab = resolvedSearchParams.tab;
-  let requestedL1 = String(resolvedSearchParams.l1 ?? "").trim();
-  if (requestedL1 === "mission-vision-culture-values") requestedL1 = "unternehmensinfo";
+  const requestedL1 = String(resolvedSearchParams.l1 ?? "").trim();
   const rawL2Param = resolvedSearchParams.l2 ?? legacyTab;
   const activeL1 = L1_TABS.includes(requestedL1 as (typeof L1_TABS)[number])
     ? requestedL1
     : legacyTab
       ? "corporate-strategy"
-      : "unternehmensinfo";
+      : "overview";
   const requestedL2 =
     rawL2Param != null && String(rawL2Param).trim() !== ""
       ? String(rawL2Param).trim()
       : activeL1 === "strategic-directions"
         ? "dashboard"
         : "summary";
-  const activeUnternehmensinfoTab =
-    activeL1 === "unternehmensinfo" &&
-    UNTERNEHMENSINFO_TABS.includes(requestedL2 as (typeof UNTERNEHMENSINFO_TABS)[number])
-      ? requestedL2
-      : "kennwerte";
   const activeTab =
     activeL1 === "corporate-strategy" &&
     STRATEGY_CYCLE_TABS.includes(requestedL2 as (typeof STRATEGY_CYCLE_TABS)[number])
@@ -573,23 +544,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     selectedCycle.legacy_planning_cycle_id ?? undefined
   );
   const branding = await getTenantBranding(context.organizationId);
-  const supabaseForStrategicContext = await createSupabaseServerClient();
-  const { data: strategicContextRow } = await supabaseForStrategicContext
-    .schema("app")
-    .from("strategic_context_cache")
-    .select("context_json, provider, model, prompt_version, created_at")
-    .eq("organization_id", context.organizationId)
-    .eq("is_current", true)
-    .maybeSingle();
-  const strategicContextCache = strategicContextRow
-    ? {
-        parsed: coerceStrategicContextOutput(strategicContextRow.context_json),
-        provider: strategicContextRow.provider,
-        model: strategicContextRow.model,
-        prompt_version: strategicContextRow.prompt_version,
-        created_at: strategicContextRow.created_at,
-      }
-    : null;
   const analysisLlmPolicy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
   const canQueueObjectiveEvaluation = isLlmFeatureEnabled(analysisLlmPolicy, "objective_evaluation");
   const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
@@ -840,6 +794,20 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const uncoveredChallenges = (workspace.challenges ?? []).filter(
     (challenge) => (directionCountByChallengeId.get(challenge.id) ?? 0) === 0
   );
+  const draftChallengeCandidates = (workspace.challengeCandidates ?? []).filter((c) => c.status === "draft");
+  const summaryClusters = workspace.clusters ?? [];
+  const recommendedChallengeTotal = draftChallengeCandidates.length + summaryClusters.length;
+  const linkDrafts = workspace.linkDrafts ?? [];
+  const gapFindings = workspace.gapFindings ?? [];
+  const linkDraftsCount = linkDrafts.length;
+  const gapFindingsCount = gapFindings.length;
+  const analyseNetzwerkOpenTotal = recommendedChallengeTotal + linkDraftsCount + gapFindingsCount;
+  const analysisNetworkStale = computeAnalysisNetworkStaleFlags({
+    entries: workspace.entries,
+    approvedLinks: workspace.approvedLinks ?? [],
+    linkDrafts: workspace.linkDrafts ?? [],
+    gapFindings: workspace.gapFindings ?? [],
+  });
   const challengeHeatmapCounts = new Map<string, number>();
   for (const challenge of workspace.challenges ?? []) {
     const impact = Math.max(1, Math.min(5, Number(challenge.impact_score ?? 3)));
@@ -932,16 +900,40 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     correlationSummary: strategicDesignSummary,
   });
 
+  const overviewMissionRaw = strategyReferenceFields.mission?.trim() ?? "";
+  const overviewMissionTeaser =
+    overviewMissionRaw.length > 0 ? truncateStrategyCycleTeaser(overviewMissionRaw, 280) : null;
+  const overviewKennzParts: string[] = [];
+  if (companyKennzahlen.organizationsform) {
+    const orgLabel =
+      companyKennzahlen.organizationsform === "other" && companyKennzahlen.organizationsform_other.trim()
+        ? companyKennzahlen.organizationsform_other.trim()
+        : companyKennzahlen.organizationsform;
+    if (orgLabel) overviewKennzParts.push(orgLabel);
+  }
+  if (companyKennzahlen.unternehmensgroesse) {
+    overviewKennzParts.push(`ca. ${companyKennzahlen.unternehmensgroesse} MA`);
+  }
+  const overviewKennwerteTeaser =
+    overviewKennzParts.length > 0 ? overviewKennzParts.join(" · ") : null;
+  const corporateStrategySummaryHref = `/strategy-cycle?l1=corporate-strategy&l2=summary&sort=${sort}&min_score=${minScore}&quality_band=${qualityBandFilter}`;
+
+  const analysisEntrySummary = buildAnalysisEntryOverviewStats(
+    workspace.entries ?? [],
+    workspace.challenges ?? [],
+    workspace.promotedClusterIds,
+    workspace.clusterMembersByClusterId
+  );
+
   return (
     <div className="space-y-6">
       <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategiezyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Arbeitsbereich Strategiezyklus</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Erfasse Signale strukturiert und leite daraus fokussierte strategische Herausforderungen ab.
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Zyklus: {selectedCycle.name} ({selectedCycle.code})
+          Hier bearbeitet ihr die Strategie für den aktuellen Planungszyklus: Unternehmensprofil und Analysen,
+          strategische Herausforderungen und Stoßrichtungen, Ziele sowie Programme und Initiativen — in einem
+          durchgängigen Ablauf.
         </p>
       </header>
 
@@ -971,8 +963,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <a
               key={tab}
               href={
-                tab === "unternehmensinfo"
-                  ? "/strategy-cycle?l1=unternehmensinfo&l2=kennwerte"
+                tab === "overview"
+                  ? "/strategy-cycle?l1=overview"
                   : tab === "pips"
                     ? "/strategy-cycle?l1=pips&l2=programme"
                     : `/strategy-cycle?l1=${tab}`
@@ -1006,22 +998,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </div>
             <p className="text-sm text-zinc-600">{getStGallenHint(activeTab)}</p>
           </>
-        ) : activeL1 === "unternehmensinfo" ? (
-          <div className="flex flex-wrap gap-2">
-            {UNTERNEHMENSINFO_TABS.map((tab) => (
-              <a
-                key={tab}
-                href={`/strategy-cycle?l1=unternehmensinfo&l2=${tab}`}
-                className={`rounded-md border px-3 py-1.5 text-xs ${
-                  activeUnternehmensinfoTab === tab
-                    ? "border-zinc-900 bg-zinc-900 text-white"
-                    : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                }`}
-              >
-                {getUnternehmensinfoSubTabLabel(tab)}
-              </a>
-            ))}
-          </div>
         ) : activeL1 === "strategic-directions" ? (
           <div className="flex flex-wrap gap-2">
             {STRATEGIC_DESIGN_TABS.map((tab) => {
@@ -1034,7 +1010,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       ? "Strategische Herausforderungen"
                       : tab === "strategy-matrix"
                         ? "Strategie-Matrix"
-                        : "Strategische Stossrichtungen";
+                        : "Strategische Sto\u00DFrichtungen";
               return (
                 <a
                   key={tab}
@@ -1069,313 +1045,40 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
         ) : null}
       </section>
 
-      {activeL1 === "unternehmensinfo" ? (
-        <section className="space-y-4">
-          {activeUnternehmensinfoTab === "kennwerte" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Kennwerte</h2>
-              <p className="mt-2 text-sm text-zinc-600">
-                Grundlegende Unternehmenskennwerte fuer den Strategiezyklus.
-              </p>
-              <form action={saveCompanyKennzahlen} className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <label className="block text-sm text-zinc-700">
-                  <span className="mb-1 block font-medium">Organisationsform</span>
-                  <select
-                    name="company_info_organizationsform"
-                    defaultValue={companyKennzahlen.organizationsform}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Bitte waehlen —</option>
-                    {ORGFORM_OPTIONS.filter((o) => o !== "other").map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                    <option value="other">Sonstige</option>
-                  </select>
-                  <input
-                    type="text"
-                    name="company_info_organizationsform_other"
-                    defaultValue={companyKennzahlen.organizationsform_other}
-                    placeholder="Bei Sonstige: eigene Angabe"
-                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="block text-sm text-zinc-700">
-                  <span className="mb-1 block font-medium">Unternehmensgroesse (Mitarbeitende)</span>
-                  <select
-                    name="company_info_unternehmensgroesse"
-                    defaultValue={companyKennzahlen.unternehmensgroesse}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Bitte waehlen —</option>
-                    {UNTERNEHMENSGROESSE_OPTIONS.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-sm text-zinc-700 md:col-span-2">
-                  <span className="mb-1 block font-medium">Industriekontext</span>
-                  <select
-                    name="company_info_industriekontext"
-                    defaultValue={companyKennzahlen.industriekontext}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Bitte waehlen —</option>
-                    {INDUSTRIE_OPTIONS.filter((o) => o !== "other").map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                    <option value="other">Sonstige</option>
-                  </select>
-                  <input
-                    type="text"
-                    name="company_info_industriekontext_other"
-                    defaultValue={companyKennzahlen.industriekontext_other}
-                    placeholder="Bei Sonstige: eigene Angabe"
-                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="block text-sm text-zinc-700 md:col-span-2">
-                  <span className="mb-1 block font-medium">Kern-Wertschöpfung</span>
-                  <select
-                    name="company_info_kern_wertschoepfung"
-                    defaultValue={companyKennzahlen.kern_wertschoepfung}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Bitte waehlen —</option>
-                    {KERN_WERTSCHOEPFUNG_OPTIONS.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    name="company_info_wichtigstes_produkt_oder_dienstleistung"
-                    defaultValue={companyKennzahlen.wichtigstes_produkt_oder_dienstleistung}
-                    placeholder="Wichtigstes Produkt oder wichtigste Dienstleistung"
-                    className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="block text-sm text-zinc-700 md:col-span-2">
-                  <span className="mb-1 block font-medium">Marktregionen</span>
-                  <div className="flex flex-wrap gap-2">
-                    {MARKTREGIONEN_OPTIONS.map((region) => (
-                      <label key={region} className="flex items-center gap-2 rounded border border-zinc-200 px-3 py-1.5">
-                        <input
-                          type="checkbox"
-                          name="company_info_marktregionen"
-                          value={region}
-                          defaultChecked={companyKennzahlen.marktregionen.includes(region)}
-                        />
-                        <span className="text-sm">{region}</span>
-                      </label>
-                    ))}
-                  </div>
-                </label>
-                <label className="block text-sm text-zinc-700">
-                  <span className="mb-1 block font-medium">Umsatzgroesse heute</span>
-                  <input
-                    type="text"
-                    name="company_info_umsatz_heute"
-                    defaultValue={companyKennzahlen.umsatz_heute}
-                    placeholder="z.B. 5 Mio. CHF"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="block text-sm text-zinc-700">
-                  <span className="mb-1 block font-medium">Umsatzgroesse Ziel (Ende Strategiezyklus)</span>
-                  <input
-                    type="text"
-                    name="company_info_umsatz_ziel"
-                    defaultValue={companyKennzahlen.umsatz_ziel}
-                    placeholder="z.B. 8 Mio. CHF"
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="block text-sm text-zinc-700 md:col-span-2">
-                  <span className="mb-1 block font-medium">Transformation Status</span>
-                  <select
-                    name="company_info_transformation_status"
-                    defaultValue={companyKennzahlen.transformation_status}
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Bitte waehlen —</option>
-                    {TRANSFORMATION_STATUS_OPTIONS.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="md:col-span-2">
-                  <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
-                    Speichern
-                  </button>
-                </div>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "mission" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Mission</h2>
-              <p className="mt-2 text-sm text-zinc-600">Unternehmensauftrag und Zweck.</p>
-              <form action={saveStrategyReferenceText} className="mt-4">
-                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
-                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
-                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
-                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
-                <textarea name="strategy_reference_mission" defaultValue={strategyReferenceFields.mission} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Unternehmensauftrag und Zweck..." />
-                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "vision" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Vision</h2>
-              <p className="mt-2 text-sm text-zinc-600">Langfristiges Zukunftsbild.</p>
-              <form action={saveStrategyReferenceText} className="mt-4">
-                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
-                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
-                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
-                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
-                <textarea name="strategy_reference_vision" defaultValue={strategyReferenceFields.vision} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Langfristiges Zukunftsbild..." />
-                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "werte" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Werte</h2>
-              <p className="mt-2 text-sm text-zinc-600">Werte und Entscheidungsgrundsaetze.</p>
-              <form action={saveStrategyReferenceText} className="mt-4">
-                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
-                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
-                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
-                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
-                <textarea name="strategy_reference_values" defaultValue={strategyReferenceFields.values} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Werte und Entscheidungsgrundsaetze..." />
-                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "kultur" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Kultur</h2>
-              <p className="mt-2 text-sm text-zinc-600">Zusammenarbeit, Verhalten und Prinzipien.</p>
-              <form action={saveStrategyReferenceText} className="mt-4">
-                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
-                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
-                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
-                <input type="hidden" name="strategy_reference_leadership" value={strategyReferenceFields.leadership} />
-                <textarea name="strategy_reference_culture" defaultValue={strategyReferenceFields.culture} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Zusammenarbeit, Verhalten und Prinzipien..." />
-                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "leadership" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Leadership</h2>
-              <p className="mt-2 text-sm text-zinc-600">Fuehrungsprinzipien und Erwartung an Leadership-Verhalten.</p>
-              <form action={saveStrategyReferenceText} className="mt-4">
-                <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
-                <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
-                <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
-                <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
-                <textarea name="strategy_reference_leadership" defaultValue={strategyReferenceFields.leadership} rows={8} className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" placeholder="Fuehrungsprinzipien und Erwartung an Leadership-Verhalten..." />
-                <button type="submit" disabled={!canWrite} className="mt-3 brand-btn px-4 py-2 text-sm">Speichern</button>
-              </form>
-            </article>
-          ) : null}
-          {activeUnternehmensinfoTab === "sentinel-zusammenfassung" ? (
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Sentinel✨ Zusammenfassung</h2>
-              <p className="mt-2 text-sm text-zinc-600">
-                Aus Kennwerten und Strategiereferenz fuer Sentinel✨ Objective-Bewertungen aufbereiteter strategischer Kontext
-                (Cache in der Datenbank).
-              </p>
-              {!strategicContextCache ? (
-                <p className="mt-4 text-sm text-zinc-600">
-                  Noch kein Eintrag. Die Zusammenfassung wird angelegt, sobald die Objective-Bewertung den strategischen Kontext
-                  erstmalig erzeugt.
-                </p>
-              ) : !strategicContextCache.parsed ? (
-                <p className="mt-4 text-sm text-amber-800">
-                  Gespeicherter Kontext konnte nicht gelesen werden. Bitte Objective-Bewertung erneut anstossen oder Support
-                  kontaktieren.
-                </p>
-              ) : (
-                <>
-                  {![
-                    strategicContextCache.parsed.company_type,
-                    strategicContextCache.parsed.scale,
-                    strategicContextCache.parsed.industry_context,
-                    strategicContextCache.parsed.value_creation_logic,
-                    strategicContextCache.parsed.market_scope,
-                    strategicContextCache.parsed.growth_ambition,
-                    strategicContextCache.parsed.transformation_pressure,
-                  ].some(Boolean) &&
-                  strategicContextCache.parsed.strategic_implications.length === 0 ? (
-                    <p className="mt-4 text-sm text-zinc-600">
-                      Der gespeicherte Kontext enthaelt noch keine ausfuellbaren Felder.
-                    </p>
-                  ) : null}
-                  <dl className="mt-6 grid gap-4 text-sm md:grid-cols-2">
-                    {[
-                      ["Unternehmenstyp", strategicContextCache.parsed.company_type],
-                      ["Skala / Groesse", strategicContextCache.parsed.scale],
-                      ["Industriekontext", strategicContextCache.parsed.industry_context],
-                      ["Wertschoepfungslogik", strategicContextCache.parsed.value_creation_logic],
-                      ["Marktumfang", strategicContextCache.parsed.market_scope],
-                      ["Wachstumsambition", strategicContextCache.parsed.growth_ambition],
-                      ["Transformationsdruck", strategicContextCache.parsed.transformation_pressure],
-                    ].map(([label, value]) =>
-                      value ? (
-                        <div key={String(label)} className="md:col-span-2">
-                          <dt className="font-medium text-zinc-800">{label}</dt>
-                          <dd className="mt-1 whitespace-pre-wrap text-zinc-700">{value}</dd>
-                        </div>
-                      ) : null
-                    )}
-                  </dl>
-                  {strategicContextCache.parsed.strategic_implications.length > 0 ? (
-                    <div className="mt-6">
-                      <h3 className="text-sm font-medium text-zinc-800">Strategische Implikationen</h3>
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-                        {strategicContextCache.parsed.strategic_implications.map((line, implIdx) => (
-                          <li key={`${implIdx}-${line.slice(0, 48)}`}>{line}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  <p className="mt-6 text-xs text-zinc-500">
-                    {[
-                      [strategicContextCache.provider, strategicContextCache.model, strategicContextCache.prompt_version]
-                        .filter(Boolean)
-                        .join(" · "),
-                      strategicContextCache.created_at
-                        ? new Date(strategicContextCache.created_at).toLocaleString("de-CH", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "Keine Metadaten (Erstellzeit unbekannt)"}
-                  </p>
-                </>
-              )}
-            </article>
-          ) : null}
-        </section>
+      {activeL1 === "overview" ? (
+        <StrategyCycleOverviewLoader
+          analysisEntrySummary={analysisEntrySummary}
+          counts={{
+            analysisEntries: analysisEntrySummary.total,
+            challenges: (workspace.challenges ?? []).length,
+            directions: (workspace.strategicDirections ?? []).length,
+            objectives: (workspace.objectives ?? []).length,
+            programs: (workspace.programs ?? []).length,
+            initiatives: (workspace.initiatives ?? []).length,
+          }}
+          kpis={strategicDesignInsights.kpis}
+          topChallenges={topChallenges}
+          topDirections={topDirections}
+          missionTeaser={overviewMissionTeaser}
+          kennwerteTeaser={overviewKennwerteTeaser}
+          corporateStrategySummaryHref={corporateStrategySummaryHref}
+        />
       ) : null}
 
       {activeL1 === "objectives" ? (
         <section className="space-y-4">
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
             <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Objective erfassen</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Ziel erfassen</h2>
               <p className="mt-1 text-[11px] text-zinc-500">
-                Neue Objectives hier anlegen (stabile Zielbilder, typ. 3–5 Jahre). Bestehende Eintraege rechts in
+                
+                Neue Ziele hier anlegen (stabile Zielbilder, typ. 3–5 Jahre). Bestehende Einträge rechts in
                 der Tabelle aufklappen und dort bearbeiten.
               </p>
               <ObjectiveCreateForm action={createObjectiveInCycle} canWrite={canWrite} />
             </article>
             <article className="brand-card p-6">
-              <h3 className="text-base font-semibold text-zinc-900">Objectives</h3>
+              <h3 className="text-base font-semibold text-zinc-900">Ziele</h3>
               <div className="mt-4">
                 <ObjectivesTable
                   objectives={workspace.objectives ?? []}
@@ -1401,7 +1104,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Portfolio-Bewertung</h3>
             <p className="mt-1 text-sm text-zinc-600">
-              Balance und Verteilung der Objectives nach Sentinel✨-Bewertung.
+              Balance und Verteilung der Ziele nach Sentinel✨-Bewertung.
             </p>
             <div className="mt-4 space-y-4">
               <PortfolioSummaryView portfolio={workspace.portfolioEvaluation ?? null} />
@@ -1416,16 +1119,17 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   }
                   className="brand-btn rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
                 >
-                  Objectives neu bewerten
+                  Ziele neu bewerten
                 </button>
               </form>
               <ObjectiveEvaluationDisabledNotice policy={analysisLlmPolicy} />
               {canQueueObjectiveEvaluation && staleObjectiveEvalJobs.length > 0 ? (
                 <p className="mt-2 text-xs text-amber-800">
-                  Ein Objective-Bewertungsjob ist aelter als ca.:{" "}
+                  
+                  Ein Ziel-Bewertungsjob ist älter als ca.:{" "}
                   {Math.round(BACKGROUND_JOB_PENDING_STALE_MS / 60000)} Min (pending) bzw.{" "}
-                  {Math.round(BACKGROUND_JOB_RUNNING_STALE_MS / 60000)} Min (running) — der Button ist wieder
-                  aktiv. Haengende Eintraege bleiben in der Jobliste; ein neuer Lauf stellt einen zusaetzlichen
+                  {Math.round(BACKGROUND_JOB_RUNNING_STALE_MS / 60000)}  Min (running) — der Button ist wieder
+                  aktiv. Hängende Einträge bleiben in der Jobliste; ein neuer Lauf stellt einen zusätzlichen
                   Job ein.
                 </p>
               ) : null}
@@ -1433,7 +1137,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </article>
 
           <article className="brand-card p-6">
-            <h3 className="text-base font-semibold text-zinc-900">Objective-Balance (Streudiagramm)</h3>
+            <h3 className="text-base font-semibold text-zinc-900">Ziel-Balance (Streudiagramm)</h3>
             <p className="mt-1 text-sm text-zinc-600">
               Grob lesbar: Intern/Extern vs Exploit/Explore (KI-Klassifikation, nur wenige Rasterpunkte). Feine
               Verschiebung unter den Punkten kommt aus Teilscores, damit Ueberlagerungen sichtbar werden.
@@ -1459,40 +1163,40 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             />
           ) : null}
           {activeStrategicTab === "challenges" ? (
-          <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-            <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Herausforderung erfassen</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Manuell oder unabhaengig von Analyse-Eintraegen anlegen und bewerten.
-              </p>
-              <ChallengeCreateForm action={createStrategicChallengeInCycle} canWrite={canWrite} />
-            </article>
-            <article className="brand-card p-6">
-              <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
-              <div className="mt-4">
-                <ChallengesTable
-                  challenges={workspace.challenges ?? []}
-                  industries={workspace.availableDimensions?.industries ?? []}
-                  businessModels={workspace.availableDimensions?.businessModels ?? []}
-                  industryIdsByChallenge={Object.fromEntries(challengeIndustryIdsById)}
-                  businessModelIdsByChallenge={Object.fromEntries(challengeBusinessModelIdsById)}
-                  directionCountByChallengeId={Object.fromEntries(directionCountByChallengeId)}
-                  canWrite={canWrite}
-                  actions={{
-                    updateStrategicChallengeAssessment,
-                    deleteStrategicChallengeInCycle,
-                    linkStrategicChallengeToIndustryInCycle,
-                    unlinkStrategicChallengeFromIndustryInCycle,
-                    linkStrategicChallengeToBusinessModelInCycle,
-                    unlinkStrategicChallengeFromBusinessModelInCycle,
-                  }}
-                />
+            <>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+                <article className="brand-card p-6">
+                  <h2 className="text-lg font-semibold text-zinc-900">Herausforderung erfassen</h2>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    
+                    Manuell oder unabhaengig von Analyse-Einträgen anlegen und bewerten.
+                  </p>
+                  <ChallengeCreateForm action={createStrategicChallengeInCycle} canWrite={canWrite} />
+                </article>
+                <article className="brand-card p-6">
+                  <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
+                  <div className="mt-4">
+                    <ChallengesTable
+                      challenges={workspace.challenges ?? []}
+                      industries={workspace.availableDimensions?.industries ?? []}
+                      businessModels={workspace.availableDimensions?.businessModels ?? []}
+                      industryIdsByChallenge={Object.fromEntries(challengeIndustryIdsById)}
+                      businessModelIdsByChallenge={Object.fromEntries(challengeBusinessModelIdsById)}
+                      directionCountByChallengeId={Object.fromEntries(directionCountByChallengeId)}
+                      canWrite={canWrite}
+                      actions={{
+                        updateStrategicChallengeAssessment,
+                        deleteStrategicChallengeInCycle,
+                        linkStrategicChallengeToIndustryInCycle,
+                        unlinkStrategicChallengeFromIndustryInCycle,
+                        linkStrategicChallengeToBusinessModelInCycle,
+                        unlinkStrategicChallengeFromBusinessModelInCycle,
+                      }}
+                    />
+                  </div>
+                </article>
               </div>
-            </article>
-          </section>
-          ) : null}
-          {activeStrategicTab === "challenges" ? (
-          <article className="brand-card p-6">
+              <article className="brand-card p-6">
             <h3 className="text-base font-semibold text-zinc-900">Heatmap (Auswirkung × Dringlichkeit)</h3>
             <p className="mt-1 text-xs text-zinc-600">
               Hohe Werte oben rechts markieren prioritär zu adressierende Herausforderungen.
@@ -1536,7 +1240,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               <div className="flex flex-col gap-4 lg:min-w-[280px]">
                 <div>
                   <h4 className="text-sm font-medium text-zinc-800">Top 5 Herausforderungen</h4>
-                  <p className="mt-1 text-xs text-zinc-500">Nach Challenge-Score sortiert</p>
+                  <p className="mt-1 text-xs text-zinc-500">Nach Herausforderungs-Score sortiert</p>
                   <ul className="mt-2 space-y-1.5">
                     {topChallenges.map((challenge, idx) => (
                       <li key={challenge.id} className="flex items-start gap-2 text-xs">
@@ -1559,7 +1263,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   <p className="mt-1 text-xs text-zinc-500">Herausforderungen mit Verknüpfung</p>
                   <div className="mt-2 space-y-2">
                     <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <span className="text-xs text-zinc-700">Durch Stossrichtungen</span>
+                      <span className="text-xs text-zinc-700">Durch Stoßrichtungen</span>
                       <span className="text-sm font-semibold text-zinc-900">
                         {challengesCoveredByDirections}/{totalChallenges} ({coverageByDirectionsPercent}%)
                       </span>
@@ -1572,20 +1276,23 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     </div>
                   </div>
                   <p className="mt-2 text-[10px] text-zinc-400">
-                    Initiativen hängen über Programme an Stossrichtungen; eine Herausforderung gilt als abgedeckt, wenn sie mit einer Stossrichtung verknüpft ist, die Initiativen hat.
+                    
+                    Initiativen hängen über Programme an Stoßrichtungen; eine Herausforderung gilt als abgedeckt, wenn sie mit einer Stoßrichtung verknüpft ist, die Initiativen hat.
                   </p>
                 </div>
               </div>
             </div>
           </article>
+            </>
           ) : null}
 
           {activeStrategicTab === "design" ? (
-          <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
             <article className="brand-card p-6">
-              <h2 className="text-lg font-semibold text-zinc-900">Stossrichtung erfassen</h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Stoßrichtung erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">
-                Unabhaengig anlegen; Verknuepfungen zu Herausforderungen und Zielen erfolgen in der Tabelle per
+                
+                Unabhaengig anlegen; Verknüpfungen zu Herausforderungen und Zielen erfolgen in der Tabelle per
                 Pills.
               </p>
               <form action={createStrategicDirectionInCycle} className="mt-4 space-y-3">
@@ -1594,7 +1301,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   <input
                     name="title"
                     required
-                    placeholder="Neue strategische Stossrichtung"
+                    placeholder="Neue strategische Sto\u00DFrichtung"
                     className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
                   />
                 </div>
@@ -1603,13 +1310,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   <textarea
                     name="description"
                     rows={3}
-                    placeholder="Kurzbeschreibung, Loesungslogik (losgeloest von konkreten Massnahmen)"
+                    placeholder="Kurzbeschreibung, L\u00F6sungslogik (losgeloest von konkreten Ma\u00DFnahmen)"
                     className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
                   />
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Prioritaet (1–5) wird automatisch aus den vier Bewertungen berechnet — gleiche Gewichtung wie der
-                  Stossrichtungs-Score, ganzzahlig gerundet.
+                  
+                  Priorität (1–5) wird automatisch aus den vier Bewertungen berechnet — gleiche Gewichtung wie der
+                  Stoßrichtungs-Score, ganzzahlig gerundet.
                 </p>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-700">Strategischer Wert</label>
@@ -1670,12 +1378,13 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   </select>
                 </div>
                 <button type="submit" disabled={!canWrite} className="brand-btn w-full px-4 py-2 text-sm">
-                  Stossrichtung speichern
+                  
+                  Stoßrichtung speichern
                 </button>
               </form>
             </article>
             <article className="brand-card p-6">
-              <h3 className="text-base font-semibold text-zinc-900">Strategische Stossrichtungen</h3>
+              <h3 className="text-base font-semibold text-zinc-900">Strategische Stoßrichtungen</h3>
               <div className="mt-4">
                 <StrategicDirectionsTable
                 directions={workspace.strategicDirections ?? []}
@@ -1714,7 +1423,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               />
               </div>
             </article>
-          </section>
+          </div>
           ) : null}
 
           {activeStrategicTab === "strategy-matrix" ? (
@@ -1846,16 +1555,26 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           strategicDirections={workspace.strategicDirections}
           llmLayoutByEntryId={llmLayoutByEntryId}
           canWrite={canWrite}
+          graphMaintenanceActions={{
+            recomputeGraphLayout,
+            backfillEntryQuality,
+            analysisType: actionTab,
+            returnTo: "/strategy-cycle?l1=corporate-strategy&l2=summary",
+            hasRunningGraphLayout,
+            hasRunningQualityBackfill,
+            staleGraphLayout: analysisNetworkStale.staleGraphLayout,
+            staleQualityBackfill: analysisNetworkStale.staleQualityBackfill,
+          }}
         />
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Challenges</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Herausforderungen</h3>
             <div className="mt-2 space-y-2">
               {topChallenges.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine Challenges vorhanden.</p>
+                <p className="text-xs text-zinc-600">Noch keine Herausforderungen vorhanden.</p>
               ) : (
                 topChallenges.map((challenge) => (
                   <div key={challenge.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
@@ -1867,25 +1586,27 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </div>
           </article>
           <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Directions</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Stoßrichtungen</h3>
             <div className="mt-2 space-y-2">
               {topDirections.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine strategischen Stossrichtungen vorhanden.</p>
+                <p className="text-xs text-zinc-600">Noch keine strategischen Stoßrichtungen vorhanden.</p>
               ) : (
                 topDirections.map((direction) => (
                   <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
                     <p className="font-medium text-zinc-900">{direction.title}</p>
-                    <p className="text-zinc-600">Prioritaet {Number(direction.priority ?? 0).toFixed(2)}</p>
+                    <p className="text-zinc-600">Priorität {Number(direction.priority ?? 0).toFixed(2)}</p>
                   </div>
                 ))
               )}
             </div>
           </article>
           <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Coverage: Unadressierte Challenges</h3>
+            <h3 className="text-sm font-semibold text-zinc-900">Coverage: Unadressierte Herausforderungen</h3>
             <div className="mt-2 space-y-2">
               {uncoveredChallenges.length === 0 ? (
-                <p className="text-xs text-emerald-700">Alle Challenges sind mindestens einer Direction zugeordnet.</p>
+                <p className="text-xs text-emerald-700">
+                  Alle Herausforderungen sind mindestens einer Stoßrichtung zugeordnet.
+                </p>
               ) : (
                 uncoveredChallenges.slice(0, 8).map((challenge) => (
                   <div key={challenge.id} className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
@@ -1899,82 +1620,41 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
-        <section className="brand-card p-6 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-zinc-900">Empfehlungen fuer Herausforderungen</h2>
-            <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-              {workspace.challengeCandidates.filter((candidate) => candidate.status === "draft").length} offen
-            </span>
+      <section className="brand-card p-6 space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-zinc-900">Analyse-Netzwerk</h2>
+            <p className="mt-1 text-sm text-zinc-600">
+              Berechnungen für Verknüpfungen, Cluster und Lücken starten Sie unter «Aktionen» (Schaltflächen nur aktiv,
+              wenn eine Neuberechnung nötig ist). Graph-Layout und Qualität steuern Sie unter der Visualisierung. Alle offenen
+              Netzwerk-Punkte bündeln wir unter «Empfohlene Herausforderungen».
+            </p>
           </div>
-          <p className="text-sm text-zinc-600">
-            Vorschlaege aus Clustern und Luecken. Uebernehmen erstellt direkt eine strategische Herausforderung.
-          </p>
-          <div className="space-y-2">
-            {workspace.challengeCandidates.filter((candidate) => candidate.status === "draft").length === 0 ? (
-              <p className="brand-surface p-3 text-sm text-zinc-600">
-                Keine offenen Empfehlungen. Fuehre &quot;Luecken neu berechnen&quot; aus, um neue Vorschlaege zu erzeugen.
-              </p>
-            ) : (
-              workspace.challengeCandidates
-                .filter((candidate) => candidate.status === "draft")
-                .map((candidate) => (
-                  <div key={candidate.id} className="brand-surface space-y-2 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-zinc-900">{candidate.title}</p>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                          Prioritaet {candidate.priority}
-                        </span>
-                        <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                          Quelle {candidate.source_type}
-                        </span>
-                      </div>
-                    </div>
-                    {candidate.description ? (
-                      <p className="text-sm text-zinc-600">{candidate.description}</p>
-                    ) : null}
-                    <div className="flex items-center gap-2">
-                      <form action={promoteChallengeCandidate}>
-                        <input type="hidden" name="candidate_id" value={candidate.id} />
-                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                          Als Challenge uebernehmen
-                        </button>
-                      </form>
-                      <form action={dismissChallengeCandidate}>
-                        <input type="hidden" name="candidate_id" value={candidate.id} />
-                        <button
-                          type="submit"
-                          disabled={!canWrite}
-                          className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-700"
-                        >
-                          Ausblenden
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                ))
-            )}
-          </div>
-        </section>
-      ) : null}
+          <span className="shrink-0 rounded-md border border-zinc-300 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-700">
+            {analyseNetzwerkOpenTotal === 1
+              ? "1 offener Punkt"
+              : `${analyseNetzwerkOpenTotal} offene Punkte`}
+          </span>
+        </div>
 
-      {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
-      <section className="brand-card p-6 space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-semibold text-zinc-900">Analyse-Netzwerk</h2>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50/80 p-4">
+          <p className="text-xs font-medium text-zinc-700">Aktionen</p>
+          <div className="mt-3 flex flex-wrap gap-2">
           <form action={generateLinkDrafts}>
             <input type="hidden" name="analysis_type" value={actionTab} />
             <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button
               type="submit"
-              disabled={!canWrite || hasRunningLinkDrafts}
-              className="brand-btn px-3 py-1.5 text-xs"
+              disabled={
+                !canWrite || hasRunningLinkDrafts || !analysisNetworkStale.staleLinkDraftGeneration
+              }
+              className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
             >
-              Link-Entwuerfe generieren
+              Link-Entwürfe generieren
             </button>
             <AiWaitOverlay
               title="Job wird eingestellt"
-              description="Link-Entwuerfe werden im Hintergrund generiert."
+              description="Link-Entw\u00FCrfe werden im Hintergrund generiert."
             />
           </form>
           <form action={recomputeClusters}>
@@ -1982,8 +1662,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button
               type="submit"
-              disabled={!canWrite || hasRunningClusters}
-              className="brand-btn px-3 py-1.5 text-xs"
+              disabled={!canWrite || hasRunningClusters || !analysisNetworkStale.staleClusterRecompute}
+              className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
             >
               Cluster neu berechnen
             </button>
@@ -1997,161 +1677,214 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
             <button
               type="submit"
-              disabled={!canWrite || hasRunningGaps}
-              className="brand-btn px-3 py-1.5 text-xs"
+              disabled={!canWrite || hasRunningGaps || !analysisNetworkStale.staleGapsRecompute}
+              className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
             >
               Luecken neu berechnen
             </button>
             <AiWaitOverlay
               title="Job wird eingestellt"
-              description="Lueckenanalyse wird im Hintergrund neu berechnet."
+              description="L\u00FCckenanalyse wird im Hintergrund neu berechnet."
             />
           </form>
-          <form action={recomputeGraphLayout}>
-            <input type="hidden" name="analysis_type" value={actionTab} />
-            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
-            <button
-              type="submit"
-              disabled={!canWrite || hasRunningGraphLayout}
-              className="brand-btn px-3 py-1.5 text-xs"
-            >
-              Graph-Layout jetzt neu berechnen
-            </button>
-            <AiWaitOverlay
-              title="AI Agent ordnet den Graphen neu"
-              description="Node-Positionen werden neu berechnet und persistent gespeichert."
-            />
-          </form>
-          <form action={backfillEntryQuality}>
-            <input type="hidden" name="analysis_type" value={actionTab} />
-            <input type="hidden" name="return_to" value="/strategy-cycle?l1=corporate-strategy&l2=summary" />
-            <button
-              type="submit"
-              disabled={!canWrite || hasRunningQualityBackfill}
-              className="brand-btn px-3 py-1.5 text-xs"
-            >
-              Bestehende Punkte neu bewerten
-            </button>
-            <AiWaitOverlay
-              title="AI Agent bewertet alle bestehenden Punkte"
-              description="Wir rechnen Quality fuer alle vorhandenen Eintraege neu und aktualisieren den Graph."
-            />
-          </form>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <article className="brand-surface p-3">
-            <h3 className="text-sm font-semibold text-zinc-900">Verbindungs-Entwuerfe</h3>
-            <div className="mt-2 space-y-2">
-              {(workspace.linkDrafts ?? []).length === 0 ? (
-                <p className="text-xs text-zinc-600">Keine offenen Entwuerfe.</p>
-              ) : (
-                (workspace.linkDrafts ?? []).slice(0, 12).map((draft) => {
-                  const tri = readTriScores(draft.metadata);
-                  return (
-                    <div key={draft.id} className="rounded-md border border-zinc-200 bg-white p-2">
-                    <p className="text-xs text-zinc-700">
-                      <span className="font-medium">
-                        {workspace.entryTitleById.get(draft.source_analysis_item_id) ?? draft.source_analysis_item_id}
-                      </span>
-                      {" -> "}
-                      <span className="font-medium">
-                        {workspace.entryTitleById.get(draft.target_analysis_item_id) ?? draft.target_analysis_item_id}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-600">
-                      {draft.link_type} | conf {Math.round(Number(draft.confidence ?? 0) * 100)}% | s
-                      {draft.strength}
-                    </p>
-                    {tri ? (
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Naehe {Math.round(tri.proximityScore * 100)}% | Unterstuetzung{" "}
-                        {Math.round(tri.supportScore * 100)}% | Abstossung {Math.round(tri.repulsionScore * 100)}%
-                      </p>
-                    ) : null}
-                    <p className="mt-1 text-xs text-zinc-500">{draft.comment}</p>
-                    <div className="mt-2 flex gap-2">
-                      <form action={approveLinkDraft}>
-                        <input type="hidden" name="analysis_type" value={actionTab} />
-                        <input type="hidden" name="draft_id" value={draft.id} />
-                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                          Accept
-                        </button>
-                      </form>
-                      <form action={rejectLinkDraft}>
-                        <input type="hidden" name="analysis_type" value={actionTab} />
-                        <input type="hidden" name="draft_id" value={draft.id} />
-                        <button
-                          type="submit"
-                          disabled={!canWrite}
-                          className="brand-btn px-3 py-1.5 text-xs"
-                        >
-                          Reject
-                        </button>
-                      </form>
-                    </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </article>
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-900">Empfohlene Herausforderungen</h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              Herausforderungs-Vorschläge (Kandidaten und Cluster), Verbindungs-Entwürfe und Lücken — jeweils
+              aufklappbar. Die Zahl in Klammern ist die Anzahl der Einträge in dieser Liste.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <details className="brand-surface group rounded-lg border border-zinc-200">
+              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
+                <span className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
+                    Herausforderungs-Vorschläge
+                  </span>
+                  <span className="text-xs font-normal text-zinc-500">({recommendedChallengeTotal})</span>
+                </span>
+              </summary>
+              <div className="space-y-2 border-t border-zinc-200 p-3">
+                {recommendedChallengeTotal === 0 ? (
+                  <p className="text-xs text-zinc-600">
+                    Keine offenen Vorschläge. Führe «Cluster neu berechnen» oder «Lücken neu berechnen» aus.
+                  </p>
+                ) : (
+                  <>
+                    {draftChallengeCandidates.map((candidate) => (
+                      <div key={candidate.id} className="space-y-2 rounded-md border border-zinc-200 bg-white p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-zinc-900">{candidate.title}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                              Priorität {candidate.priority}
+                            </span>
+                            <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                              Quelle {candidate.source_type}
+                            </span>
+                          </div>
+                        </div>
+                        {candidate.description ? (
+                          <p className="text-sm text-zinc-600">{candidate.description}</p>
+                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <form action={promoteChallengeCandidate}>
+                            <input type="hidden" name="candidate_id" value={candidate.id} />
+                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
+                              Als Herausforderung übernehmen
+                            </button>
+                          </form>
+                          <form action={dismissChallengeCandidate}>
+                            <input type="hidden" name="candidate_id" value={candidate.id} />
+                            <button
+                              type="submit"
+                              disabled={!canWrite}
+                              className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-700"
+                            >
+                              Ausblenden
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                    ))}
+                    {summaryClusters.map((cluster) => {
+                      const members = workspace.clusterMembersByClusterId.get(cluster.id) ?? [];
+                      const topMemberTitles = members
+                        .slice(0, 4)
+                        .map((member) => workspace.entryTitleById.get(member.entry_id) ?? member.entry_id);
+                      return (
+                        <div key={`cluster-${cluster.id}`} className="space-y-2 rounded-md border border-zinc-200 bg-white p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-zinc-900">{cluster.label}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                                Score {Math.round(Number(cluster.cluster_score ?? 0) * 100)}
+                              </span>
+                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                                Quelle Cluster
+                              </span>
+                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
+                                {members.length} Mitglieder
+                              </span>
+                            </div>
+                          </div>
+                          {cluster.summary ? (
+                            <p className="text-sm text-zinc-600">{cluster.summary}</p>
+                          ) : null}
+                          {topMemberTitles.length > 0 ? (
+                            <p className="text-xs text-zinc-500">{topMemberTitles.join(" · ")}</p>
+                          ) : null}
+                          <form action={promoteClusterToStrategicChallenge}>
+                            <input type="hidden" name="analysis_type" value={actionTab} />
+                            <input type="hidden" name="cluster_id" value={cluster.id} />
+                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
+                              Als Herausforderung übernehmen
+                            </button>
+                          </form>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </details>
 
-          <article className="brand-surface p-3">
-            <h3 className="text-sm font-semibold text-zinc-900">Cluster & Potenziale</h3>
-            <div className="mt-2 space-y-2">
-              {(workspace.clusters ?? []).length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine Cluster berechnet.</p>
-              ) : (
-                (workspace.clusters ?? []).slice(0, 8).map((cluster) => {
-                  const members = workspace.clusterMembersByClusterId.get(cluster.id) ?? [];
-                  const topMemberTitles = members
-                    .slice(0, 4)
-                    .map((member) => workspace.entryTitleById.get(member.entry_id) ?? member.entry_id);
-                  return (
-                    <div key={cluster.id} className="rounded-md border border-zinc-200 bg-white p-2">
-                      <p className="text-xs font-semibold text-zinc-900">{cluster.label}</p>
-                      <p className="mt-1 text-xs text-zinc-600">{cluster.summary}</p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Score: {Math.round(Number(cluster.cluster_score ?? 0) * 100)} | Mitglieder: {members.length}
-                      </p>
-                      {topMemberTitles.length > 0 ? (
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {topMemberTitles.join(" | ")}
+            <details className="brand-surface group rounded-lg border border-zinc-200">
+              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
+                <span className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
+                    Verbindungs-Entwürfe
+                  </span>
+                  <span className="text-xs font-normal text-zinc-500">({linkDraftsCount})</span>
+                </span>
+              </summary>
+              <div className="space-y-2 border-t border-zinc-200 p-3">
+                {linkDraftsCount === 0 ? (
+                  <p className="text-xs text-zinc-600">Keine offenen Entwürfe.</p>
+                ) : (
+                  linkDrafts.slice(0, 12).map((draft) => {
+                    const tri = readTriScores(draft.metadata);
+                    return (
+                      <div key={draft.id} className="rounded-md border border-zinc-200 bg-white p-2">
+                        <p className="text-xs text-zinc-700">
+                          <span className="font-medium">
+                            {workspace.entryTitleById.get(draft.source_analysis_item_id) ??
+                              draft.source_analysis_item_id}
+                          </span>
+                          {" -> "}
+                          <span className="font-medium">
+                            {workspace.entryTitleById.get(draft.target_analysis_item_id) ??
+                              draft.target_analysis_item_id}
+                          </span>
                         </p>
-                      ) : null}
-                      <form action={promoteClusterToStrategicChallenge} className="mt-2">
-                        <input type="hidden" name="analysis_type" value={actionTab} />
-                        <input type="hidden" name="cluster_id" value={cluster.id} />
-                        <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                          Als Challenge uebernehmen
-                        </button>
-                      </form>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </article>
+                        <p className="mt-1 text-xs text-zinc-600">
+                          {draft.link_type} | conf {Math.round(Number(draft.confidence ?? 0) * 100)}% | s
+                          {draft.strength}
+                        </p>
+                        {tri ? (
+                          <p className="mt-1 text-xs text-zinc-500">
+                            Nähe {Math.round(tri.proximityScore * 100)}% | Unterstützung{" "}
+                            {Math.round(tri.supportScore * 100)}% | Abstossung {Math.round(tri.repulsionScore * 100)}%
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-zinc-500">{draft.comment}</p>
+                        <div className="mt-2 flex gap-2">
+                          <form action={approveLinkDraft}>
+                            <input type="hidden" name="analysis_type" value={actionTab} />
+                            <input type="hidden" name="draft_id" value={draft.id} />
+                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
+                              Annehmen
+                            </button>
+                          </form>
+                          <form action={rejectLinkDraft}>
+                            <input type="hidden" name="analysis_type" value={actionTab} />
+                            <input type="hidden" name="draft_id" value={draft.id} />
+                            <button
+                              type="submit"
+                              disabled={!canWrite}
+                              className="brand-btn px-3 py-1.5 text-xs"
+                            >
+                              Ablehnen
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </details>
 
-          <article className="brand-surface p-3">
-            <h3 className="text-sm font-semibold text-zinc-900">Luecken in der Betrachtung</h3>
-            <div className="mt-2 space-y-2">
-              {(workspace.gapFindings ?? []).length === 0 ? (
-                <p className="text-xs text-zinc-600">Keine offenen Luecken gefunden.</p>
-              ) : (
-                (workspace.gapFindings ?? []).slice(0, 12).map((gap) => (
-                  <div key={gap.id} className="rounded-md border border-zinc-200 bg-white p-2">
-                    <p className="text-xs font-medium text-zinc-900">
-                      {gap.gap_type} | {gap.dimension}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-600">Prioritaet: {gap.severity} | Status: {gap.status}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{gap.recommendation}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </article>
+            <details className="brand-surface group rounded-lg border border-zinc-200">
+              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
+                <span className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
+                    Lücken in der Betrachtung
+                  </span>
+                  <span className="text-xs font-normal text-zinc-500">({gapFindingsCount})</span>
+                </span>
+              </summary>
+              <div className="space-y-2 border-t border-zinc-200 p-3">
+                {gapFindingsCount === 0 ? (
+                  <p className="text-xs text-zinc-600">Keine offenen Lücken gefunden.</p>
+                ) : (
+                  gapFindings.slice(0, 12).map((gap) => (
+                    <div key={gap.id} className="rounded-md border border-zinc-200 bg-white p-2">
+                      <p className="text-xs font-medium text-zinc-900">
+                        {gap.gap_type} | {gap.dimension}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-600">Priorität: {gap.severity} | Status: {gap.status}</p>
+                      <p className="mt-1 text-xs text-zinc-500">{gap.recommendation}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </details>
+          </div>
         </div>
       </section>
       ) : null}
@@ -2238,14 +1971,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               <LiveRangeInput name="uncertainty_level" defaultValue={3} />
             </div>
             <p className="text-xs text-zinc-500">
-              Qualitaetsregel: Bei Wirkung 4-5 muss die Begruendung mindestens 40 Zeichen haben.
+              
+              Qualitätsregel: Bei Wirkung 4-5 muss die Begründung mindestens 40 Zeichen haben.
             </p>
             <button type="submit" disabled={!canWrite} className="brand-btn px-4 py-2 text-sm">
               Eintrag speichern
             </button>
             <AiWaitOverlay
               title="AI Agent berechnet Qualitaet"
-              description="Der Qualitaetswert wird berechnet und direkt in der Datenbank gespeichert."
+              description="Der Qualit\u00E4tswert wird berechnet und direkt in der Datenbank gespeichert."
             />
           </form>
         </article>
@@ -2253,7 +1987,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
         <article className="brand-card p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900">
-              {getTabTitle(activeTab)} - Eintraege ({filteredEntries.length}/{entries.length})
+              {getTabTitle(activeTab)}  - Einträge ({filteredEntries.length}/{entries.length})
             </h2>
             <a
               href="/strategy-cycle?l1=strategic-directions&l2=strategy-matrix"
@@ -2270,7 +2004,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               defaultValue={sort}
               className="min-w-[260px] flex-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
             >
-              <option value="score_desc">Sortierung: Qualitaetswert (absteigend)</option>
+              <option value="score_desc">Sortierung: Qualitätswert (absteigend)</option>
               <option value="updated_desc">Sortierung: Letzte Aktualisierung</option>
             </select>
             <select

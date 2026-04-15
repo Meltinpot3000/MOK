@@ -97,7 +97,7 @@ export function ProgramCreateForm({
 
   const validateBeforeSubmit = (): string | null => {
     if (!form.title.trim()) return "Bitte einen Titel angeben.";
-    if (!form.strategicDirectionId) return "Bitte eine strategische Stossrichtung waehlen.";
+    if (!form.strategicDirectionId) return "Bitte eine strategische Sto\u00DFrichtung waehlen.";
     if (!PROGRAM_STATUSES.includes(form.status)) return "Bitte einen Status waehlen.";
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       return "Das Enddatum darf nicht vor dem Startdatum liegen.";
@@ -105,7 +105,7 @@ export function ProgramCreateForm({
     if (form.status === "active") {
       const activeCount = selectedProgram?.initiative_active_count ?? 0;
       if (activeCount < 1) {
-        return "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugehoerige Initiative aktiv ist.";
+        return "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugeh\u00F6rige Initiative aktiv ist.";
       }
     }
     return null;
@@ -164,18 +164,20 @@ export function ProgramCreateForm({
 
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-700">
-          Strategische Stossrichtung
+          
+          Strategische Stoßrichtung
         </label>
         <p className="mb-1.5 text-[11px] text-zinc-500">
-          Nur Stossrichtungen mit Status «Aktiv» sind waehlbar. Andere Status zuerst im Bereich
-          Strategische Stossrichtungen auf Aktiv setzen.
+          
+          Nur Stoßrichtungen mit Status «Aktiv» sind waehlbar. Andere Status zuerst im Bereich
+          Strategische Stoßrichtungen auf Aktiv setzen.
         </p>
         <select
           value={form.strategicDirectionId}
           onChange={(e) => setForm((s) => ({ ...s, strategicDirectionId: e.target.value }))}
           className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
         >
-          <option value="">Stossrichtung waehlen</option>
+          <option value="">Stoßrichtung waehlen</option>
           {strategicDirections.map((direction) => (
             <option key={direction.id} value={direction.id}>
               {direction.title}
@@ -184,7 +186,8 @@ export function ProgramCreateForm({
         </select>
         {strategicDirections.length === 0 ? (
           <p className="mt-1.5 text-xs text-amber-800">
-            Es gibt keine aktive Stossrichtung in diesem Zyklus — zuerst eine Stossrichtung auf Status
+            
+            Es gibt keine aktive Stoßrichtung in diesem Zyklus — zuerst eine Stoßrichtung auf Status
             Aktiv setzen.
           </p>
         ) : null}
@@ -289,7 +292,8 @@ export function ProgramCreateForm({
           }}
           className="w-full rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 hover:bg-zinc-50"
         >
-          Neu anlegen oder Zuruecksetzen
+          
+          Neu anlegen oder Zurücksetzen
         </button>
       ) : null}
     </form>

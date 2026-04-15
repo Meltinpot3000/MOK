@@ -154,8 +154,8 @@ export default function LoginPage() {
 
         {showInviteHint ? (
           <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-            <span className="font-medium">Einladung:</span> Nutze den Link in der E-Mail — der meldet dich an und fuehrt zur
-            Annahme. Ohne Passwort: unten «Anmeldelink per E-Mail» verwenden (Posteingang pruefen).
+            <span className="font-medium">Einladung:</span>  Nutze den Link in der E-Mail — der meldet dich an und führt zur
+            Annahme. Ohne Passwort: unten «Anmeldelink per E-Mail» verwenden (Posteingang prüfen).
           </p>
         ) : null}
 

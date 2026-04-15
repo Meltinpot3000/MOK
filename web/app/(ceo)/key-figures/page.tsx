@@ -12,7 +12,7 @@ export default async function KeyFiguresPage() {
       eyebrow="Kennzahlen"
       title="Strategische Kennzahlen"
       purpose="Konsolidierte Sicht auf strategische Kennzahlen mit Baselines, Zielwerten und Abweichungen."
-      audience="Geschaeftsleitung, Strategiebuero, Controlling"
+      audience="Gesch\u00E4ftsleitung, Strategieb\u00FCro, Controlling"
     />
   );
 }

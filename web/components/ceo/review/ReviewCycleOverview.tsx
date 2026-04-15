@@ -35,13 +35,14 @@ export function ReviewCycleOverview({
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Management-Uebersicht</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          KPIs und Kurzprofile — Details in den Reitern Stossrichtungen, Handlungsbedarf und Initiativen.
+          
+          KPIs und Kurzprofile — Details in den Reitern Stoßrichtungen, Handlungsbedarf und Initiativen.
         </p>
       </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Aktive Stossrichtungen</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Aktive Stoßrichtungen</p>
           <p className="mt-2 text-2xl font-semibold text-zinc-900">{kpis.activeDirectionsCount}</p>
           <p className="mt-1 text-xs text-zinc-500">status „aktiv“ im Zyklus</p>
         </article>
@@ -53,17 +54,17 @@ export function ReviewCycleOverview({
         <article className="brand-card p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Kritische Umsetzung</p>
           <p className="mt-2 text-2xl font-semibold text-amber-800">{kpis.criticalExecutionCount}</p>
-          <p className="mt-1 text-xs text-zinc-500">aktive Initiativen auffaellig/kritisch</p>
+          <p className="mt-1 text-xs text-zinc-500">aktive Initiativen auffällig/kritisch</p>
         </article>
         <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Ueberfaellige Termine</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Überfällige Termine</p>
           <p className="mt-2 text-2xl font-semibold text-red-800">{kpis.overdueDeadlinesCount}</p>
           <p className="mt-1 text-xs text-zinc-500">Initiativen + Key Results (Fälligkeit)</p>
         </article>
       </section>
 
       <section className="brand-card p-6">
-        <h3 className="text-base font-semibold text-zinc-900">Stossrichtungen — Snapshot</h3>
+        <h3 className="text-base font-semibold text-zinc-900">Stoßrichtungen — Snapshot</h3>
         <div className="mt-4 space-y-2">
           {snapshotDirections.length === 0 ? (
             <p className="text-sm text-zinc-600">Keine Daten.</p>
@@ -92,7 +93,8 @@ export function ReviewCycleOverview({
         </div>
         <p className="mt-3 text-sm">
           <Link href="/reviews?tab=directions" className="text-zinc-900 underline">
-            Alle Stossrichtungen
+            
+            Alle Stoßrichtungen
           </Link>
         </p>
       </section>
@@ -125,7 +127,8 @@ export function ReviewCycleOverview({
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-zinc-900">Handlungsbedarf — Vorschau</h3>
           <Link href="/reviews?tab=attention" className="text-sm text-zinc-900 underline">
-            Vollstaendige Liste
+            
+            Vollständige Liste
           </Link>
         </div>
         <ReviewAttentionRequired items={attentionPreview} maxItems={5} showHeading={false} />
