@@ -841,8 +841,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
         },
       ])
   );
-  const graphLayoutLlmCount = enrichedAllEntries.filter((entry) => entry.graph_layout_source === "llm").length;
-  const graphLayoutRuleCount = enrichedAllEntries.filter((entry) => entry.graph_layout_source === "rule").length;
   const activeOrFailedJobs = (workspace.backgroundJobs ?? []).filter(
     (job) => job.status === "pending" || job.status === "running" || job.status === "failed"
   );
@@ -1512,36 +1510,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
-        <section className="brand-card p-4">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-medium text-zinc-700">Node-Einordnung:</span>
-            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700">
-              LLM: {graphLayoutLlmCount}
-            </span>
-            <span className="rounded-full border border-zinc-300 bg-white px-2 py-1 text-zinc-700">
-              Rule-Fallback: {graphLayoutRuleCount}
-            </span>
-            {activeOrFailedJobs.length > 0 ? (
-              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-amber-700">
-                Hintergrundjobs: {activeOrFailedJobs.length}
-              </span>
-            ) : null}
-          </div>
-          {activeOrFailedJobs.length > 0 ? (
-            <div className="mt-2 space-y-1 text-xs text-zinc-600">
-              {activeOrFailedJobs.slice(0, 4).map((job) => (
-                <p key={job.id}>
-                  {job.job_type} - {job.status}
-                  {job.progress_total > 0 ? ` (${job.progress_done}/${job.progress_total})` : ""}
-                  {job.last_error ? ` - ${job.last_error}` : ""}
-                </p>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
         <AnalysisVisualizationWorkspace
           entries={enrichedAllEntries}
           approvedLinks={workspace.approvedLinks}
@@ -1554,6 +1522,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           entryDirectionIdsByEntryId={entryDirectionIdsRecord}
           strategicDirections={workspace.strategicDirections}
           llmLayoutByEntryId={llmLayoutByEntryId}
+          manualClusterPositionsByEntryId={workspace.manualClusterPositionsByEntryId}
           canWrite={canWrite}
           graphMaintenanceActions={{
             recomputeGraphLayout,

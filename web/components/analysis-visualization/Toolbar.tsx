@@ -9,8 +9,6 @@ type ToolbarProps = {
   setShowLabels: (value: boolean) => void;
   showLinks: boolean;
   setShowLinks: (value: boolean) => void;
-  is3D: boolean;
-  setIs3D: (value: boolean) => void;
   showDensity: boolean;
   setShowDensity: (value: boolean) => void;
   showClusterLabels: boolean;
@@ -30,8 +28,6 @@ export function Toolbar({
   setShowLabels,
   showLinks,
   setShowLinks,
-  is3D,
-  setIs3D,
   showDensity,
   setShowDensity,
   showClusterLabels,
@@ -50,8 +46,6 @@ export function Toolbar({
         onChange={(event) => setViewMode(event.target.value as VisualizationViewMode)}
         className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs"
       >
-        <option value="constellation">Konstellationsansicht</option>
-        <option value="influence">Einflussansicht</option>
         <option value="cluster">Clusteransicht</option>
         <option value="terrain">Strategische Terrainkarte</option>
         <option value="table">Tabellenansicht</option>
@@ -72,10 +66,6 @@ export function Toolbar({
           onChange={(event) => setShowLinks(event.target.checked)}
         />
         Verbindungen
-      </label>
-      <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
-        <input type="checkbox" checked={is3D} onChange={(event) => setIs3D(event.target.checked)} />
-        3D-Ansicht
       </label>
       <label className="flex items-center gap-1 rounded border border-zinc-300 bg-white px-2 py-1.5 text-xs">
         <input type="checkbox" checked={showDensity} onChange={(event) => setShowDensity(event.target.checked)} />

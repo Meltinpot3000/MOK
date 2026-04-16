@@ -1,4 +1,4 @@
-export type VisualizationViewMode = "constellation" | "influence" | "cluster" | "terrain" | "table";
+export type VisualizationViewMode = "cluster" | "terrain" | "table";
 
 export type VisualizationNode = {
   id: string;
@@ -40,6 +40,10 @@ export type VisualizationEdge = {
     next: { linkType: string; strength: number; comment: string | null };
   }>;
   isDraft?: boolean;
+  edgeLayers?: {
+    connection: boolean;
+    influence: boolean;
+  };
 };
 
 export type PositionedNode = VisualizationNode & {

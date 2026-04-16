@@ -13,11 +13,17 @@
 1. `DATABASE_URL` setzen (Pooler-URL mit `sslmode=require`).
 2. Schema-Migrationen ausführen:
    - `npm run db:migrate`
-3. Seeds ausführen:
+3. Seeds ausführen (nur bei neuer/leer initialisierter DB):
    - `dbmate --migrations-dir supabase/seed up`
 4. Status prüfen:
    - `npm run db:migrate:status`
    - `dbmate --migrations-dir supabase/seed status`
+
+### Hinweis zur bestehenden Supabase-Instanz
+
+Für die bereits laufende Supabase-Instanz dieses Projekts wurden die Seeds schon angewendet.
+`supabase/seed` muss dort in der Regel nicht erneut ausgeführt werden, solange kein expliziter
+Reseed gewünscht ist.
 
 ## 2) Fallback: Supabase SQL Editor
 

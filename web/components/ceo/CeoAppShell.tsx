@@ -46,7 +46,7 @@ export function CeoAppShell({
         userEmail={userEmail}
         primaryRoleLabel={primaryRoleLabel}
       />
-      <main className="flex-1 p-6">{children}</main>
+      <div className="flex-1 p-6">{children}</div>
     </div>
   );
 }

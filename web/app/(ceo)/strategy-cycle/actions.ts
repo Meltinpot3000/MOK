@@ -134,6 +134,12 @@ type GraphLayoutRunSummary = {
   llmNodeCount: number;
 };
 
+function parseTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) ? ts : null;
+}
+
 const ANALYSIS_TYPES = new Set([
   "environment",
   "company",
@@ -590,12 +596,16 @@ async function recomputeAndPersistGraphLayout(params: {
   organizationId: string;
   cycleId: string;
   trigger: string;
+  onlyDirty?: boolean;
+  targetEntryIds?: string[];
 }): Promise<GraphLayoutRunSummary> {
   const [{ data: entries }, { data: approvedLinks }, { data: draftLinks }] = await Promise.all([
     params.supabase
       .schema("app")
       .from("analysis_entries")
-      .select("id, title, analysis_type, sub_type, description, impact_level, uncertainty_level, quality_score")
+      .select(
+        "id, title, analysis_type, sub_type, description, impact_level, uncertainty_level, quality_score, updated_at, quality_calculated_at, graph_layout_calculated_at"
+      )
       .eq("organization_id", params.organizationId)
       .eq("cycle_instance_id", params.cycleId),
     params.supabase
@@ -624,6 +634,32 @@ async function recomputeAndPersistGraphLayout(params: {
       llmNodeCount: 0,
     };
   }
+  const targetIds = new Set((params.targetEntryIds ?? []).filter((id) => Boolean(id)));
+  const entriesToLayout =
+    targetIds.size > 0
+      ? allEntries.filter((entry) => targetIds.has(entry.id))
+      : params.onlyDirty
+        ? allEntries.filter((entry) => {
+            const graphCalculatedAtTs = parseTimestamp(entry.graph_layout_calculated_at);
+            const updatedAtTs = parseTimestamp(entry.updated_at);
+            const qualityCalculatedAtTs = parseTimestamp(entry.quality_calculated_at);
+            if (!graphCalculatedAtTs) return true;
+            if (updatedAtTs && updatedAtTs > graphCalculatedAtTs) return true;
+            if (qualityCalculatedAtTs && qualityCalculatedAtTs > graphCalculatedAtTs) return true;
+            return false;
+          })
+        : allEntries;
+  if (entriesToLayout.length === 0) {
+    return {
+      usedLlm: false,
+      status: "success",
+      fallbackReason: "llm_not_requested",
+      providerModel: null,
+      usage: null,
+      nodeCount: 0,
+      llmNodeCount: 0,
+    };
+  }
   const brandingConfig = await readBrandingConfig(params.supabase, params.organizationId);
   const llmPolicy = readAnalysisNetworkLlmPolicy(brandingConfig);
   const budgetStatus = await evaluateLlmBudgetStatus({
@@ -635,18 +671,21 @@ async function recomputeAndPersistGraphLayout(params: {
   const strategyReferenceText = buildStrategyReferenceText(
     readStrategyReferenceFieldsFromBrandingConfig(brandingConfig)
   );
-  const mergedEdges = [...(approvedLinks ?? []), ...(draftLinks ?? [])].map((edge) => ({
-    source: edge.source_analysis_item_id,
-    target: edge.target_analysis_item_id,
-    linkType: edge.link_type,
-    confidence: Number(edge.confidence ?? 0),
-    strength: Number(edge.strength ?? 3),
-    triScores: readTriScoresFromMetadata(edge.metadata),
-  }));
-  const fallbackPoints = allEntries.map((entry) => readRuleGraphLayoutPoint(entry));
+  const entryIdSet = new Set(entriesToLayout.map((entry) => entry.id));
+  const mergedEdges = [...(approvedLinks ?? []), ...(draftLinks ?? [])]
+    .map((edge) => ({
+      source: edge.source_analysis_item_id,
+      target: edge.target_analysis_item_id,
+      linkType: edge.link_type,
+      confidence: Number(edge.confidence ?? 0),
+      strength: Number(edge.strength ?? 3),
+      triScores: readTriScoresFromMetadata(edge.metadata),
+    }))
+    .filter((edge) => entryIdSet.has(edge.source) && entryIdSet.has(edge.target));
+  const fallbackPoints = entriesToLayout.map((entry) => readRuleGraphLayoutPoint(entry));
   const llmResponse = canUseGraphLayoutLlm
     ? await proposeGraphLayoutWithLlm({
-        nodes: allEntries.map((entry) => ({
+        nodes: entriesToLayout.map((entry) => ({
           id: entry.id,
           title: entry.title,
           analysisType: entry.analysis_type,
@@ -671,7 +710,7 @@ async function recomputeAndPersistGraphLayout(params: {
   const llmNodeIds = new Set((llmResponse.result?.nodes ?? []).map((node) => node.id));
   const calculatedAt = new Date().toISOString();
   await Promise.all(
-    allEntries.map((entry) => {
+    entriesToLayout.map((entry) => {
       const point = pointsById.get(entry.id) ?? readRuleGraphLayoutPoint(entry);
       const isLlmNode = llmNodeIds.has(entry.id);
       return params.supabase
@@ -738,7 +777,7 @@ async function recomputeAndPersistGraphLayout(params: {
           usageMissing: llmResponse.usage.usageMissing,
         }
       : null,
-    nodeCount: allEntries.length,
+    nodeCount: entriesToLayout.length,
     llmNodeCount: llmNodeIds.size,
   };
 }
@@ -1627,7 +1666,7 @@ export async function recomputeGraphLayout(formData: FormData) {
     cycleId: context.cycleId,
     membershipId: context.membershipId,
     jobType: "graph_layout_recompute",
-    payload: { tab, trigger: "manual_recompute_graph_layout" },
+    payload: { tab, trigger: "manual_recompute_graph_layout", scope: "dirty" },
   });
   done(withSuccess(returnTo, "graph-layout-queued"));
 }
@@ -1643,7 +1682,7 @@ export async function backfillEntryQuality(formData: FormData) {
     cycleId: context.cycleId,
     membershipId: context.membershipId,
     jobType: "quality_backfill",
-    payload: { tab, trigger: "manual_quality_backfill" },
+    payload: { tab, trigger: "manual_quality_backfill", scope: "dirty" },
   });
   done(withSuccess(returnTo, "quality-backfill-queued"));
 }
@@ -1680,13 +1719,14 @@ export async function executeQualityBackfill(params: {
   cycleId: string;
   trigger: string;
   tab?: string;
+  onlyDirty?: boolean;
 }) {
   const startedAt = new Date().toISOString();
   const { data: entries } = await params.supabase
     .schema("app")
     .from("analysis_entries")
     .select(
-      "id, analysis_type, sub_type, title, description, impact_level, uncertainty_level"
+      "id, analysis_type, sub_type, title, description, impact_level, uncertainty_level, updated_at, quality_calculated_at"
     )
     .eq("organization_id", params.organizationId)
     .eq("cycle_instance_id", params.cycleId);
@@ -1708,9 +1748,18 @@ export async function executeQualityBackfill(params: {
   let embeddingReady = 0;
   const embeddingErrors: Array<{ entryId: string; code: string | null; message: string | null }> = [];
   const allEntries = entries ?? [];
+  const entriesToProcess = params.onlyDirty
+    ? allEntries.filter((entry) => {
+        const qualityCalculatedAtTs = parseTimestamp(entry.quality_calculated_at);
+        const updatedAtTs = parseTimestamp(entry.updated_at);
+        if (!qualityCalculatedAtTs) return true;
+        return Boolean(updatedAtTs && updatedAtTs > qualityCalculatedAtTs);
+      })
+    : allEntries;
+  const processedEntryIds: string[] = [];
   const batchSize = Math.max(1, Math.min(20, Math.round(QUALITY_BACKFILL_BATCH_SIZE)));
-  for (let i = 0; i < allEntries.length; i += batchSize) {
-    const batch = allEntries.slice(i, i + batchSize);
+  for (let i = 0; i < entriesToProcess.length; i += batchSize) {
+    const batch = entriesToProcess.slice(i, i + batchSize);
     for (const entry of batch) {
       const quality = await computePersistedQuality({
         supabase: params.supabase,
@@ -1743,6 +1792,7 @@ export async function executeQualityBackfill(params: {
         .eq("id", entry.id)
         .eq("organization_id", params.organizationId)
         .eq("cycle_instance_id", params.cycleId);
+      processedEntryIds.push(entry.id);
       const embeddingResult = await updateEntryEmbedding({
         supabase: params.supabase,
         organizationId: params.organizationId,
@@ -1781,7 +1831,7 @@ export async function executeQualityBackfill(params: {
         });
       }
     }
-    if (i + batchSize < allEntries.length && QUALITY_BACKFILL_BATCH_PAUSE_MS > 0) {
+    if (i + batchSize < entriesToProcess.length && QUALITY_BACKFILL_BATCH_PAUSE_MS > 0) {
       await sleep(QUALITY_BACKFILL_BATCH_PAUSE_MS);
     }
   }
@@ -1791,6 +1841,7 @@ export async function executeQualityBackfill(params: {
     organizationId: params.organizationId,
     cycleId: params.cycleId,
     trigger: params.trigger,
+    targetEntryIds: processedEntryIds,
   });
   const usageSummary = summarizeUsage(
     usageEvents.map((event) => ({
@@ -1836,7 +1887,7 @@ export async function executeQualityBackfill(params: {
       ((usageSummary.billableCost ?? 0) + (graphLayoutSummary.usage?.billableCost ?? 0)).toFixed(6)
     ),
     counts: {
-      entriesProcessed: allEntries.length,
+      entriesProcessed: entriesToProcess.length,
       qualityLlmEvents: usageEvents.length,
       embeddingAttempted,
       embeddingReady,
@@ -1849,7 +1900,7 @@ export async function executeQualityBackfill(params: {
         type: "quality_backfill",
         trigger: params.trigger,
         tab: params.tab ?? "environment",
-        entriesProcessed: allEntries.length,
+        entriesProcessed: entriesToProcess.length,
         llmEvents: usageEvents.length,
       },
       {
@@ -1869,6 +1920,7 @@ export async function executeGraphLayoutRecompute(params: {
   organizationId: string;
   cycleId: string;
   trigger: string;
+  onlyDirty?: boolean;
 }) {
   const startedAt = new Date().toISOString();
   const summary = await recomputeAndPersistGraphLayout({
@@ -1876,6 +1928,7 @@ export async function executeGraphLayoutRecompute(params: {
     organizationId: params.organizationId,
     cycleId: params.cycleId,
     trigger: params.trigger,
+    onlyDirty: params.onlyDirty,
   });
   await writeAiActionLogSafe({
     supabase: params.supabase,
@@ -2910,6 +2963,7 @@ export async function processPendingBackgroundJobs(
         ? (pending.payload as Record<string, unknown>)
         : {}) as Record<string, unknown>;
       const trigger = String(payload.trigger ?? pending.job_type ?? "worker");
+      const onlyDirty = String(payload.scope ?? "").toLowerCase() === "dirty";
       if (pending.job_type === "quality_backfill") {
         await executeQualityBackfill({
           supabase,
@@ -2917,6 +2971,7 @@ export async function processPendingBackgroundJobs(
           cycleId: pending.cycle_instance_id,
           trigger,
           tab: String(payload.tab ?? "environment"),
+          onlyDirty,
         });
       } else if (pending.job_type === "graph_layout_recompute") {
         await executeGraphLayoutRecompute({
@@ -2924,6 +2979,7 @@ export async function processPendingBackgroundJobs(
           organizationId: pending.organization_id,
           cycleId: pending.cycle_instance_id,
           trigger,
+          onlyDirty,
         });
       } else if (pending.job_type === "objective_evaluation_backfill") {
         await executeObjectiveEvaluationBackfill({

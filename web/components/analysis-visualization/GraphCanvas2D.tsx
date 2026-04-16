@@ -18,6 +18,9 @@ type GraphCanvas2DProps = {
   onSelectEdge?: (id: string, anchor: { x: number; y: number }) => void;
   linkFromNodeId?: string | null;
   onCtrlClickNode?: (id: string, anchor: { x: number; y: number }) => void;
+  draggableNodes?: boolean;
+  onNodePositionChange?: (id: string, position: { x: number; y: number; z: number }) => void;
+  onNodePositionCommit?: (id: string, position: { x: number; y: number; z: number }) => Promise<void>;
 };
 
 function getNodeColor(node: PositionedNode): string {
@@ -54,6 +57,26 @@ function getEdgeColor(edge: VisualizationEdge): string {
   return "#94a3b8";
 }
 
+function withParallelOffset(p: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  offset: number;
+}) {
+  const dx = p.x2 - p.x1;
+  const dy = p.y2 - p.y1;
+  const len = Math.max(1, Math.hypot(dx, dy));
+  const nx = -dy / len;
+  const ny = dx / len;
+  return {
+    x1: p.x1 + nx * p.offset,
+    y1: p.y1 + ny * p.offset,
+    x2: p.x2 + nx * p.offset,
+    y2: p.y2 + ny * p.offset,
+  };
+}
+
 export function GraphCanvas2D({
   nodes,
   edges,
@@ -68,6 +91,9 @@ export function GraphCanvas2D({
   onSelectEdge,
   linkFromNodeId = null,
   onCtrlClickNode,
+  draggableNodes = false,
+  onNodePositionChange,
+  onNodePositionCommit,
 }: GraphCanvas2DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +101,12 @@ export function GraphCanvas2D({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
+  const [draggingNode, setDraggingNode] = useState<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+  } | null>(null);
 
   const [width, setWidth] = useState(1200);
   const rawHeight = Math.round((width * 9) / 16);
@@ -141,10 +173,25 @@ export function GraphCanvas2D({
         }}
         onMouseDown={(event) => {
           if (event.button !== 0) return;
+          if (draggingNode) return;
           setDragStart({ x: event.clientX, y: event.clientY });
           setPanStart({ ...pan });
         }}
         onMouseMove={(event) => {
+          if (draggingNode && wrapperRef.current && onNodePositionChange) {
+            const rect = wrapperRef.current.getBoundingClientRect();
+            const worldX = (event.clientX - rect.left - pan.x) / zoom - centerX;
+            const worldY = (event.clientY - rect.top - pan.y) / zoom - centerY;
+            onNodePositionChange(draggingNode.id, {
+              x: worldX - draggingNode.offsetX,
+              y: worldY - draggingNode.offsetY,
+              z: 0,
+            });
+            if (!draggingNode.moved) {
+              setDraggingNode((prev) => (prev ? { ...prev, moved: true } : prev));
+            }
+            return;
+          }
           if (!dragStart || !panStart) return;
           setPan({
             x: panStart.x + (event.clientX - dragStart.x),
@@ -152,10 +199,18 @@ export function GraphCanvas2D({
           });
         }}
         onMouseUp={() => {
+          if (draggingNode && draggingNode.moved && onNodePositionCommit) {
+            const node = nodes.find((n) => n.id === draggingNode.id);
+            if (node) {
+              void onNodePositionCommit(node.id, { x: node.x, y: node.y, z: node.z });
+            }
+          }
+          setDraggingNode(null);
           setDragStart(null);
           setPanStart(null);
         }}
         onMouseLeave={() => {
+          setDraggingNode(null);
           setDragStart(null);
           setPanStart(null);
         }}
@@ -169,9 +224,9 @@ export function GraphCanvas2D({
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Workshop</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-500" />Sonstige</span>
           <span className="border-l border-zinc-300 pl-2" />
-          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#dc2626" }} />widerspricht</span>
-          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />unterstützt/verstaerkt</span>
-          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#94a3b8" }} />verbunden/verursacht/...</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#64748b" }} />Verbindungslinie</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#dc2626" }} />Einflusslinie: widerspricht</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded" style={{ backgroundColor: "#16a34a" }} />Einflusslinie: unterstützt</span>
         </div>
         <div className="pointer-events-none absolute right-3 top-3 z-10 rounded border border-zinc-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700 shadow-sm">
           Zoom: Shift + Scroll
@@ -184,38 +239,81 @@ export function GraphCanvas2D({
           </defs>
           <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
             {showLinks
-              ? renderedEdges.map(({ edge, source, target }) => (
-                  <line
-                    key={edge.id}
-                    x1={centerX + source.x}
-                    y1={centerY + source.y}
-                    x2={centerX + target.x}
-                    y2={centerY + target.y}
-                    stroke={selectedEdgeId === edge.id ? "#0f172a" : getEdgeColor(edge)}
-                    strokeWidth={Math.max(1, edge.strength * 0.8)}
-                    strokeOpacity={edge.isDraft ? 0.45 : Math.min(0.95, Math.max(0.2, edge.confidence))}
-                    strokeDasharray={edge.isDraft ? "4 3" : undefined}
-                    markerEnd={viewMode === "influence" ? "url(#arrowhead)" : undefined}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedEdgeId(edge.id);
-                      setSelectedNodeId(null);
-                      if (wrapperRef.current && onSelectEdge) {
-                        const rect = wrapperRef.current.getBoundingClientRect();
-                        onSelectEdge(edge.id, {
-                          x: event.clientX - rect.left,
-                          y: event.clientY - rect.top,
-                        });
-                      }
-                    }}
-                  />
-                ))
+              ? renderedEdges.map(({ edge, source, target }) => {
+                  const x1 = centerX + source.x;
+                  const y1 = centerY + source.y;
+                  const x2 = centerX + target.x;
+                  const y2 = centerY + target.y;
+                  const selectedStroke = selectedEdgeId === edge.id ? "#0f172a" : null;
+                  const connectionLine = withParallelOffset({ x1, y1, x2, y2, offset: -3 });
+                  const influenceLine = withParallelOffset({ x1, y1, x2, y2, offset: 3 });
+                  const opacity = edge.isDraft ? 0.45 : Math.min(0.95, Math.max(0.2, edge.confidence));
+
+                  return (
+                    <g
+                      key={edge.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedEdgeId(edge.id);
+                        setSelectedNodeId(null);
+                        if (wrapperRef.current && onSelectEdge) {
+                          const rect = wrapperRef.current.getBoundingClientRect();
+                          onSelectEdge(edge.id, {
+                            x: event.clientX - rect.left,
+                            y: event.clientY - rect.top,
+                          });
+                        }
+                      }}
+                    >
+                      {viewMode === "cluster" ? (
+                        <>
+                          <line
+                            x1={connectionLine.x1}
+                            y1={connectionLine.y1}
+                            x2={connectionLine.x2}
+                            y2={connectionLine.y2}
+                            stroke={selectedStroke ?? "#64748b"}
+                            strokeWidth={Math.max(1, edge.strength * 0.55)}
+                            strokeOpacity={opacity}
+                            strokeDasharray={edge.isDraft ? "4 3" : undefined}
+                          />
+                          <line
+                            x1={influenceLine.x1}
+                            y1={influenceLine.y1}
+                            x2={influenceLine.x2}
+                            y2={influenceLine.y2}
+                            stroke={selectedStroke ?? getEdgeColor(edge)}
+                            strokeWidth={Math.max(1, edge.strength * 0.85)}
+                            strokeOpacity={opacity}
+                            strokeDasharray={edge.isDraft ? "4 3" : undefined}
+                            markerEnd="url(#arrowhead)"
+                          />
+                        </>
+                      ) : (
+                        <line
+                          x1={x1}
+                          y1={y1}
+                          x2={x2}
+                          y2={y2}
+                          stroke={selectedStroke ?? getEdgeColor(edge)}
+                          strokeWidth={Math.max(1, edge.strength * 0.8)}
+                          strokeOpacity={opacity}
+                          strokeDasharray={edge.isDraft ? "4 3" : undefined}
+                        />
+                      )}
+                    </g>
+                  );
+                })
               : null}
 
             {nodes.map((node) => {
               const placement = labelPlacements.get(node.id);
               const isLinkFrom = linkFromNodeId === node.id;
               const handleNodeClick = (event: React.MouseEvent) => {
+                if (draggingNode?.id === node.id && draggingNode.moved) {
+                  setDraggingNode((prev) => (prev && prev.id === node.id ? { ...prev, moved: false } : prev));
+                  return;
+                }
                 event.stopPropagation();
                 if (wrapperRef.current) {
                   const rect = wrapperRef.current.getBoundingClientRect();
@@ -245,6 +343,19 @@ export function GraphCanvas2D({
                     fill={getNodeColor(node)}
                     stroke={selectedNodeId === node.id ? "#0f172a" : isLinkFrom ? "#0ea5e9" : "#ffffff"}
                     strokeWidth={selectedNodeId === node.id ? 3 : isLinkFrom ? 2 : 1.5}
+                    onMouseDown={(event) => {
+                      if (!draggableNodes || viewMode !== "cluster" || event.ctrlKey || !wrapperRef.current) return;
+                      event.stopPropagation();
+                      const rect = wrapperRef.current.getBoundingClientRect();
+                      const worldX = (event.clientX - rect.left - pan.x) / zoom - centerX;
+                      const worldY = (event.clientY - rect.top - pan.y) / zoom - centerY;
+                      setDraggingNode({
+                        id: node.id,
+                        offsetX: worldX - node.x,
+                        offsetY: worldY - node.y,
+                        moved: false,
+                      });
+                    }}
                     onClick={handleNodeClick}
                   />
                   {showLabels && placement ? (
@@ -313,7 +424,7 @@ export function GraphCanvas2D({
         </svg>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Zoom: Shift + Mousewheel | Drag: Pan | Klick: Node/Edge-Detail | Ctrl+Klick: Verbindung erstellen
+        Zoom: Shift + Mousewheel | Drag Hintergrund: Pan | Drag Knoten (Clusteransicht): manuell platzieren | Klick: Node/Edge-Detail | Ctrl+Klick: Verbindung erstellen
       </p>
     </div>
   );

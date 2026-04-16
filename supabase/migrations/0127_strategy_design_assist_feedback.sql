@@ -1,4 +1,5 @@
 -- Hybrid Strategic Design: persist assist decisions and telemetry.
+-- migrate:up
 
 create table if not exists app.strategy_design_assist_feedback (
   organization_id uuid not null,
@@ -31,3 +32,7 @@ create index if not exists idx_strategy_design_assist_feedback_org_cycle
 
 create index if not exists idx_strategy_design_assist_feedback_decision_state
   on app.strategy_design_assist_feedback (decision_state);
+
+-- migrate:down
+
+drop table if exists app.strategy_design_assist_feedback;

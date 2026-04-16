@@ -6,7 +6,6 @@ import { CreateLinkDialog } from "@/components/analysis-visualization/CreateLink
 import { DetailPanel } from "@/components/analysis-visualization/DetailPanel";
 import { FilterPanel } from "@/components/analysis-visualization/FilterPanel";
 import { GraphCanvas2D } from "@/components/analysis-visualization/GraphCanvas2D";
-import { GraphCanvas3D } from "@/components/analysis-visualization/GraphCanvas3D";
 import { TerrainMap2D } from "@/components/analysis-visualization/TerrainMap2D";
 import { Toolbar } from "@/components/analysis-visualization/Toolbar";
 import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
@@ -69,6 +68,7 @@ type AnalysisVisualizationWorkspaceProps = {
   entryDirectionIdsByEntryId: Record<string, string[]>;
   strategicDirections: Array<{ id: string; title: string }>;
   llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number; reason?: string }>;
+  manualClusterPositionsByEntryId?: Record<string, { x: number; y: number; z?: number; updatedAt?: string | null }>;
   canWrite: boolean;
   /** Graph-Layout / Quality-Jobs direkt unter den Filtern (Zusammenfassung). */
   graphMaintenanceActions?: {
@@ -83,29 +83,18 @@ type AnalysisVisualizationWorkspaceProps = {
   };
 };
 
+type ManualNodePosition = {
+  x: number;
+  y: number;
+  z: number;
+};
+
 function hashToUnit(value: string): number {
   let hash = 0;
   for (let i = 0; i < value.length; i += 1) {
     hash = (hash * 31 + value.charCodeAt(i)) | 0;
   }
   return ((hash >>> 0) % 1000) / 1000;
-}
-
-function bucketX(analysisType: string): number {
-  switch (analysisType) {
-    case "environment":
-      return -230;
-    case "competitor":
-      return -110;
-    case "company":
-      return 40;
-    case "swot":
-      return 160;
-    case "workshop":
-      return 260;
-    default:
-      return 0;
-  }
 }
 
 function normalizeHistory(raw: unknown): VisualizationEdge["history"] {
@@ -165,85 +154,10 @@ function fallbackTriScoresFromEdge(edge: VisualizationEdge): NonNullable<Visuali
   };
 }
 
-function buildForceLayout(
-  nodes: VisualizationNode[],
-  edges: VisualizationEdge[],
-  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>
-): PositionedNode[] {
-  const positioned = nodes.map((node) => ({
-    ...node,
-    x:
-      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].x)
-        ? llmLayoutByEntryId[node.id].x * 360
-        : bucketX(node.analysisType) + (hashToUnit(node.id) - 0.5) * 120,
-    y:
-      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].y)
-        ? llmLayoutByEntryId[node.id].y * 240
-        : (3 - node.impact) * 80 + (hashToUnit(`${node.id}-y`) - 0.5) * 160,
-    z:
-      llmLayoutByEntryId?.[node.id] && Number.isFinite(llmLayoutByEntryId[node.id].z)
-        ? llmLayoutByEntryId[node.id].z * 180
-        : 0,
-  }));
-  const idxById = new Map(positioned.map((node, idx) => [node.id, idx]));
-  const linkPairs = edges
-    .map((edge) => {
-      const a = idxById.get(edge.source);
-      const b = idxById.get(edge.target);
-      if (a === undefined || b === undefined) return null;
-      return { a, b, strength: edge.strength };
-    })
-    .filter((item): item is { a: number; b: number; strength: number } => Boolean(item));
-
-  const area = 1100 * 640;
-  const k = Math.sqrt(area / Math.max(positioned.length, 1));
-  for (let iter = 0; iter < 110; iter += 1) {
-    const dx = new Array(positioned.length).fill(0);
-    const dy = new Array(positioned.length).fill(0);
-
-    for (let i = 0; i < positioned.length; i += 1) {
-      for (let j = i + 1; j < positioned.length; j += 1) {
-        const vx = positioned[i].x - positioned[j].x;
-        const vy = positioned[i].y - positioned[j].y;
-        const dist = Math.max(1, Math.hypot(vx, vy));
-        const force = (k * k) / dist;
-        const ux = vx / dist;
-        const uy = vy / dist;
-        dx[i] += ux * force;
-        dy[i] += uy * force;
-        dx[j] -= ux * force;
-        dy[j] -= uy * force;
-      }
-    }
-
-    for (const pair of linkPairs) {
-      const source = positioned[pair.a];
-      const target = positioned[pair.b];
-      const vx = source.x - target.x;
-      const vy = source.y - target.y;
-      const dist = Math.max(1, Math.hypot(vx, vy));
-      const desired = 120 - pair.strength * 10;
-      const force = ((dist - desired) * 0.13);
-      const ux = vx / dist;
-      const uy = vy / dist;
-      dx[pair.a] -= ux * force;
-      dy[pair.a] -= uy * force;
-      dx[pair.b] += ux * force;
-      dy[pair.b] += uy * force;
-    }
-
-    for (let i = 0; i < positioned.length; i += 1) {
-      positioned[i].x = Math.max(-480, Math.min(480, positioned[i].x + dx[i] * 0.012));
-      positioned[i].y = Math.max(-290, Math.min(290, positioned[i].y + dy[i] * 0.012));
-    }
-  }
-
-  return positioned;
-}
-
 function buildClusterLayout(
   nodes: VisualizationNode[],
-  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>
+  llmLayoutByEntryId?: Record<string, { x: number; y: number; z: number; confidence: number }>,
+  manualPositionsByEntryId?: Record<string, ManualNodePosition>
 ): PositionedNode[] {
   const clusterBuckets = new Map<string, VisualizationNode[]>();
   for (const node of nodes) {
@@ -259,18 +173,28 @@ function buildClusterLayout(
     const clusterCenterX = -350 + (clusterIdx % 4) * 230;
     const clusterCenterY = -170 + Math.floor(clusterIdx / 4) * 180;
     const localSeed = hashToUnit(node.id);
+    const manualAnchor = manualPositionsByEntryId?.[node.id];
     const llmAnchor = llmLayoutByEntryId?.[node.id];
     return {
       ...node,
       x:
-        llmAnchor && Number.isFinite(llmAnchor.x)
+        manualAnchor && Number.isFinite(manualAnchor.x)
+          ? manualAnchor.x
+          : llmAnchor && Number.isFinite(llmAnchor.x)
           ? llmAnchor.x * 360
           : clusterCenterX + (localSeed - 0.5) * 90,
       y:
-        llmAnchor && Number.isFinite(llmAnchor.y)
+        manualAnchor && Number.isFinite(manualAnchor.y)
+          ? manualAnchor.y
+          : llmAnchor && Number.isFinite(llmAnchor.y)
           ? llmAnchor.y * 240
           : clusterCenterY + (hashToUnit(`${node.id}-c`) - 0.5) * 90,
-      z: llmAnchor && Number.isFinite(llmAnchor.z) ? llmAnchor.z * 180 : 0,
+      z:
+        manualAnchor && Number.isFinite(manualAnchor.z)
+          ? manualAnchor.z
+          : llmAnchor && Number.isFinite(llmAnchor.z)
+            ? llmAnchor.z * 180
+            : 0,
     };
   });
 }
@@ -296,7 +220,7 @@ function buildTerrainLayout(
           : externalWeight * 220 + (hashToUnit(node.id) - 0.5) * 170,
       y:
         llmAnchor && Number.isFinite(llmAnchor.y)
-          ? llmAnchor.y * 240
+          ? -(llmAnchor.y * 240)
           : -(strategicWeight * 70) + (hashToUnit(`${node.id}-terrain-y`) - 0.5) * 90,
       z: llmAnchor && Number.isFinite(llmAnchor.z) ? llmAnchor.z * 180 : 0,
     };
@@ -315,13 +239,13 @@ export function AnalysisVisualizationWorkspace({
   entryDirectionIdsByEntryId,
   strategicDirections,
   llmLayoutByEntryId,
+  manualClusterPositionsByEntryId,
   canWrite,
   graphMaintenanceActions,
 }: AnalysisVisualizationWorkspaceProps) {
-  const [viewMode, setViewMode] = useState<VisualizationViewMode>("constellation");
+  const [viewMode, setViewMode] = useState<VisualizationViewMode>("cluster");
   const [showLabels, setShowLabels] = useState(true);
   const [showLinks, setShowLinks] = useState(true);
-  const [is3D, setIs3D] = useState(false);
   const [showDensity, setShowDensity] = useState(true);
   const [showClusterLabels, setShowClusterLabels] = useState(true);
   const [showChallengeLayer, setShowChallengeLayer] = useState(true);
@@ -347,6 +271,46 @@ export function AnalysisVisualizationWorkspace({
     targetId: string;
     anchor: { x: number; y: number };
   } | null>(null);
+  const [manualPositions, setManualPositions] = useState<Record<string, ManualNodePosition>>(
+    () =>
+      Object.fromEntries(
+        Object.entries(manualClusterPositionsByEntryId ?? {}).map(([entryId, pos]) => [
+          entryId,
+          {
+            x: Number(pos.x),
+            y: Number(pos.y),
+            z: Number.isFinite(Number(pos.z)) ? Number(pos.z) : 0,
+          } satisfies ManualNodePosition,
+        ])
+      )
+  );
+  const [persistedManualPositions, setPersistedManualPositions] = useState<Record<string, ManualNodePosition>>(
+    () =>
+      Object.fromEntries(
+        Object.entries(manualClusterPositionsByEntryId ?? {}).map(([entryId, pos]) => [
+          entryId,
+          {
+            x: Number(pos.x),
+            y: Number(pos.y),
+            z: Number.isFinite(Number(pos.z)) ? Number(pos.z) : 0,
+          } satisfies ManualNodePosition,
+        ])
+      )
+  );
+  useEffect(() => {
+    const mapped = Object.fromEntries(
+      Object.entries(manualClusterPositionsByEntryId ?? {}).map(([entryId, pos]) => [
+        entryId,
+        {
+          x: Number(pos.x),
+          y: Number(pos.y),
+          z: Number.isFinite(Number(pos.z)) ? Number(pos.z) : 0,
+        } satisfies ManualNodePosition,
+      ])
+    ) as Record<string, ManualNodePosition>;
+    setManualPositions(mapped);
+    setPersistedManualPositions(mapped);
+  }, [manualClusterPositionsByEntryId]);
 
   const clusterIdByEntryId = useMemo(() => {
     const map = new Map<string, string>();
@@ -412,6 +376,7 @@ export function AnalysisVisualizationWorkspace({
             ? normalizeHistory((link.metadata as Record<string, unknown>).change_log)
             : [],
         isDraft: false,
+        edgeLayers: { connection: true, influence: true },
       }));
     const mappedDrafts = linkDrafts.map((link) => ({
       id: `draft-${link.id}`,
@@ -429,6 +394,7 @@ export function AnalysisVisualizationWorkspace({
       updatedAt: null,
       history: [],
       isDraft: true,
+      edgeLayers: { connection: true, influence: true },
     }));
     if (linkScope === "approved") return mappedApproved;
     if (linkScope === "draft") return mappedDrafts;
@@ -485,10 +451,10 @@ export function AnalysisVisualizationWorkspace({
   const positionedNodes = useMemo<PositionedNode[]>(() => {
     const base =
       viewMode === "cluster"
-        ? buildClusterLayout(filteredNodes, llmLayoutByEntryId)
+        ? buildClusterLayout(filteredNodes, llmLayoutByEntryId, manualPositions)
         : viewMode === "terrain"
           ? buildTerrainLayout(filteredNodes, llmLayoutByEntryId)
-          : buildForceLayout(filteredNodes, filteredEdges, llmLayoutByEntryId);
+          : buildClusterLayout(filteredNodes, llmLayoutByEntryId, manualPositions);
     return base.map((node) => {
       const internalExternal =
         node.analysisType === "company" || node.analysisType === "swot" ? -120 : 120;
@@ -499,7 +465,7 @@ export function AnalysisVisualizationWorkspace({
         z: horizon + internalExternal * 0.25 + (hashToUnit(`${node.id}-z`) - 0.5) * 80,
       };
     });
-  }, [filteredNodes, filteredEdges, viewMode, llmLayoutByEntryId]);
+  }, [filteredNodes, filteredEdges, manualPositions, viewMode, llmLayoutByEntryId]);
 
   const selectedNode = useMemo(
     () => positionedNodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -553,6 +519,33 @@ export function AnalysisVisualizationWorkspace({
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
     setOverlayAnchor(null);
+  }
+
+  function handleNodePositionChange(id: string, nextPosition: ManualNodePosition) {
+    if (viewMode !== "cluster") return;
+    setManualPositions((prev) => ({ ...prev, [id]: nextPosition }));
+  }
+
+  async function persistNodePosition(id: string, nextPosition: ManualNodePosition) {
+    if (viewMode !== "cluster" || !canWrite) return;
+    const previous = persistedManualPositions[id];
+    const response = await fetch("/api/analysis-node-position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        analysisEntryId: id,
+        x: Number(nextPosition.x.toFixed(3)),
+        y: Number(nextPosition.y.toFixed(3)),
+        z: Number(nextPosition.z.toFixed(3)),
+      }),
+    });
+    if (!response.ok) {
+      if (previous) {
+        setManualPositions((prev) => ({ ...prev, [id]: previous }));
+      }
+      throw new Error("persist_node_position_failed");
+    }
+    setPersistedManualPositions((prev) => ({ ...prev, [id]: nextPosition }));
   }
 
   async function updateEdge(payload: { id: string; linkType: string; strength: number; comment: string }) {
@@ -738,7 +731,7 @@ export function AnalysisVisualizationWorkspace({
     <section className="brand-card p-6">
       <h2 className="text-lg font-semibold text-zinc-900">Analyse-Visualisierung</h2>
       <p className="mt-1 text-xs text-zinc-600">
-        Explorative Netzwerkansicht mit Cluster-, Einfluss- und optionalem 3D-Modus.
+        Explorative Netzwerkansicht mit Cluster-, Terrain- und Tabellenmodus.
       </p>
       <div className="mt-3">
         <Toolbar
@@ -748,8 +741,6 @@ export function AnalysisVisualizationWorkspace({
           setShowLabels={setShowLabels}
           showLinks={showLinks}
           setShowLinks={setShowLinks}
-          is3D={is3D}
-          setIs3D={setIs3D}
           showDensity={showDensity}
           setShowDensity={setShowDensity}
           showClusterLabels={showClusterLabels}
@@ -855,7 +846,7 @@ export function AnalysisVisualizationWorkspace({
                   }
                   className="brand-btn px-3 py-1.5 text-xs disabled:opacity-50"
                 >
-                  Bestehende Punkte neu bewerten
+                  Bestehende Herausforderungen neu bewerten
                 </button>
                 <AiWaitOverlay
                   title="AI Agent bewertet alle bestehenden Punkte"
@@ -890,21 +881,6 @@ export function AnalysisVisualizationWorkspace({
               linkFromNodeId={canWrite ? linkFromNodeId : null}
               onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
             />
-          ) : is3D ? (
-            <GraphCanvas3D
-              nodes={positionedNodes}
-              edges={filteredEdges}
-              showLabels={showLabels}
-              showLinks={showLinks}
-              selectedNodeId={selectedNodeId}
-              selectedEdgeId={selectedEdgeId}
-              setSelectedNodeId={setSelectedNodeId}
-              setSelectedEdgeId={setSelectedEdgeId}
-              onSelectNode={handleSelectNode}
-              onSelectEdge={handleSelectEdge}
-              linkFromNodeId={canWrite ? linkFromNodeId : null}
-              onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
-            />
           ) : (
             <GraphCanvas2D
               nodes={positionedNodes}
@@ -920,6 +896,9 @@ export function AnalysisVisualizationWorkspace({
               onSelectEdge={handleSelectEdge}
               linkFromNodeId={canWrite ? linkFromNodeId : null}
               onCtrlClickNode={canWrite ? handleCtrlClickNode : undefined}
+              draggableNodes={viewMode === "cluster" && canWrite}
+              onNodePositionChange={handleNodePositionChange}
+              onNodePositionCommit={persistNodePosition}
             />
           )}
           {createLinkState && canWrite ? (() => {

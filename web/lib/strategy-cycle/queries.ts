@@ -103,6 +103,7 @@ export async function getStrategyCycleWorkspaceData(
     annualTargetsResult,
     initiativesResult,
     initiativeTargetLinksResult,
+    manualNodePositionsResult,
     challengeCandidatesResult,
     backgroundJobsResult,
     portfolioEvalResult,
@@ -307,6 +308,12 @@ export async function getStrategyCycleWorkspaceData(
       .schema("app")
       .from("initiative_target_links")
       .select("id, initiative_id, annual_target_id, contribution_level, comment")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("analysis_manual_node_positions")
+      .select("analysis_entry_id, x, y, z, updated_at")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -672,6 +679,17 @@ export async function getStrategyCycleWorkspaceData(
     }));
   }
   const challengeDirectionLinks = challengeDirectionLinksResult.data ?? [];
+  const manualClusterPositionsByEntryId = Object.fromEntries(
+    (manualNodePositionsResult.data ?? []).map((row) => [
+      row.analysis_entry_id,
+      {
+        x: Number(row.x ?? 0),
+        y: Number(row.y ?? 0),
+        z: Number(row.z ?? 0),
+        updatedAt: row.updated_at ?? null,
+      },
+    ])
+  ) as Record<string, { x: number; y: number; z: number; updatedAt: string | null }>;
   let directionObjectiveLinksRaw = directionObjectiveLinksResult.data ?? [];
   if (directionObjectiveLinksResult.error && directionObjectiveLinksRaw.length === 0) {
     const { data: fallbackObjectiveLinks } = await supabase
@@ -876,6 +894,7 @@ export async function getStrategyCycleWorkspaceData(
     challengeIndustries: challengeIndustriesResult.data ?? [],
     challengeBusinessModels: challengeBusinessModelsResult.data ?? [],
     initiativeTargetLinks,
+    manualClusterPositionsByEntryId,
     challengeCandidates: challengeCandidatesResult.data ?? [],
     backgroundJobs: backgroundJobsResult.data ?? [],
     directionCoverageById,
