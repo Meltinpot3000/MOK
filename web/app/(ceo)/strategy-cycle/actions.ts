@@ -713,6 +713,10 @@ async function recomputeAndPersistGraphLayout(params: {
     entriesToLayout.map((entry) => {
       const point = pointsById.get(entry.id) ?? readRuleGraphLayoutPoint(entry);
       const isLlmNode = llmNodeIds.has(entry.id);
+      const ruleFallbackExplain =
+        !isLlmNode && canUseGraphLayoutLlm && llmResponse.graphLayoutDiagnostics?.ruleFallbackExplanationDe
+          ? llmResponse.graphLayoutDiagnostics.ruleFallbackExplanationDe
+          : null;
       return params.supabase
         .schema("app")
         .from("analysis_entries")
@@ -721,7 +725,9 @@ async function recomputeAndPersistGraphLayout(params: {
           graph_layout_y: point.y,
           graph_layout_z: point.z,
           graph_layout_confidence: point.confidence,
-          graph_layout_reason: point.reason || null,
+          graph_layout_reason: isLlmNode
+            ? point.reason || null
+            : ruleFallbackExplain ?? (point.reason || null),
           graph_layout_source: isLlmNode ? "llm" : "rule",
           graph_layout_fallback_reason:
             isLlmNode || !llmResponse.result
@@ -804,6 +810,30 @@ function done(path = "/strategy-cycle"): never {
   revalidatePath("/strategy-matrix");
   revalidatePath("/unternehmensinfo");
   redirect(path);
+}
+
+async function syncChallengePrimaryAnalysisEntry(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  cycleId: string,
+  challengeId: string
+) {
+  const { data: rows } = await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .select("analysis_entry_id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleId)
+    .eq("strategic_challenge_id", challengeId)
+    .order("created_at", { ascending: true });
+  const primary = (rows?.[0] as { analysis_entry_id?: string } | undefined)?.analysis_entry_id ?? null;
+  await supabase
+    .schema("app")
+    .from("strategic_challenges")
+    .update({ source_analysis_entry_id: primary })
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleId)
+    .eq("id", challengeId);
 }
 
 /** Wenn _noRedirect=1 im FormData: nur revalidieren, kein Redirect. Fuer sanfte UX (z.B. Pill-Klicks). */
@@ -1378,7 +1408,15 @@ export async function promoteToStrategicChallenge(formData: FormData) {
     done(`/strategy-cycle?tab=${tab}&error=high-impact-justification`);
   }
 
-  const { data: existingChallenge } = await supabase
+  const { data: existingJunction } = await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .select("strategic_challenge_id")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("analysis_entry_id", entry.id)
+    .maybeSingle();
+  const { data: legacyChallenge } = await supabase
     .schema("app")
     .from("strategic_challenges")
     .select("id")
@@ -1387,7 +1425,14 @@ export async function promoteToStrategicChallenge(formData: FormData) {
     .eq("source_analysis_entry_id", entry.id)
     .maybeSingle();
 
-  if (!existingChallenge) {
+  if (!existingJunction && legacyChallenge?.id) {
+    await supabase.schema("app").from("strategic_challenge_analysis_entries").insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_challenge_id: legacyChallenge.id,
+      analysis_entry_id: entry.id,
+    });
+  } else if (!existingJunction && !legacyChallenge) {
     const { data: challenge } = await supabase
       .schema("app")
       .from("strategic_challenges")
@@ -1405,7 +1450,13 @@ export async function promoteToStrategicChallenge(formData: FormData) {
       .select("id")
       .single();
 
-    if (challenge) {
+    if (challenge?.id) {
+      await supabase.schema("app").from("strategic_challenge_analysis_entries").insert({
+        organization_id: context.organizationId,
+        cycle_instance_id: context.cycleId,
+        strategic_challenge_id: challenge.id,
+        analysis_entry_id: entry.id,
+      });
       const { count } = await supabase
         .schema("app")
         .from("dashboard_column_config")
@@ -1666,7 +1717,8 @@ export async function recomputeGraphLayout(formData: FormData) {
     cycleId: context.cycleId,
     membershipId: context.membershipId,
     jobType: "graph_layout_recompute",
-    payload: { tab, trigger: "manual_recompute_graph_layout", scope: "dirty" },
+    /** Vollständiger Graph (alle Knoten), wie CLI — nicht nur «dirty», sonst z. B. bei nur neuen Kanten 0 Einträge. */
+    payload: { tab, trigger: "manual_recompute_graph_layout", scope: "all" },
   });
   done(withSuccess(returnTo, "graph-layout-queued"));
 }
@@ -3260,13 +3312,48 @@ export async function attachFindingToChallenge(formData: FormData) {
   if (!entryId || !challengeId) done(`/strategy-cycle?tab=${tab}`);
 
   const supabase = await createSupabaseServerClient();
-  await supabase
+  const { data: entryRow } = await supabase
     .schema("app")
-    .from("strategic_challenges")
-    .update({ source_analysis_entry_id: entryId })
-    .eq("id", challengeId)
+    .from("analysis_entries")
+    .select("id")
+    .eq("id", entryId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId);
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (!entryRow) done(`/strategy-cycle?tab=${tab}&error=not-found`);
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .select("strategic_challenge_id")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("analysis_entry_id", entryId)
+    .maybeSingle();
+  const prevChallengeId = existing?.strategic_challenge_id as string | undefined;
+  if (prevChallengeId && prevChallengeId !== challengeId) {
+    await supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .delete()
+      .eq("organization_id", context.organizationId)
+      .eq("cycle_instance_id", context.cycleId)
+      .eq("analysis_entry_id", entryId);
+    await syncChallengePrimaryAnalysisEntry(
+      supabase,
+      context.organizationId,
+      context.cycleId,
+      prevChallengeId
+    );
+  }
+  if (prevChallengeId !== challengeId) {
+    await supabase.schema("app").from("strategic_challenge_analysis_entries").insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_challenge_id: challengeId,
+      analysis_entry_id: entryId,
+    });
+  }
+  await syncChallengePrimaryAnalysisEntry(supabase, context.organizationId, context.cycleId, challengeId);
 
   done(`/strategy-cycle?tab=${tab}&success=finding-linked`);
 }
@@ -3701,23 +3788,81 @@ export async function createStrategicChallengeInCycle(formData: FormData) {
   const relevanceLevel = impactScore;
   const riskLevel = urgencyScore;
   const description = String(formData.get("description") ?? "").trim() || null;
+  const analysisEntryIds = formData
+    .getAll("analysis_entry_id")
+    .map((v) => String(v ?? "").trim())
+    .filter((id) => id.length > 0);
   const supabase = await createSupabaseServerClient();
-  await supabase.schema("app").from("strategic_challenges").insert({
-    organization_id: context.organizationId,
-    cycle_instance_id: context.cycleId,
-    title,
-    description,
-    priority: 3,
-    impact_score: impactScore,
-    urgency_score: urgencyScore,
-    scope_score: scopeScore,
-    root_cause_score: rootCauseScore,
-    challenge_score: challengeScore,
-    relevance_level: relevanceLevel,
-    risk_level: riskLevel,
-    visibility: "internal",
-    created_by_membership_id: context.membershipId,
-  });
+  const { data: created, error: insertError } = await supabase
+    .schema("app")
+    .from("strategic_challenges")
+    .insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      title,
+      description,
+      priority: 3,
+      impact_score: impactScore,
+      urgency_score: urgencyScore,
+      scope_score: scopeScore,
+      root_cause_score: rootCauseScore,
+      challenge_score: challengeScore,
+      relevance_level: relevanceLevel,
+      risk_level: riskLevel,
+      visibility: "internal",
+      created_by_membership_id: context.membershipId,
+    })
+    .select("id")
+    .single();
+  if (insertError || !created?.id) {
+    console.error("[createStrategicChallengeInCycle]", insertError?.message);
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=challenge-create-failed");
+  }
+  const challengeId = created.id as string;
+  for (const entryId of analysisEntryIds) {
+    const { data: entryOk } = await supabase
+      .schema("app")
+      .from("analysis_entries")
+      .select("id")
+      .eq("id", entryId)
+      .eq("organization_id", context.organizationId)
+      .eq("cycle_instance_id", context.cycleId)
+      .maybeSingle();
+    if (!entryOk) continue;
+    const { data: existingLink } = await supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .select("strategic_challenge_id")
+      .eq("organization_id", context.organizationId)
+      .eq("cycle_instance_id", context.cycleId)
+      .eq("analysis_entry_id", entryId)
+      .maybeSingle();
+    const prevId = existingLink?.strategic_challenge_id as string | undefined;
+    if (prevId && prevId !== challengeId) {
+      await supabase
+        .schema("app")
+        .from("strategic_challenge_analysis_entries")
+        .delete()
+        .eq("organization_id", context.organizationId)
+        .eq("cycle_instance_id", context.cycleId)
+        .eq("analysis_entry_id", entryId);
+      await syncChallengePrimaryAnalysisEntry(
+        supabase,
+        context.organizationId,
+        context.cycleId,
+        prevId
+      );
+    }
+    await supabase.schema("app").from("strategic_challenge_analysis_entries").insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      strategic_challenge_id: challengeId,
+      analysis_entry_id: entryId,
+    });
+  }
+  if (analysisEntryIds.length > 0) {
+    await syncChallengePrimaryAnalysisEntry(supabase, context.organizationId, context.cycleId, challengeId);
+  }
   done("/strategy-cycle?l1=strategic-directions&l2=challenges&success=challenge-created");
 }
 
@@ -4400,6 +4545,88 @@ export async function unlinkStrategicChallengeFromBusinessModelInCycle(formData:
     .eq("cycle_instance_id", context.cycleId)
     .eq("strategic_challenge_id", challengeId)
     .eq("business_model_id", businessModelId);
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=unlinked");
+}
+
+export async function linkStrategicChallengeToAnalysisEntryInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
+  const entryId = String(formData.get("analysis_entry_id") ?? "").trim();
+  if (!challengeId || !entryId) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=missing-link");
+  }
+  const supabase = await createSupabaseServerClient();
+  const { data: entryRow } = await supabase
+    .schema("app")
+    .from("analysis_entries")
+    .select("id")
+    .eq("id", entryId)
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .maybeSingle();
+  if (!entryRow) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=analysis-entry-not-found");
+  }
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .select("strategic_challenge_id")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("analysis_entry_id", entryId)
+    .maybeSingle();
+  const prevChallengeId = existing?.strategic_challenge_id as string | undefined;
+  if (prevChallengeId === challengeId) {
+    finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=linked");
+    return;
+  }
+
+  if (prevChallengeId) {
+    await supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .delete()
+      .eq("organization_id", context.organizationId)
+      .eq("cycle_instance_id", context.cycleId)
+      .eq("analysis_entry_id", entryId);
+    await syncChallengePrimaryAnalysisEntry(
+      supabase,
+      context.organizationId,
+      context.cycleId,
+      prevChallengeId
+    );
+  }
+  const { error } = await supabase.schema("app").from("strategic_challenge_analysis_entries").insert({
+    organization_id: context.organizationId,
+    cycle_instance_id: context.cycleId,
+    strategic_challenge_id: challengeId,
+    analysis_entry_id: entryId,
+  });
+  if (error) {
+    console.error("[linkStrategicChallengeToAnalysisEntryInCycle]", error.code, error.message);
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=link-failed");
+  }
+  await syncChallengePrimaryAnalysisEntry(supabase, context.organizationId, context.cycleId, challengeId);
+  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=linked");
+}
+
+export async function unlinkStrategicChallengeFromAnalysisEntryInCycle(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const challengeId = String(formData.get("strategic_challenge_id") ?? "").trim();
+  const entryId = String(formData.get("analysis_entry_id") ?? "").trim();
+  if (!challengeId || !entryId) {
+    done("/strategy-cycle?l1=strategic-directions");
+  }
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .delete()
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("strategic_challenge_id", challengeId)
+    .eq("analysis_entry_id", entryId);
+  await syncChallengePrimaryAnalysisEntry(supabase, context.organizationId, context.cycleId, challengeId);
   finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=challenges&success=unlinked");
 }
 

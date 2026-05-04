@@ -49,6 +49,7 @@ export async function getSidebarPermissionsForMembership(
     .in("role_id", roleIds);
 
   const permissionIds = [...new Set((rolePermissions ?? []).map((row) => row.permission_id))];
+  const codeSet = new Set<string>();
 
   if (permissionIds.length > 0) {
     const { data: permissionsData } = await supabase
@@ -57,7 +58,9 @@ export async function getSidebarPermissionsForMembership(
       .select("id, code")
       .in("id", permissionIds);
 
-    const codeSet = new Set((permissionsData ?? []).map((row) => row.code));
+    for (const row of permissionsData ?? []) {
+      codeSet.add(row.code);
+    }
 
     for (const itemId of SIDEBAR_ITEM_IDS) {
       const read = codeSet.has(getReadPermissionCode(itemId));
@@ -67,6 +70,17 @@ export async function getSidebarPermissionsForMembership(
         write,
       };
     }
+  }
+
+  /**
+   * Menü «Meine Aufgaben» hängt an nav.my-tasks.read. Rollen mit tasks.read (0124) hatten das Nav-Recht
+   * oft paarweise — bei manuell gepflegten Matrizen fehlt nav.my-tasks.read trotzdem. Dann trotzdem anzeigen.
+   */
+  if (codeSet.has("tasks.read")) {
+    permissions["my-tasks"] = {
+      read: true,
+      write: permissions["my-tasks"].write,
+    };
   }
 
   const hasAnySidebarPermission = SIDEBAR_ITEM_IDS.some(

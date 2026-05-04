@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildCeoKpis, type KpiCard } from "@/lib/ceo/kpis";
+import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 
 export type PlanningCycle = {
   id: string;
@@ -15,7 +16,7 @@ export type PlanningCycle = {
   legacy_planning_cycle_id?: string | null;
 };
 
-export type Objective = {
+export type OkrObjectiveKpiRow = {
   id: string;
   title: string;
   status: string;
@@ -41,7 +42,7 @@ export type CeoDashboardData = {
   cycles: PlanningCycle[];
   selectedCycle: PlanningCycle | null;
   previousCycle: PlanningCycle | null;
-  objectives: Objective[];
+  objectives: OkrObjectiveKpiRow[];
   keyResults: KeyResult[];
   kpis: KpiCard[];
 };
@@ -82,6 +83,10 @@ function pickDefaultCycle(cycles: PlanningCycle[]): PlanningCycle | null {
   if (past.length > 0) return past[0];
 
   return scope[0] ?? null;
+}
+
+function toMs(value: string): number {
+  return Date.parse(value);
 }
 
 const KNOWN_ORG_ROLE_LABELS_DE: Record<string, string> = {
@@ -337,90 +342,95 @@ export async function getCeoDashboardData(
       objectives: [],
       keyResults: [],
       kpis: buildCeoKpis({
-        objectives: [],
-        keyResults: [],
+        okrObjectives: [],
+        atRiskObjectiveCount: 0,
+        atRiskKeyResultCount: 0,
         okrObjectiveCount: 0,
         trendDeltaPercent: null,
+        okrAssigneeCount: 0,
+        activeMemberCount: 0,
       }),
     };
   }
 
   const selectedIndex = cycles.findIndex((cycle) => cycle.id === selectedCycle.id);
   const previousCycle = selectedIndex >= 0 ? cycles[selectedIndex + 1] ?? null : null;
+  const previousObjectiveCycle =
+    cycles
+      .filter(
+        (cycle) =>
+          (cycle.level_no ?? 1) === (selectedCycle.level_no ?? 1) &&
+          cycle.id !== selectedCycle.id &&
+          (selectedCycle.cycle_scheme_id ? cycle.cycle_scheme_id === selectedCycle.cycle_scheme_id : true) &&
+          toMs(cycle.end_date) <= toMs(selectedCycle.start_date)
+      )
+      .sort((a, b) => toMs(b.start_date) - toMs(a.start_date))[0] ?? null;
 
-  const [objectivesResult, okrListResult] = await Promise.all([
-    supabase
-      .schema("app")
-      .from("strategy_objectives")
-      .select("id, title, status, progress_percent")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", selectedCycle.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .schema("app")
-      .from("okr_objectives")
-      .select("id")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", selectedCycle.id),
-  ]);
+  const ctx = await getOkrCycleContext(organizationId, selectedCycle.id, null);
+  const objectiveViews = ctx.objectiveViews;
 
-  const objectives = (objectivesResult.data ?? []) as Objective[];
-  const okrRowsForKr = okrListResult.data ?? [];
-  const okrObjectiveCount = okrRowsForKr.length;
-  const okrIdsForKeyResults = okrRowsForKr.map((r) => r.id);
+  const objectives: OkrObjectiveKpiRow[] = objectiveViews.map((ov) => ({
+    id: ov.objective.id,
+    title: ov.objective.title,
+    status: ov.objective.status,
+    progress_percent: ov.rollupProgressPercent,
+  }));
 
-  const { data: keyResultsData } =
-    okrIdsForKeyResults.length > 0
-      ? await supabase
-          .schema("app")
-          .from("key_results")
-          .select("id, title, status, okr_objective_id")
-          .eq("organization_id", organizationId)
-          .in("okr_objective_id", okrIdsForKeyResults)
-      : { data: [] as KeyResult[] };
+  const keyResults: KeyResult[] = objectiveViews.flatMap((ov) =>
+    ov.keyResults.map((kv) => ({
+      id: kv.keyResult.id,
+      title: kv.keyResult.title,
+      objective_id: ov.objective.id,
+      status: kv.reviewStatus,
+    }))
+  );
 
-  const keyResults: KeyResult[] = (keyResultsData ?? []).map((kr) => {
-    const r = kr as { id: string; title: string; status: string; okr_objective_id: string };
-    return {
-      id: r.id,
-      title: r.title,
-      status: r.status,
-      objective_id: r.okr_objective_id,
-    };
-  });
+  const atRiskObjectiveCount = objectiveViews.filter(
+    (ov) => ov.rollupStatus === "at_risk" || ov.rollupStatus === "off_track"
+  ).length;
+  const atRiskKeyResultCount = objectiveViews.flatMap((ov) => ov.keyResults).filter(
+    (kv) => kv.reviewStatus === "at_risk" || kv.reviewStatus === "off_track"
+  ).length;
+
+  const okrObjectiveCount = objectiveViews.length;
+  const okrAssigneeCount = new Set(
+    ctx.workspace.okrObjectives.flatMap((o) =>
+      [o.ownerMembershipId, o.deputyMembershipId].filter((id): id is string => Boolean(id))
+    )
+  ).size;
 
   let trendDeltaPercent: number | null = null;
+  const { count: activeMemberCountRaw } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("status", "active");
+  const activeMemberCount = activeMemberCountRaw ?? 0;
 
-  if (previousCycle) {
-    const { data: previousObjectives } = await supabase
-      .schema("app")
-      .from("strategy_objectives")
-      .select("progress_percent")
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", previousCycle.id);
-
+  if (previousObjectiveCycle) {
+    const prevCtx = await getOkrCycleContext(organizationId, previousObjectiveCycle.id, null);
     const currentAvg =
       objectives.length > 0
         ? objectives.reduce((sum, objective) => sum + Number(objective.progress_percent || 0), 0) /
           objectives.length
         : 0;
-
     const prevAvg =
-      (previousObjectives ?? []).length > 0
-        ? (previousObjectives ?? []).reduce(
-            (sum, objective) => sum + Number(objective.progress_percent || 0),
-            0
-          ) / (previousObjectives ?? []).length
+      prevCtx.objectiveViews.length > 0
+        ? prevCtx.objectiveViews.reduce((sum, ov) => sum + ov.rollupProgressPercent, 0) /
+          prevCtx.objectiveViews.length
         : 0;
-
     trendDeltaPercent = currentAvg - prevAvg;
   }
 
   const kpis = buildCeoKpis({
-    objectives,
-    keyResults,
+    okrObjectives: objectives,
+    atRiskObjectiveCount,
+    atRiskKeyResultCount,
     okrObjectiveCount,
     trendDeltaPercent,
+    okrAssigneeCount,
+    activeMemberCount,
   });
 
   return {

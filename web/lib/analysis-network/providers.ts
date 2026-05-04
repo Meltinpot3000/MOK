@@ -99,6 +99,13 @@ const QUALITY_PROMPT_VERSION = "analysis-quality-v1";
 const CLUSTER_PROMPT_VERSION = "analysis-cluster-v1";
 const GAP_PROMPT_VERSION = "analysis-gap-v1";
 const GRAPH_LAYOUT_PROMPT_VERSION = "analysis-graph-layout-v1";
+/** Nachziehen unvollständiger Groq-Antworten: kleinere Batches, bis alle IDs KI-Positionen haben (oder Abbruch). */
+const GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE = Number(
+  process.env.ANALYSIS_GRAPH_LAYOUT_SUPPLEMENT_CHUNK ?? 8
+);
+const GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS = Number(
+  process.env.ANALYSIS_GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS ?? 48
+);
 const OKR_CONTRIBUTION_PROMPT_VERSION = "okr-contribution-v3";
 const KR_INITIATIVE_MATCHING_PROMPT_VERSION = "kr-initiative-matching-v1";
 
@@ -304,7 +311,7 @@ function buildChallengeCandidatesPrompt(input: {
   return withStrategyReference(lines, input.strategyReferenceText);
 }
 
-function buildGraphLayoutPrompt(input: {
+export function buildGraphLayoutPrompt(input: {
   nodes: Array<{
     id: string;
     title: string;
@@ -433,11 +440,136 @@ function parseGenericJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-function parseGraphLayoutJson(raw: string, expectedNodeIds: string[]): {
+export type GraphLayoutParseDiagnostics = {
+  accepted: boolean;
+  reasonCode: "ok" | "empty_response" | "invalid_json" | "below_threshold";
+  expectedCount: number;
+  parsedCount: number;
+  minimumRequired: number;
+  coverageRatioApplied: number;
+  missingIds: string[];
+  unexpectedIdsInResponse: string[];
+  rawNodesArrayLength: number;
+  /** Eine Zeile Deutsch: warum der Parser abgelehnt hat oder OK */
+  summaryDe: string;
+};
+
+function summarizeMissingIds(ids: string[], max = 6): string {
+  if (ids.length === 0) return "";
+  const shown = ids.slice(0, max);
+  const suffix = ids.length > max ? ` (+${ids.length - max} weitere)` : "";
+  return `${shown.join(", ")}${suffix}`;
+}
+
+/**
+ * Gleiche Regeln wie {@link parseGraphLayoutJson}, liefert aber eine nachvollziehbare Begründung
+ * (z. B. für Tests, Logs, graph_layout_reason bei Rule-Fallback).
+ */
+export function diagnoseGraphLayoutParse(
+  raw: string | null | undefined,
+  expectedNodeIds: string[],
+  options?: { minimumCoverageRatio?: number }
+): GraphLayoutParseDiagnostics {
+  const expectedCount = expectedNodeIds.length;
+  const ratio = options?.minimumCoverageRatio ?? 0.5;
+  const minimumRequired = Math.max(1, Math.ceil(expectedCount * ratio));
+  const coverageRatioApplied = ratio;
+
+  if (!raw?.trim()) {
+    return {
+      accepted: false,
+      reasonCode: "empty_response",
+      expectedCount,
+      parsedCount: 0,
+      minimumRequired,
+      coverageRatioApplied,
+      missingIds: [...expectedNodeIds],
+      unexpectedIdsInResponse: [],
+      rawNodesArrayLength: 0,
+      summaryDe: "Groq lieferte keinen Text (leere Antwort oder Timeout).",
+    };
+  }
+
+  const json = parseGenericJson(raw);
+  if (!json) {
+    return {
+      accepted: false,
+      reasonCode: "invalid_json",
+      expectedCount,
+      parsedCount: 0,
+      minimumRequired,
+      coverageRatioApplied,
+      missingIds: [...expectedNodeIds],
+      unexpectedIdsInResponse: [],
+      rawNodesArrayLength: 0,
+      summaryDe:
+        "Antwort ist kein verwertbares JSON (kein gültiges Objekt in geschweiften Klammern oder Parse-Fehler).",
+    };
+  }
+
+  const rawNodes = Array.isArray(json.nodes) ? json.nodes : [];
+  const expected = new Set(expectedNodeIds);
+  const parsedIds = new Set<string>();
+  const unexpectedIdsInResponse: string[] = [];
+
+  for (const rawNode of rawNodes) {
+    if (!rawNode || typeof rawNode !== "object") continue;
+    const node = rawNode as Record<string, unknown>;
+    const id = String(node.id ?? "").trim();
+    if (!id) continue;
+    if (!expected.has(id)) {
+      if (!unexpectedIdsInResponse.includes(id)) unexpectedIdsInResponse.push(id);
+      continue;
+    }
+    if (parsedIds.has(id)) continue;
+    parsedIds.add(id);
+  }
+
+  const parsedCount = parsedIds.size;
+  const missingIds = expectedNodeIds.filter((id) => !parsedIds.has(id));
+
+  if (parsedCount < minimumRequired) {
+    return {
+      accepted: false,
+      reasonCode: "below_threshold",
+      expectedCount,
+      parsedCount,
+      minimumRequired,
+      coverageRatioApplied,
+      missingIds,
+      unexpectedIdsInResponse,
+      rawNodesArrayLength: rawNodes.length,
+      summaryDe: `JSON enthielt nur ${parsedCount} gültige Knoten-ID(s), mindestens ${minimumRequired} nötig (${Math.round(
+        coverageRatioApplied * 100
+      )}% von ${expectedCount}). Fehlend: ${summarizeMissingIds(missingIds)}.`,
+    };
+  }
+
+  return {
+    accepted: true,
+    reasonCode: "ok",
+    expectedCount,
+    parsedCount,
+    minimumRequired,
+    coverageRatioApplied,
+    missingIds,
+    unexpectedIdsInResponse,
+    rawNodesArrayLength: rawNodes.length,
+    summaryDe: `OK: ${parsedCount} Knoten im JSON akzeptiert.`,
+  };
+}
+
+function parseGraphLayoutJson(
+  raw: string,
+  expectedNodeIds: string[],
+  options?: { minimumCoverageRatio?: number }
+): {
   layoutVersion: string;
   nodes: LlmGraphLayoutNode[];
   globalReasoning: string;
 } | null {
+  const d = diagnoseGraphLayoutParse(raw, expectedNodeIds, options);
+  if (!d.accepted) return null;
   const json = parseGenericJson(raw);
   if (!json) return null;
   const rawNodes = Array.isArray(json.nodes) ? json.nodes : [];
@@ -463,12 +595,36 @@ function parseGraphLayoutJson(raw: string, expectedNodeIds: string[]): {
     });
     seen.add(id);
   }
-  const minimumAccepted = Math.max(1, Math.ceil(expectedNodeIds.length * 0.5));
+  const ratio = options?.minimumCoverageRatio ?? 0.5;
+  const minimumAccepted = Math.max(1, Math.ceil(expectedNodeIds.length * ratio));
   if (parsedNodes.length < minimumAccepted) return null;
   return {
     layoutVersion: String(json.layoutVersion ?? GRAPH_LAYOUT_PROMPT_VERSION).trim().slice(0, 80),
     nodes: parsedNodes,
     globalReasoning: String(json.globalReasoning ?? "").trim().slice(0, 300),
+  };
+}
+
+function aggregateGraphLayoutUsages(usages: LlmUsage[]): LlmUsage | null {
+  if (usages.length === 0) return null;
+  const sum = (pick: (u: LlmUsage) => number | null): number | null => {
+    let total = 0;
+    let any = false;
+    for (const u of usages) {
+      const v = pick(u);
+      if (v != null && Number.isFinite(v)) {
+        total += v;
+        any = true;
+      }
+    }
+    return any ? total : null;
+  };
+  return {
+    promptTokens: sum((u) => u.promptTokens),
+    completionTokens: sum((u) => u.completionTokens),
+    totalTokens: sum((u) => u.totalTokens),
+    billableCost: null,
+    usageMissing: usages.some((u) => u.usageMissing),
   };
 }
 
@@ -874,7 +1030,7 @@ export async function proposeChallengeCandidatesWithLlm(input: {
   };
 }
 
-export async function proposeGraphLayoutWithLlm(input: {
+type GraphLayoutLlmInput = {
   nodes: Array<{
     id: string;
     title: string;
@@ -895,13 +1051,33 @@ export async function proposeGraphLayoutWithLlm(input: {
   }>;
   strategyReferenceText?: string | null;
   maxOutputTokens?: number;
-}): Promise<LlmScoreResponse<LlmGraphLayout>> {
-  if (input.nodes.length === 0) return { result: null, usage: null };
+};
+
+export type GraphLayoutLlmMergeDiagnostics = {
+  missingNodeIds: string[];
+  /** Für Rule-Knoten in die DB (graph_layout_reason); gekürzt */
+  ruleFallbackExplanationDe: string;
+  /** Letzter Groq-Versuch mit Parser-Ablehnung (auch wenn Gemini danach half) */
+  lastGroqParseRejected: GraphLayoutParseDiagnostics | null;
+};
+
+async function proposeGraphLayoutWithLlmOnce(
+  input: GraphLayoutLlmInput,
+  parseOptions?: { minimumCoverageRatio?: number }
+): Promise<{
+  result: LlmGraphLayout | null;
+  usage: LlmUsage | null;
+  groqParseRejected: GraphLayoutParseDiagnostics | null;
+}> {
+  if (input.nodes.length === 0) {
+    return { result: null, usage: null, groqParseRejected: null };
+  }
   const expectedNodeIds = input.nodes.map((node) => node.id);
   const prompt = buildGraphLayoutPrompt(input);
+  let groqParseRejected: GraphLayoutParseDiagnostics | null = null;
   const groqRaw = await scoreWithGroq(prompt, GROQ_MODEL, input.maxOutputTokens);
   if (groqRaw) {
-    const parsedGroq = parseGraphLayoutJson(groqRaw.text, expectedNodeIds);
+    const parsedGroq = parseGraphLayoutJson(groqRaw.text, expectedNodeIds, parseOptions);
     if (parsedGroq) {
       return {
         result: {
@@ -911,13 +1087,17 @@ export async function proposeGraphLayoutWithLlm(input: {
           promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
         },
         usage: groqRaw.usage,
+        groqParseRejected: null,
       };
     }
+    groqParseRejected = diagnoseGraphLayoutParse(groqRaw.text, expectedNodeIds, parseOptions);
+  } else {
+    groqParseRejected = diagnoseGraphLayoutParse(undefined, expectedNodeIds, parseOptions);
   }
   const geminiRaw = await scoreWithGemini(prompt, GEMINI_MODEL_ASSIST, input.maxOutputTokens);
-  if (!geminiRaw) return { result: null, usage: null };
-  const parsed = parseGraphLayoutJson(geminiRaw.text, expectedNodeIds);
-  if (!parsed) return { result: null, usage: geminiRaw.usage };
+  if (!geminiRaw) return { result: null, usage: null, groqParseRejected };
+  const parsed = parseGraphLayoutJson(geminiRaw.text, expectedNodeIds, parseOptions);
+  if (!parsed) return { result: null, usage: geminiRaw.usage, groqParseRejected };
   return {
     result: {
       ...parsed,
@@ -926,6 +1106,283 @@ export async function proposeGraphLayoutWithLlm(input: {
       promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
     },
     usage: geminiRaw.usage,
+    groqParseRejected,
+  };
+}
+
+function buildGraphLayoutRuleFallbackExplanationDe(
+  missingCount: number,
+  lastGroq: GraphLayoutParseDiagnostics | null
+): string {
+  const head = `${missingCount} Knoten: Regel-Layout, weil dafür keine gültige LLM-Position übernommen wurde.`;
+  const tail = lastGroq?.summaryDe ? ` Letzter Groq-Parser: ${lastGroq.summaryDe}` : "";
+  return (head + tail).slice(0, 480);
+}
+
+export type GraphLayoutGroqPipelineStep = {
+  phase: "full" | "supplement";
+  supplementRound: number;
+  expectedNodeIds: string[];
+  groqTextLength: number;
+  /** Anfang der Rohantwort (nur Diagnose; nicht in Produktion loggen ohne Redaktion) */
+  groqTextPreview: string;
+  usage: LlmUsage | null;
+  parse: GraphLayoutParseDiagnostics;
+};
+
+export type GraphLayoutGroqPipelineReport = {
+  model: string;
+  steps: GraphLayoutGroqPipelineStep[];
+  mergedNodeIds: string[];
+  missingNodeIds: string[];
+  summaryDe: string;
+};
+
+/**
+ * Nur Groq (kein Gemini): gleiche Batch-Logik wie {@link proposeGraphLayoutWithLlm}, aber
+ * pro Schritt Rohantwort + Parser-Diagnose — für Tests und Root-Cause (warum fehlen IDs).
+ */
+export async function diagnoseGraphLayoutGroqPipeline(
+  input: GraphLayoutLlmInput
+): Promise<GraphLayoutGroqPipelineReport> {
+  const expectedNodeIds = input.nodes.map((node) => node.id);
+  if (expectedNodeIds.length === 0) {
+    return {
+      model: GROQ_MODEL,
+      steps: [],
+      mergedNodeIds: [],
+      missingNodeIds: [],
+      summaryDe: "Keine Knoten übergeben.",
+    };
+  }
+
+  const nodeById = new Map(input.nodes.map((node) => [node.id, node]));
+  const edgeList = input.edges;
+  const merged = new Map<string, LlmGraphLayoutNode>();
+  const steps: GraphLayoutGroqPipelineStep[] = [];
+
+  const promptFull = buildGraphLayoutPrompt(input);
+  const groqFull = await scoreWithGroq(promptFull, GROQ_MODEL, input.maxOutputTokens);
+  const parseFull = diagnoseGraphLayoutParse(groqFull?.text, expectedNodeIds, { minimumCoverageRatio: 0.5 });
+  steps.push({
+    phase: "full",
+    supplementRound: 0,
+    expectedNodeIds: [...expectedNodeIds],
+    groqTextLength: groqFull?.text?.length ?? 0,
+    groqTextPreview: (groqFull?.text ?? "").slice(0, 1200),
+    usage: groqFull?.usage ?? null,
+    parse: parseFull,
+  });
+  const parsedFull = parseGraphLayoutJson(groqFull?.text ?? "", expectedNodeIds, { minimumCoverageRatio: 0.5 });
+  if (parsedFull) {
+    for (const node of parsedFull.nodes) merged.set(node.id, node);
+  }
+
+  const giveUp = new Set<string>();
+  let chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+  let supplementRounds = 0;
+
+  while (supplementRounds < GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS) {
+    const missing = expectedNodeIds.filter((id) => !merged.has(id) && !giveUp.has(id));
+    if (missing.length === 0) break;
+
+    const chunk = missing.slice(0, chunkCap);
+    const chunkSet = new Set(chunk);
+    const chunkNodes = chunk
+      .map((id) => nodeById.get(id))
+      .filter((n): n is GraphLayoutLlmInput["nodes"][number] => n != null);
+    if (chunkNodes.length === 0) break;
+
+    const chunkEdges = edgeList.filter((edge) => chunkSet.has(edge.source) && chunkSet.has(edge.target));
+    const ratio = 1 / Math.max(chunk.length, 1);
+    const promptSub = buildGraphLayoutPrompt({
+      nodes: chunkNodes,
+      edges: chunkEdges,
+      strategyReferenceText: input.strategyReferenceText,
+    });
+    const groqSub = await scoreWithGroq(promptSub, GROQ_MODEL, input.maxOutputTokens);
+    const parseSub = diagnoseGraphLayoutParse(groqSub?.text, chunk, { minimumCoverageRatio: ratio });
+    steps.push({
+      phase: "supplement",
+      supplementRound: supplementRounds + 1,
+      expectedNodeIds: [...chunk],
+      groqTextLength: groqSub?.text?.length ?? 0,
+      groqTextPreview: (groqSub?.text ?? "").slice(0, 1200),
+      usage: groqSub?.usage ?? null,
+      parse: parseSub,
+    });
+
+    const before = merged.size;
+    const parsedSub = parseGraphLayoutJson(groqSub?.text ?? "", chunk, { minimumCoverageRatio: ratio });
+    if (parsedSub) {
+      for (const node of parsedSub.nodes) merged.set(node.id, node);
+    }
+    supplementRounds += 1;
+
+    const gained = merged.size > before;
+    if (gained) {
+      chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+    } else if (chunkCap > 1) {
+      chunkCap = Math.max(1, Math.floor(chunkCap / 2));
+    } else {
+      giveUp.add(chunk[0]);
+      chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+    }
+  }
+
+  const mergedNodeIds = expectedNodeIds.filter((id) => merged.has(id));
+  const missingNodeIds = expectedNodeIds.filter((id) => !merged.has(id));
+  const lastFail = [...steps].reverse().find((s) => !s.parse.accepted);
+  const summaryDe =
+    missingNodeIds.length === 0
+      ? `Groq-only: alle ${mergedNodeIds.length} Knoten nach ${steps.length} Schritt(en) parsebar.`
+      : `Groq-only: ${missingNodeIds.length} Knoten ohne Position. ${lastFail ? lastFail.parse.summaryDe : ""}`.slice(
+          0,
+          600
+        );
+
+  return {
+    model: GROQ_MODEL,
+    steps,
+    mergedNodeIds,
+    missingNodeIds,
+    summaryDe,
+  };
+}
+
+/**
+ * Erster Aufruf mit vollem Graph (50 %-Parser-Schwelle), danach Supplement-Batches
+ * für fehlende IDs (1/Knoten Mindestabdeckung), damit unvollständige Groq-JSON-Antworten
+ * nicht dauerhaft auf Rule-Fallback verweisen.
+ */
+export async function proposeGraphLayoutWithLlm(
+  input: GraphLayoutLlmInput
+): Promise<
+  LlmScoreResponse<LlmGraphLayout> & {
+    graphLayoutDiagnostics?: GraphLayoutLlmMergeDiagnostics;
+  }
+> {
+  if (input.nodes.length === 0) return { result: null, usage: null };
+  const expectedNodeIds = input.nodes.map((node) => node.id);
+  const nodeById = new Map(input.nodes.map((node) => [node.id, node]));
+  const edgeList = input.edges;
+
+  const merged = new Map<string, LlmGraphLayoutNode>();
+  const usages: LlmUsage[] = [];
+  const reasoningParts: string[] = [];
+
+  let lastGroqParseRejected: GraphLayoutParseDiagnostics | null = null;
+
+  const fullPass = await proposeGraphLayoutWithLlmOnce(input, { minimumCoverageRatio: 0.5 });
+  if (fullPass.groqParseRejected) lastGroqParseRejected = fullPass.groqParseRejected;
+  if (fullPass.usage) usages.push(fullPass.usage);
+  if (fullPass.result) {
+    for (const node of fullPass.result.nodes) merged.set(node.id, node);
+    if (fullPass.result.globalReasoning) reasoningParts.push(fullPass.result.globalReasoning);
+  }
+
+  let layoutVersion = fullPass.result?.layoutVersion ?? GRAPH_LAYOUT_PROMPT_VERSION;
+  let primaryProvider: LlmGraphLayout["provider"] | null = fullPass.result?.provider ?? null;
+  let primaryModel: string | null = fullPass.result?.model ?? null;
+
+  const giveUp = new Set<string>();
+  let chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+  let supplementRounds = 0;
+
+  while (supplementRounds < GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS) {
+    const missing = expectedNodeIds.filter((id) => !merged.has(id) && !giveUp.has(id));
+    if (missing.length === 0) break;
+
+    const chunk = missing.slice(0, chunkCap);
+    const chunkSet = new Set(chunk);
+    const chunkNodes = chunk
+      .map((id) => nodeById.get(id))
+      .filter((n): n is GraphLayoutLlmInput["nodes"][number] => n != null);
+    if (chunkNodes.length === 0) break;
+
+    const chunkEdges = edgeList.filter((edge) => chunkSet.has(edge.source) && chunkSet.has(edge.target));
+    const ratio = 1 / Math.max(chunk.length, 1);
+
+    const before = merged.size;
+    const subRes = await proposeGraphLayoutWithLlmOnce(
+      {
+        nodes: chunkNodes,
+        edges: chunkEdges,
+        strategyReferenceText: input.strategyReferenceText,
+        maxOutputTokens: input.maxOutputTokens,
+      },
+      { minimumCoverageRatio: ratio }
+    );
+    supplementRounds += 1;
+    if (subRes.groqParseRejected) lastGroqParseRejected = subRes.groqParseRejected;
+    if (subRes.usage) usages.push(subRes.usage);
+
+    if (subRes.result) {
+      for (const node of subRes.result.nodes) merged.set(node.id, node);
+      if (subRes.result.globalReasoning) reasoningParts.push(subRes.result.globalReasoning);
+      if (!primaryProvider) {
+        primaryProvider = subRes.result.provider;
+        primaryModel = subRes.result.model;
+      }
+      layoutVersion = subRes.result.layoutVersion || layoutVersion;
+    }
+
+    const gained = merged.size > before;
+    if (gained) {
+      chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+    } else if (chunkCap > 1) {
+      chunkCap = Math.max(1, Math.floor(chunkCap / 2));
+    } else {
+      giveUp.add(chunk[0]);
+      chunkCap = Math.max(1, Math.min(GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE, expectedNodeIds.length));
+    }
+  }
+
+  const missingNodeIds = expectedNodeIds.filter((id) => !merged.has(id));
+  const graphLayoutDiagnostics: GraphLayoutLlmMergeDiagnostics | undefined =
+    missingNodeIds.length > 0
+      ? {
+          missingNodeIds,
+          ruleFallbackExplanationDe: buildGraphLayoutRuleFallbackExplanationDe(
+            missingNodeIds.length,
+            lastGroqParseRejected
+          ),
+          lastGroqParseRejected,
+        }
+      : undefined;
+
+  if (merged.size === 0) {
+    return {
+      result: null,
+      usage: aggregateGraphLayoutUsages(usages),
+      graphLayoutDiagnostics:
+        graphLayoutDiagnostics ??
+        ({
+          missingNodeIds: [...expectedNodeIds],
+          ruleFallbackExplanationDe: buildGraphLayoutRuleFallbackExplanationDe(
+            expectedNodeIds.length,
+            lastGroqParseRejected
+          ),
+          lastGroqParseRejected,
+        } satisfies GraphLayoutLlmMergeDiagnostics),
+    };
+  }
+
+  const orderedNodes = expectedNodeIds
+    .map((id) => merged.get(id))
+    .filter((node): node is LlmGraphLayoutNode => Boolean(node));
+
+  return {
+    result: {
+      layoutVersion,
+      nodes: orderedNodes,
+      globalReasoning: reasoningParts.filter(Boolean).join(" | ").slice(0, 300),
+      provider: primaryProvider ?? "groq",
+      model: primaryModel ?? GROQ_MODEL,
+      promptVersion: GRAPH_LAYOUT_PROMPT_VERSION,
+    },
+    usage: aggregateGraphLayoutUsages(usages),
+    graphLayoutDiagnostics,
   };
 }
 

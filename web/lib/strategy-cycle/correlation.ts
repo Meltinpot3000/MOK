@@ -124,10 +124,13 @@ export function computeStrategicDesignCorrelationSummary(input: {
   challengeDirectionLinks: ChallengeDirectionLinkInput[];
   directionObjectiveLinks: DirectionObjectiveLinkInput[];
   overrides: CorrelationOverrideInput[];
+  /** Optional: alle einer Herausforderung zugeordneten Analyse-Einträge (Union der Cluster-Zuordnung). */
+  analysisEntryIdsByChallengeId?: Map<string, string[]>;
 }): CorrelationSummaryResult {
   const challenges = [...(input.challenges ?? [])].sort((a, b) => a.title.localeCompare(b.title, "de"));
   const objectives = [...(input.objectives ?? [])].sort((a, b) => a.title.localeCompare(b.title, "de"));
   const directionsById = new Map((input.directions ?? []).map((row) => [row.id, row] as const));
+  const analysisEntryIdsByChallengeId = input.analysisEntryIdsByChallengeId ?? new Map<string, string[]>();
 
   const clusterIdsByEntryId = new Map<string, Set<string>>();
   for (const member of input.clusterMembers ?? []) {
@@ -178,9 +181,21 @@ export function computeStrategicDesignCorrelationSummary(input: {
 
   for (const challenge of challenges) {
     const challengeNorm = normalizeScore1to5(challenge.challenge_score);
-    const challengeClusterIds = challenge.source_analysis_entry_id
-      ? [...(clusterIdsByEntryId.get(challenge.source_analysis_entry_id) ?? new Set<string>())]
-      : [];
+    const entryIdsForChallenge = new Set<string>();
+    const fromMap = analysisEntryIdsByChallengeId.get(challenge.id) ?? [];
+    for (const eid of fromMap) {
+      if (eid) entryIdsForChallenge.add(String(eid));
+    }
+    if (challenge.source_analysis_entry_id) {
+      entryIdsForChallenge.add(String(challenge.source_analysis_entry_id));
+    }
+    const challengeClusterIdSet = new Set<string>();
+    for (const eid of entryIdsForChallenge) {
+      for (const cid of clusterIdsByEntryId.get(eid) ?? []) {
+        challengeClusterIdSet.add(cid);
+      }
+    }
+    const challengeClusterIds = [...challengeClusterIdSet];
     const challengeDirectionIds = directionIdsByChallengeId.get(challenge.id) ?? new Set<string>();
 
     for (const objective of objectives) {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { KPI_ACCENTS } from "@/components/ceo/KpiCards";
 import type { StrategicDesignKpis } from "@/lib/strategy-cycle/strategic-design-insights";
 import type { AnalysisEntryOverviewStats } from "@/lib/strategy-cycle/analysis-entry-overview";
 
@@ -35,6 +36,11 @@ function scoreNum(v: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function overviewTileClass(accentIndex: number) {
+  const accent = KPI_ACCENTS[accentIndex % KPI_ACCENTS.length];
+  return `relative flex min-h-[10.5rem] flex-col overflow-hidden rounded-2xl bg-gradient-to-br p-4 text-left shadow-md ring-1 sm:min-h-[11rem] xl:aspect-square xl:min-h-0 ${accent}`;
+}
+
 export function StrategyCycleOverview({
   analysisEntrySummary,
   counts,
@@ -47,64 +53,83 @@ export function StrategyCycleOverview({
 }: StrategyCycleOverviewProps) {
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <article
-          className="brand-card p-4 sm:col-span-2 xl:col-span-2"
+          className={overviewTileClass(0)}
           title={
-            "Qualitätsband nach Bewertung (Score oder Regel). „In Herausforderungen“: Eintrag ist Quelle einer " +
-            "strategischen Herausforderung und/oder gehört zu einem Cluster, der bereits in eine Herausforderung " +
-            "übernommen wurde."
+            "Direkt: Analyse-Eintrag ist Quelle einer Herausforderung (übernommen oder nachträglich zugeordnet). " +
+            "Zusätzlich können Einträge über einen bereits übernommenen Analyse-Cluster einbezogen sein. " +
+            "Qualität: Bewertungsband (Score oder Regel)."
           }
         >
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Analyse-Einträge</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{analysisEntrySummary.total}</p>
-          <p className="mt-1 text-[11px] leading-snug text-zinc-600">
-            {analysisEntrySummary.qualityHigh} hoch · {analysisEntrySummary.qualityMedium} mittel ·{" "}
-            {analysisEntrySummary.qualityLow} niedrig
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Analyse-Einträge</p>
+          <p className="mt-2 flex flex-wrap items-baseline gap-1.5 tabular-nums">
+            <span className="text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
+              {analysisEntrySummary.directEntryCount}
+            </span>
+            <span className="text-base font-medium text-zinc-400">/</span>
+            <span className="text-xl font-semibold text-zinc-700 sm:text-2xl">{analysisEntrySummary.total}</span>
           </p>
-          <p className="mt-1 text-[11px] leading-snug text-zinc-600">
-            {analysisEntrySummary.inChallengesUnique} in Herausforderungen · {analysisEntrySummary.onlyAnalysis} nur
-            Analyse
+          <p className="mt-1 text-[10px] font-medium leading-snug text-zinc-700">
+            mit Herausforderung verknüpft (direkte Quelle)
           </p>
-          {analysisEntrySummary.inChallengesUnique > 0 ? (
-            <p className="mt-1 text-[10px] leading-snug text-zinc-500">
-              davon {analysisEntrySummary.directOnlyEntryCount} nur direkt · {analysisEntrySummary.clusterOnlyEntryCount}{" "}
-              nur über Cluster · {analysisEntrySummary.bothDirectAndClusterCount} in beiden Pfaden
-            </p>
-          ) : null}
-          <p className="mt-2 text-[11px]">
+          <p className="mt-2 text-[10px] leading-snug text-zinc-600">
+            {analysisEntrySummary.inChallengesUnique} von {analysisEntrySummary.total} Einträgen in Herausforderungen
+            einbezogen
+            {analysisEntrySummary.clusterOnlyEntryCount > 0
+              ? ` (${analysisEntrySummary.clusterOnlyEntryCount} nur über übernommenen Cluster)`
+              : ""}
+            {analysisEntrySummary.bothDirectAndClusterCount > 0
+              ? ` · ${analysisEntrySummary.bothDirectAndClusterCount} direkt und im Cluster`
+              : ""}
+          </p>
+          <p className="mt-1 text-[10px] leading-snug text-zinc-500">
+            Qualität: {analysisEntrySummary.qualityHigh} hoch · {analysisEntrySummary.qualityMedium} mittel ·{" "}
+            {analysisEntrySummary.qualityLow} niedrig · {analysisEntrySummary.onlyAnalysis} ohne Herausforderungs-Bezug
+          </p>
+          <p className="mt-auto pt-2">
             <Link
               href={corporateStrategySummaryHref}
-              className="font-medium text-zinc-800 underline underline-offset-2 hover:text-zinc-950"
+              className="text-[10px] font-semibold text-zinc-800 underline underline-offset-2 hover:text-zinc-950"
             >
               Zur Zusammenfassung
             </Link>
           </p>
         </article>
-        <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Herausforderungen</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{counts.challenges}</p>
-          <p className="mt-1 text-xs text-zinc-500">strategisch</p>
+        <article className={overviewTileClass(1)} title="Strategische Herausforderungen im Zyklus">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Herausforderungen</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
+            {counts.challenges}
+          </p>
+          <p className="mt-auto text-[10px] leading-snug text-zinc-600">strategisch im Zyklus</p>
         </article>
-        <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Stoßrichtungen</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{counts.directions}</p>
-          <p className="mt-1 text-xs text-zinc-500">im Zyklus</p>
+        <article className={overviewTileClass(2)} title="Strategische Stoßrichtungen">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Stoßrichtungen</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
+            {counts.directions}
+          </p>
+          <p className="mt-auto text-[10px] leading-snug text-zinc-600">im Zyklus</p>
         </article>
-        <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategische Ziele</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{counts.objectives}</p>
-          <p className="mt-1 text-xs text-zinc-500">im Strategiezyklus</p>
+        <article className={overviewTileClass(3)} title="Strategische Ziele (nicht OKR-Objectives)">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Strategische Ziele</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
+            {counts.objectives}
+          </p>
+          <p className="mt-auto text-[10px] leading-snug text-zinc-600">im Strategiezyklus</p>
         </article>
-        <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Programme</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{counts.programs}</p>
-          <p className="mt-1 text-xs text-zinc-500">PIPs</p>
+        <article className={overviewTileClass(4)} title="Programme (PIP)">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Programme</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
+            {counts.programs}
+          </p>
+          <p className="mt-auto text-[10px] leading-snug text-zinc-600">PIPs</p>
         </article>
-        <article className="brand-card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Initiativen</p>
-          <p className="mt-2 text-2xl font-semibold text-zinc-900">{counts.initiatives}</p>
-          <p className="mt-1 text-xs text-zinc-500">PIPs</p>
+        <article className={overviewTileClass(5)} title="Initiativen (PIP)">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">Initiativen</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
+            {counts.initiatives}
+          </p>
+          <p className="mt-auto text-[10px] leading-snug text-zinc-600">PIPs</p>
         </article>
       </section>
 

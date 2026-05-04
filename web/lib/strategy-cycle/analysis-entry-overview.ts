@@ -47,7 +47,9 @@ export function buildAnalysisEntryOverviewStats(
   entries: AnalysisEntry[],
   challenges: ChallengeEntrySource[],
   promotedClusterIds: Set<string>,
-  clusterMembersByClusterId: Map<string, Array<{ entry_id: string }>>
+  clusterMembersByClusterId: Map<string, Array<{ entry_id: string }>>,
+  /** Alle Analyse-Einträge, die per Verknüpfungstabelle einer Herausforderung zugeordnet sind (kann mit source_analysis_entry_id überlappen). */
+  extraLinkedAnalysisEntryIds?: Set<string>
 ): AnalysisEntryOverviewStats {
   const total = entries.length;
   let qualityHigh = 0;
@@ -64,6 +66,9 @@ export function buildAnalysisEntryOverviewStats(
   for (const ch of challenges) {
     const sid = ch.source_analysis_entry_id;
     if (sid && String(sid).trim() !== "") directSet.add(String(sid));
+  }
+  for (const id of extraLinkedAnalysisEntryIds ?? []) {
+    if (id && String(id).trim() !== "") directSet.add(String(id));
   }
 
   const clusterSet = new Set<string>();

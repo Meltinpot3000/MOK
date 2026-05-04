@@ -87,6 +87,7 @@ export async function getStrategyCycleWorkspaceData(
     directionObjectiveLinksResult,
     challengeIndustriesResult,
     challengeBusinessModelsResult,
+    challengeAnalysisEntriesResult,
     directionIndustriesResult,
     directionBusinessModelsResult,
     directionOperatingModelsResult,
@@ -190,6 +191,12 @@ export async function getStrategyCycleWorkspaceData(
       .schema("app")
       .from("strategic_challenge_business_models")
       .select("strategic_challenge_id, business_model_id")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .select("strategic_challenge_id, analysis_entry_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
@@ -350,6 +357,12 @@ export async function getStrategyCycleWorkspaceData(
       promotedBySourceId.set(challenge.source_analysis_entry_id, challenge.id);
     }
   }
+  for (const row of challengeAnalysisEntriesResult.data ?? []) {
+    const r = row as { strategic_challenge_id: string; analysis_entry_id: string };
+    if (r.analysis_entry_id && r.strategic_challenge_id) {
+      promotedBySourceId.set(r.analysis_entry_id, r.strategic_challenge_id);
+    }
+  }
   const { data: promotedClusters, error: promotedClustersError } = await supabase
     .schema("app")
     .from("strategic_challenges")
@@ -387,6 +400,13 @@ export async function getStrategyCycleWorkspaceData(
     const current = challengeIdsBySourceEntryId.get(challenge.source_analysis_entry_id) ?? [];
     current.push(challenge.id);
     challengeIdsBySourceEntryId.set(challenge.source_analysis_entry_id, current);
+  }
+  for (const row of challengeAnalysisEntriesResult.data ?? []) {
+    const r = row as { strategic_challenge_id: string; analysis_entry_id: string };
+    if (!r.analysis_entry_id) continue;
+    const current = challengeIdsBySourceEntryId.get(r.analysis_entry_id) ?? [];
+    if (!current.includes(r.strategic_challenge_id)) current.push(r.strategic_challenge_id);
+    challengeIdsBySourceEntryId.set(r.analysis_entry_id, current);
   }
   const directionIdsByChallengeId = new Map<string, string[]>();
   for (const link of challengeDirectionLinksResult.data ?? []) {
@@ -893,6 +913,10 @@ export async function getStrategyCycleWorkspaceData(
     directionBusinessModels: directionBusinessModelsResult.data ?? [],
     challengeIndustries: challengeIndustriesResult.data ?? [],
     challengeBusinessModels: challengeBusinessModelsResult.data ?? [],
+    challengeAnalysisEntries: (challengeAnalysisEntriesResult.data ?? []) as Array<{
+      strategic_challenge_id: string;
+      analysis_entry_id: string;
+    }>,
     initiativeTargetLinks,
     manualClusterPositionsByEntryId,
     challengeCandidates: challengeCandidatesResult.data ?? [],

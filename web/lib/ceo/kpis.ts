@@ -5,10 +5,15 @@ export type KpiCard = {
 };
 
 type BuildKpisInput = {
-  objectives: Array<{ progress_percent: number; status: string }>;
-  keyResults: Array<{ status: string }>;
+  okrObjectives: Array<{ status: string; progress_percent: number }>;
+  /** Abweichung vom Plan: Objectives (Rollup-Status wackelig/kritisch). */
+  atRiskObjectiveCount: number;
+  /** Abweichung vom Plan: Key Results (Review-Status wackelig/kritisch). */
+  atRiskKeyResultCount: number;
   okrObjectiveCount: number;
   trendDeltaPercent: number | null;
+  okrAssigneeCount: number;
+  activeMemberCount: number;
 };
 
 function formatPercent(value: number): string {
@@ -20,47 +25,53 @@ function formatPercent(value: number): string {
 }
 
 export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
-  const { objectives, keyResults, okrObjectiveCount, trendDeltaPercent } = input;
-  const objectiveCount = objectives.length;
+  const okrObjectivesSafe = input.okrObjectives ?? [];
+  const {
+    atRiskObjectiveCount,
+    atRiskKeyResultCount,
+    okrObjectiveCount,
+    trendDeltaPercent,
+    okrAssigneeCount,
+    activeMemberCount,
+  } = input;
+  const objectiveCount = okrObjectivesSafe.length;
 
-  const totalProgress = objectives.reduce(
+  const totalProgress = okrObjectivesSafe.reduce(
     (sum, objective) => sum + Number(objective.progress_percent || 0),
     0
   );
   const overallProgress = objectiveCount > 0 ? totalProgress / objectiveCount : 0;
 
-  const completedObjectives = objectives.filter(
+  const completedObjectives = okrObjectivesSafe.filter(
     (objective) => objective.status === "completed"
   ).length;
   const completionRate =
     objectiveCount > 0 ? (completedObjectives / objectiveCount) * 100 : 0;
 
-  const atRiskObjectives = objectives.filter(
-    (objective) => objective.status === "at_risk"
-  ).length;
-  const atRiskKeyResults = keyResults.filter((keyResult) => keyResult.status === "at_risk").length;
-  const atRiskTotal = atRiskObjectives + atRiskKeyResults;
+  const atRiskTotal = atRiskObjectiveCount + atRiskKeyResultCount;
 
   const trendText =
     trendDeltaPercent === null
       ? "N/A"
       : `${trendDeltaPercent >= 0 ? "+" : ""}${Math.round(trendDeltaPercent)} pp`;
 
+  const withoutOkrObjectiveCount = Math.max(0, activeMemberCount - okrAssigneeCount);
+
   return [
     {
-      label: "Gesamtfortschritt Objectives",
+      label: "Gesamtfortschritt OKR",
       value: formatPercent(overallProgress),
-      hint: `${objectiveCount} Objectives im Zyklus`,
+      hint: `Durchschnitt Rollup wie OKR-Übersicht · ${objectiveCount} OKR-Objectives`,
     },
     {
-      label: "At-Risk Count",
+      label: "Abweichung vom Plan",
       value: String(atRiskTotal),
-      hint: `${atRiskObjectives} Objectives, ${atRiskKeyResults} Key Results`,
+      hint: `${atRiskObjectiveCount} OKR-Objectives, ${atRiskKeyResultCount} Key Results (wackelig/kritisch)`,
     },
     {
       label: "Abschlussquote",
       value: formatPercent(completionRate),
-      hint: `${completedObjectives} von ${objectiveCount} Objectives abgeschlossen`,
+      hint: `${completedObjectives} von ${objectiveCount} OKR-Objectives abgeschlossen`,
     },
     {
       label: "OKR-Ziele (Quartal)",
@@ -71,9 +82,14 @@ export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
           : `${okrObjectiveCount} OKR-Objectives im Zyklus`,
     },
     {
-      label: "Trend vs. vorheriger Zyklus",
+      label: "Trend zum vorherigen Zyklus",
       value: trendText,
-      hint: "Vergleich Durchschnittsfortschritt Objectives",
+      hint: "Vergleich Durchschnitts-Rollup wie OKR-Übersicht",
+    },
+    {
+      label: "Personen mit OKR-Objective",
+      value: `${okrAssigneeCount} / ${activeMemberCount}`,
+      hint: `${withoutOkrObjectiveCount} aktive Mitglieder ohne OKR-Objective`,
     },
   ];
 }

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { PlanningCycle, TenantBranding } from "@/lib/ceo/queries";
 import {
-  SIDEBAR_ITEMS,
   isSidebarNavItemActive,
+  type SidebarItem,
   type SidebarPermissionMap,
 } from "@/lib/sidebar-access";
 import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
@@ -16,6 +16,14 @@ type CycleSidebarProps = {
   branding: TenantBranding | null;
   productName: string;
   permissions: SidebarPermissionMap;
+  /** Vom Server serialisiert — identisch mit SSR-Markup, keine Client-Neufilterung der Nav-Reihenfolge. */
+  topNavItems: SidebarItem[];
+  /** Offene Aufgaben + Entwurfs-OKRs für «Meine Aufgaben (n)». */
+  myTasksOpenCount: number;
+  phase1NavItems: SidebarItem[];
+  phase0NavItems: SidebarItem[];
+  cycleNavItems: SidebarItem[];
+  adminNavItems: SidebarItem[];
   nowIso: string;
   /** Erste Zeile: voller Name oder E-Mail */
   userDisplayLine: string;
@@ -53,6 +61,12 @@ export function CycleSidebar({
   branding,
   productName,
   permissions,
+  topNavItems,
+  myTasksOpenCount,
+  phase1NavItems,
+  phase0NavItems,
+  cycleNavItems,
+  adminNavItems,
   nowIso,
   userDisplayLine,
   userEmail,
@@ -98,25 +112,6 @@ export function CycleSidebar({
       .filter((cycle) => Date.parse(cycle.end_date) <= nowMs)
       .sort((a, b) => Date.parse(b.end_date) - Date.parse(a.end_date))[0] ??
     null;
-  const phase1Items = SIDEBAR_ITEMS.filter(
-    (item) =>
-      item.section === "phase1" &&
-      permissions[item.id].read &&
-      item.id !== "key-figures" &&
-      item.id !== "strategic-directions" &&
-      item.id !== "initiatives" &&
-      item.id !== "annual-targets"
-  );
-  const phase0Items = SIDEBAR_ITEMS.filter(
-    (item) => item.section === "phase0" && permissions[item.id].read
-  );
-  const cycleItems = SIDEBAR_ITEMS.filter(
-    (item) => item.section === "cycles" && permissions[item.id].read
-  );
-  const adminItems = SIDEBAR_ITEMS.filter(
-    (item) => item.section === "admin" && permissions[item.id].read
-  );
-
   const showJobBell = permissions["strategy-cycle"]?.read ?? false;
 
   return (
@@ -175,14 +170,30 @@ export function CycleSidebar({
         ) : null}
       </div>
 
+      {topNavItems.length > 0 ? (
+        <div className="mb-4 space-y-1">
+          {topNavItems.map((item) => (
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
+            >
+              {item.id === "my-tasks"
+                ? `${item.label} (${myTasksOpenCount})`
+                : item.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mb-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
           Strategische Planung
         </p>
         <div className="space-y-1">
-          {phase1Items.map((item) => (
+          {phase1NavItems.map((item) => (
             <Link
-              key={item.href}
+              key={item.id}
               href={item.href}
               className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
             >
@@ -197,7 +208,7 @@ export function CycleSidebar({
           Organisation
         </p>
         <div className="space-y-1">
-          {phase0Items.map((item) => (
+          {phase0NavItems.map((item) => (
             <Link
               key={item.id}
               href={item.href}
@@ -225,7 +236,7 @@ export function CycleSidebar({
           Zyklen
         </p>
         <div className="space-y-1 pb-2">
-          {cycleItems.map((item) => (
+          {cycleNavItems.map((item) => (
             <Link
               key={item.id}
               href={item.href}
@@ -262,7 +273,7 @@ export function CycleSidebar({
           Verwaltung
         </p>
         <div className="space-y-1">
-          {adminItems.map((item) => (
+          {adminNavItems.map((item) => (
             <Link
               key={item.id}
               href={item.href}

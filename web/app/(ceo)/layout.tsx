@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import { redirect } from "next/navigation";
-import { CeoAppShell } from "@/components/ceo/CeoAppShell";
+import { CycleSidebar } from "@/components/ceo/CycleSidebar";
 import { getAppShellAccess } from "@/lib/rbac/page-access";
+import {
+  getVisibleAdminNavItems,
+  getVisibleCyclesNavItems,
+  getVisiblePhase0NavItems,
+  getVisiblePhase1NavItems,
+  getVisibleTopNavItems,
+} from "@/lib/sidebar-access";
+import { getOpenTaskCountForMembership } from "@/lib/tasks/approval-queries";
 import {
   getAuthenticatedUserId,
   getAuthUserSidebarIdentity,
@@ -64,6 +72,15 @@ export default async function CeoLayout({
   const productName = access.organizationName
     ? `${access.organizationName} CITADEL`
     : "CITADEL";
+  const topNavItems = getVisibleTopNavItems(sidebarPermissions);
+  const phase1NavItems = getVisiblePhase1NavItems(sidebarPermissions);
+  const phase0NavItems = getVisiblePhase0NavItems(sidebarPermissions);
+  const cycleNavItems = getVisibleCyclesNavItems(sidebarPermissions);
+  const adminNavItems = getVisibleAdminNavItems(sidebarPermissions);
+  const myTasksOpenCount =
+    topNavItems.length > 0
+      ? await getOpenTaskCountForMembership(access.organizationId, access.membershipId)
+      : 0;
   const brandStyle = {
     "--brand-primary": branding?.primary_color ?? "#1D4ED8",
     "--brand-secondary": branding?.secondary_color ?? "#0F172A",
@@ -71,18 +88,24 @@ export default async function CeoLayout({
   } as CSSProperties;
 
   return (
-    <CeoAppShell
-      brandStyle={brandStyle}
-      cycles={cycles}
-      branding={branding}
-      productName={productName}
-      permissions={sidebarPermissions}
-      nowIso={new Date().toISOString()}
-      userDisplayLine={userDisplayLine}
-      userEmail={sidebarIdentity.email}
-      primaryRoleLabel={primaryRoleLabel}
-    >
-      {children}
-    </CeoAppShell>
+    <div className="brand-shell flex min-h-screen bg-zinc-50" style={brandStyle}>
+      <CycleSidebar
+        cycles={cycles}
+        branding={branding}
+        productName={productName}
+        permissions={sidebarPermissions}
+        topNavItems={topNavItems}
+        myTasksOpenCount={myTasksOpenCount}
+        phase1NavItems={phase1NavItems}
+        phase0NavItems={phase0NavItems}
+        cycleNavItems={cycleNavItems}
+        adminNavItems={adminNavItems}
+        nowIso={new Date().toISOString()}
+        userDisplayLine={userDisplayLine}
+        userEmail={sidebarIdentity.email}
+        primaryRoleLabel={primaryRoleLabel}
+      />
+      <div className="flex-1 p-6">{children}</div>
+    </div>
   );
 }

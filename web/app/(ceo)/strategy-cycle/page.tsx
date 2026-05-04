@@ -38,6 +38,8 @@ import {
   unlinkObjectiveFromBusinessModelInCycle,
   unlinkObjectiveFromIndustryInCycle,
   unlinkStrategicChallengeFromBusinessModelInCycle,
+  linkStrategicChallengeToAnalysisEntryInCycle,
+  unlinkStrategicChallengeFromAnalysisEntryInCycle,
   unlinkStrategicChallengeFromIndustryInCycle,
   unlinkStrategicDirectionFromBusinessModelInCycle,
   unlinkStrategicDirectionFromIndustryInCycle,
@@ -879,6 +881,12 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       status: (o as { status?: string | null }).status ?? null,
     })),
   });
+  const analysisEntryIdsByChallengeId = new Map<string, string[]>();
+  for (const row of workspace.challengeAnalysisEntries ?? []) {
+    const cur = analysisEntryIdsByChallengeId.get(row.strategic_challenge_id) ?? [];
+    if (!cur.includes(row.analysis_entry_id)) cur.push(row.analysis_entry_id);
+    analysisEntryIdsByChallengeId.set(row.strategic_challenge_id, cur);
+  }
   const strategicDesignSummary = computeStrategicDesignCorrelationSummary({
     challenges: workspace.challenges ?? [],
     objectives: workspace.objectives ?? [],
@@ -888,6 +896,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     challengeDirectionLinks: workspace.challengeDirectionLinks ?? [],
     directionObjectiveLinks: workspace.directionObjectiveLinks ?? [],
     overrides: workspace.correlationStatusOverrides ?? [],
+    analysisEntryIdsByChallengeId,
   });
   const strategicDesignInsights = computeStrategicDesignInsights({
     challenges: workspace.challenges ?? [],
@@ -916,12 +925,39 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     overviewKennzParts.length > 0 ? overviewKennzParts.join(" · ") : null;
   const corporateStrategySummaryHref = `/strategy-cycle?l1=corporate-strategy&l2=summary&sort=${sort}&min_score=${minScore}&quality_band=${qualityBandFilter}`;
 
+  const extraLinkedAnalysisEntryIds = new Set(
+    (workspace.challengeAnalysisEntries ?? []).map((r) => r.analysis_entry_id).filter(Boolean)
+  );
   const analysisEntrySummary = buildAnalysisEntryOverviewStats(
     workspace.entries ?? [],
     workspace.challenges ?? [],
     workspace.promotedClusterIds,
-    workspace.clusterMembersByClusterId
+    workspace.clusterMembersByClusterId,
+    extraLinkedAnalysisEntryIds
   );
+
+  const analysisEntryIdsByChallengeRecord: Record<string, string[]> = {};
+  for (const c of workspace.challenges ?? []) {
+    analysisEntryIdsByChallengeRecord[c.id] = [];
+  }
+  for (const row of workspace.challengeAnalysisEntries ?? []) {
+    const cur = analysisEntryIdsByChallengeRecord[row.strategic_challenge_id] ?? [];
+    if (!cur.includes(row.analysis_entry_id)) cur.push(row.analysis_entry_id);
+    analysisEntryIdsByChallengeRecord[row.strategic_challenge_id] = cur;
+  }
+  const challengeIdByAnalysisEntryId: Record<string, string> = {};
+  for (const row of workspace.challengeAnalysisEntries ?? []) {
+    challengeIdByAnalysisEntryId[row.analysis_entry_id] = row.strategic_challenge_id;
+  }
+  for (const ch of workspace.challenges ?? []) {
+    const sid = (ch as { source_analysis_entry_id?: string | null }).source_analysis_entry_id;
+    if (sid && challengeIdByAnalysisEntryId[sid] === undefined) {
+      challengeIdByAnalysisEntryId[sid] = ch.id;
+    }
+  }
+  const analysisEntriesForChallengePills = [...(workspace.entries ?? [])]
+    .map((e) => ({ id: e.id, title: e.title, analysis_type: e.analysis_type }))
+    .sort((a, b) => a.title.localeCompare(b.title, "de"));
 
   return (
     <div className="space-y-6">
@@ -1169,7 +1205,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     
                     Manuell oder unabhaengig von Analyse-Einträgen anlegen und bewerten.
                   </p>
-                  <ChallengeCreateForm action={createStrategicChallengeInCycle} canWrite={canWrite} />
+                  <ChallengeCreateForm
+                    action={createStrategicChallengeInCycle}
+                    canWrite={canWrite}
+                    analysisEntries={analysisEntriesForChallengePills}
+                  />
                 </article>
                 <article className="brand-card p-6">
                   <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
@@ -1180,6 +1220,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       businessModels={workspace.availableDimensions?.businessModels ?? []}
                       industryIdsByChallenge={Object.fromEntries(challengeIndustryIdsById)}
                       businessModelIdsByChallenge={Object.fromEntries(challengeBusinessModelIdsById)}
+                      analysisEntries={analysisEntriesForChallengePills}
+                      analysisEntryIdsByChallenge={analysisEntryIdsByChallengeRecord}
+                      challengeIdByAnalysisEntryId={challengeIdByAnalysisEntryId}
                       directionCountByChallengeId={Object.fromEntries(directionCountByChallengeId)}
                       canWrite={canWrite}
                       actions={{
@@ -1189,6 +1232,8 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                         unlinkStrategicChallengeFromIndustryInCycle,
                         linkStrategicChallengeToBusinessModelInCycle,
                         unlinkStrategicChallengeFromBusinessModelInCycle,
+                        linkStrategicChallengeToAnalysisEntryInCycle,
+                        unlinkStrategicChallengeFromAnalysisEntryInCycle,
                       }}
                     />
                   </div>

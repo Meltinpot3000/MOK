@@ -17,12 +17,22 @@ type Challenge = {
   risk_level: number | null;
 };
 
+type AnalysisEntryOption = {
+  id: string;
+  title: string;
+  analysis_type: string;
+};
+
 type ChallengesTableProps = {
   challenges: Challenge[];
   industries: Array<{ id: string; name: string }>;
   businessModels: Array<{ id: string; name: string }>;
   industryIdsByChallenge: Record<string, string[]>;
   businessModelIdsByChallenge: Record<string, string[]>;
+  analysisEntries: AnalysisEntryOption[];
+  analysisEntryIdsByChallenge: Record<string, string[]>;
+  /** Welcher Analyse-Eintrag ist bereits einer Herausforderung zugeordnet (pro Zyklus höchstens eine). */
+  challengeIdByAnalysisEntryId: Record<string, string>;
   directionCountByChallengeId: Record<string, number>;
   canWrite: boolean;
   actions: {
@@ -38,6 +48,8 @@ type ChallengesTableProps = {
     unlinkStrategicChallengeFromBusinessModelInCycle: (
       formData: FormData
     ) => Promise<void>;
+    linkStrategicChallengeToAnalysisEntryInCycle: (formData: FormData) => Promise<void>;
+    unlinkStrategicChallengeFromAnalysisEntryInCycle: (formData: FormData) => Promise<void>;
   };
 };
 
@@ -56,12 +68,21 @@ function PillSection({
   );
 }
 
+function shortEntryTitle(title: string, max = 40) {
+  const t = title.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
 export function ChallengesTable({
   challenges,
   industries,
   businessModels,
   industryIdsByChallenge,
   businessModelIdsByChallenge,
+  analysisEntries,
+  analysisEntryIdsByChallenge,
+  challengeIdByAnalysisEntryId,
   directionCountByChallengeId,
   canWrite,
   actions,
@@ -184,6 +205,7 @@ export function ChallengesTable({
         const linkedBusinessModelIds = new Set(
           businessModelIdsByChallenge[challenge.id] ?? []
         );
+        const linkedAnalysisEntryIds = new Set(analysisEntryIdsByChallenge[challenge.id] ?? []);
 
         return (
           <div className="space-y-4">
@@ -296,6 +318,34 @@ export function ChallengesTable({
               </button>
               </div>
             </form>
+
+            <PillSection title="Analyse-Einträge">
+              {analysisEntries.map((entry) => {
+                const isLinkedHere = linkedAnalysisEntryIds.has(entry.id);
+                const ownerId = challengeIdByAnalysisEntryId[entry.id];
+                const stealHint =
+                  !isLinkedHere && ownerId && ownerId !== challenge.id
+                    ? "Andere Herausforderung zugeordnet — Klick übernimmt die Verknüpfung hierher."
+                    : `${entry.title} (${entry.analysis_type})`;
+                return (
+                  <EntityPillButton
+                    key={entry.id}
+                    entityKey="strategic_challenge_id"
+                    entityValue={challenge.id}
+                    extraFields={{ analysis_entry_id: entry.id }}
+                    isLinked={isLinkedHere}
+                    linkAction={actions.linkStrategicChallengeToAnalysisEntryInCycle}
+                    unlinkAction={actions.unlinkStrategicChallengeFromAnalysisEntryInCycle}
+                    canWrite={canWrite}
+                    title={stealHint}
+                    linkedClassName={pillLinked()}
+                    unlinkedClassName={pillNeutral()}
+                  >
+                    {shortEntryTitle(entry.title)} ({entry.analysis_type})
+                  </EntityPillButton>
+                );
+              })}
+            </PillSection>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PillSection title="Industrien">

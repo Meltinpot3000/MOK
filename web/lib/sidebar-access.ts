@@ -7,6 +7,7 @@ export type SidebarItemId =
   | "initiatives"
   | "okr-workspace"
   | "reviews"
+  | "my-tasks"
   | "organization"
   | "planning-cycles"
   | "invitations"
@@ -14,7 +15,7 @@ export type SidebarItemId =
   | "access-control"
   | "llm-usage";
 
-export type SidebarSection = "phase1" | "phase0" | "cycles" | "admin";
+export type SidebarSection = "top" | "phase1" | "phase0" | "cycles" | "admin";
 
 export type SidebarItem = {
   id: SidebarItemId;
@@ -32,6 +33,7 @@ export type SidebarPermissionMap = Record<SidebarItemId, SidebarItemPermission>;
 
 export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard", section: "phase1" },
+  { id: "my-tasks", href: "/my-tasks", label: "Meine Aufgaben", section: "top" },
   { id: "key-figures", href: "/key-figures", label: "Kennzahlen", section: "phase1" },
   { id: "strategy-cycle", href: "/strategy-cycle", label: "Strategiezyklus", section: "phase1" },
   { id: "reviews", href: "/reviews", label: "Reviewzyklus", section: "phase1" },
@@ -58,6 +60,39 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
 ];
 
 export const SIDEBAR_ITEM_IDS = SIDEBAR_ITEMS.map((item) => item.id);
+
+/** Oberer Nav-Block (z. B. «Meine Aufgaben»), vor «Strategische Planung». */
+export function getVisibleTopNavItems(permissions: SidebarPermissionMap): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter(
+    (item) => item.section === "top" && Boolean(permissions[item.id]?.read)
+  );
+}
+
+/** Sichtbare Phase-1-Links (Sidebar); serverseitig berechnen und als Prop serialisieren, um Hydration-Mismatches zu vermeiden. */
+export function getVisiblePhase1NavItems(permissions: SidebarPermissionMap): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter(
+    (item) =>
+      item.section === "phase1" &&
+      Boolean(permissions[item.id]?.read) &&
+      item.id !== "my-tasks" &&
+      item.id !== "key-figures" &&
+      item.id !== "strategic-directions" &&
+      item.id !== "initiatives" &&
+      item.id !== "annual-targets"
+  );
+}
+
+export function getVisiblePhase0NavItems(permissions: SidebarPermissionMap): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter((item) => item.section === "phase0" && Boolean(permissions[item.id]?.read));
+}
+
+export function getVisibleCyclesNavItems(permissions: SidebarPermissionMap): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter((item) => item.section === "cycles" && Boolean(permissions[item.id]?.read));
+}
+
+export function getVisibleAdminNavItems(permissions: SidebarPermissionMap): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter((item) => item.section === "admin" && Boolean(permissions[item.id]?.read));
+}
 
 export function getReadPermissionCode(itemId: SidebarItemId): string {
   return `nav.${itemId}.read`;
@@ -95,6 +130,10 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
     return "okr-workspace";
   }
 
+  if (pathname === "/my-tasks" || pathname.startsWith("/my-tasks/")) {
+    return "my-tasks";
+  }
+
   if (
     pathname === "/responsibles" ||
     pathname === "/industries" ||
@@ -126,6 +165,10 @@ export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boo
 
   if (item.id === "okr-workspace") {
     return pathname === "/okr" || pathname.startsWith("/okr/");
+  }
+
+  if (item.id === "my-tasks") {
+    return pathname === "/my-tasks" || pathname.startsWith("/my-tasks/");
   }
 
   if (item.id === "organization") {

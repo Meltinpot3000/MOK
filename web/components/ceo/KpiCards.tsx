@@ -6,7 +6,8 @@ type KpiCardsProps = {
   layout?: "default" | "aside";
 };
 
-const KPI_ACCENTS = [
+/** Gleiche Verlauf-Akzente wie im CEO-Dashboard; für andere Übersichtskacheln wiederverwendbar. */
+export const KPI_ACCENTS = [
   "from-violet-500/15 to-fuchsia-500/10 ring-violet-200/60",
   "from-sky-500/15 to-cyan-500/10 ring-sky-200/60",
   "from-emerald-500/12 to-amber-500/10 ring-emerald-200/50",

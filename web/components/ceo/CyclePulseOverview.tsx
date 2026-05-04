@@ -113,6 +113,8 @@ export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: Cycle
   const okrSegmentDeg = 360 / okrSegmentCount;
   const okrActiveStart = Math.max(0, activeOkrSegmentIndex) * okrSegmentDeg;
   const okrActiveEnd = okrActiveStart + okrSegmentDeg;
+  const okrActiveProgressEnd =
+    okrActiveStart + okrSegmentDeg * (Math.max(0, Math.min(100, levels[2].progressPercent)) / 100);
 
   const header = (
     <div
@@ -122,8 +124,8 @@ export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: Cycle
           "linear-gradient(90deg, var(--brand-accent) 0%, color-mix(in srgb, var(--brand-accent) 72%, white) 100%)",
       }}
     >
-      <p className="text-xs font-semibold uppercase tracking-wide text-white/80">Cycle Map</p>
-      <h2 className="mt-2 text-xl font-semibold">Zyklusdarstellung ueber alle Ebenen</h2>
+      <p className="text-xs font-semibold uppercase tracking-wide text-white/80">Zykluskarte</p>
+      <h2 className="mt-2 text-xl font-semibold">Zyklusdarstellung über alle Ebenen</h2>
       <p className="mt-1 text-sm text-white/80">
         Schema: {activeSchemeName} | Stand: {formatDate(nowIso)}
       </p>
@@ -173,8 +175,9 @@ export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: Cycle
             style={{
               backgroundImage: [
                 `repeating-conic-gradient(from -90deg, transparent 0deg ${okrSegmentDeg - 1}deg, rgba(255,255,255,0.9) ${okrSegmentDeg - 1}deg ${okrSegmentDeg}deg)`,
-                `conic-gradient(from -90deg, transparent ${okrActiveStart}deg, var(--brand-accent) ${okrActiveStart}deg ${okrActiveEnd}deg, transparent ${okrActiveEnd}deg 360deg)`,
-                `conic-gradient(var(--brand-accent) ${Math.round(levels[2].progressPercent)}%, color-mix(in srgb, var(--brand-accent) 20%, white) ${Math.round(levels[2].progressPercent)}% 100%)`,
+                `conic-gradient(from -90deg, transparent ${okrActiveStart}deg, color-mix(in srgb, var(--brand-accent) 40%, white) ${okrActiveStart}deg ${okrActiveEnd}deg, transparent ${okrActiveEnd}deg 360deg)`,
+                `conic-gradient(from -90deg, transparent ${okrActiveStart}deg, var(--brand-accent) ${okrActiveStart}deg ${okrActiveProgressEnd}deg, transparent ${okrActiveProgressEnd}deg 360deg)`,
+                "conic-gradient(color-mix(in srgb, var(--brand-accent) 18%, white) 0deg 360deg)",
               ].join(", "),
             }}
           >
@@ -184,6 +187,9 @@ export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: Cycle
             >
               <p className="text-lg font-semibold text-zinc-900">OKR Zyklus</p>
               <p className="mt-1 text-sm font-medium text-zinc-800">{Math.round(levels[2].progressPercent)}%</p>
+              <p className="mt-1 max-w-[155px] text-[10px] leading-tight text-zinc-600">
+                Zeitfortschritt des aktuell laufenden OKR-Zyklus
+              </p>
               {levels[2].cycle ? (
                 <p className="mt-2 max-w-[150px] text-[11px] leading-tight text-zinc-700">
                   {formatDate(levels[2].cycle.start_date)} - {formatDate(levels[2].cycle.end_date)}
@@ -191,7 +197,7 @@ export function CyclePulseOverview({ cycles, nowIso, fillHeight = false }: Cycle
               ) : null}
             </div>
           </div>
-        </div>
+    </div>
   );
 
   if (fillHeight) {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { KpiCards } from "@/components/ceo/KpiCards";
 import { CyclePulseOverview } from "@/components/ceo/CyclePulseOverview";
+import { DashboardTopLists } from "@/components/ceo/DashboardTopLists";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getAuthenticatedUserId, getCeoDashboardData } from "@/lib/ceo/queries";
 import { getStrategyCycleWorkspaceData } from "@/lib/strategy-cycle/queries";
@@ -62,6 +63,40 @@ export default async function CeoDashboardPage() {
     .slice(0, 5);
   const linkedChallengeIds = new Set((strategyWorkspace.challengeDirectionLinks ?? []).map((link) => link.strategic_challenge_id));
   const uncoveredChallenges = (strategyWorkspace.challenges ?? []).filter((challenge) => !linkedChallengeIds.has(challenge.id));
+  const challengeById = new Map((strategyWorkspace.challenges ?? []).map((challenge) => [challenge.id, challenge]));
+  const directionById = new Map(
+    (strategyWorkspace.strategicDirections ?? []).map((direction) => [direction.id, direction])
+  );
+  const analysisEntryById = new Map((strategyWorkspace.entries ?? []).map((entry) => [entry.id, entry]));
+  const directionIdsByChallengeId = new Map<string, string[]>();
+  const challengeIdsByDirectionId = new Map<string, string[]>();
+  const contributionByChallengeDirectionPair = new Map<string, string>();
+  const analysisEntryIdsByChallengeId = new Map<string, string[]>();
+  for (const link of strategyWorkspace.challengeDirectionLinks ?? []) {
+    const forChallenge = directionIdsByChallengeId.get(link.strategic_challenge_id) ?? [];
+    if (!forChallenge.includes(link.strategic_direction_id)) forChallenge.push(link.strategic_direction_id);
+    directionIdsByChallengeId.set(link.strategic_challenge_id, forChallenge);
+
+    const forDirection = challengeIdsByDirectionId.get(link.strategic_direction_id) ?? [];
+    if (!forDirection.includes(link.strategic_challenge_id)) forDirection.push(link.strategic_challenge_id);
+    challengeIdsByDirectionId.set(link.strategic_direction_id, forDirection);
+    contributionByChallengeDirectionPair.set(
+      `${link.strategic_challenge_id}:${link.strategic_direction_id}`,
+      String(link.contribution_level ?? "")
+    );
+  }
+  for (const row of strategyWorkspace.challengeAnalysisEntries ?? []) {
+    const current = analysisEntryIdsByChallengeId.get(row.strategic_challenge_id) ?? [];
+    if (!current.includes(row.analysis_entry_id)) current.push(row.analysis_entry_id);
+    analysisEntryIdsByChallengeId.set(row.strategic_challenge_id, current);
+  }
+  for (const challenge of strategyWorkspace.challenges ?? []) {
+    const sourceId = (challenge as { source_analysis_entry_id?: string | null }).source_analysis_entry_id;
+    if (!sourceId) continue;
+    const current = analysisEntryIdsByChallengeId.get(challenge.id) ?? [];
+    if (!current.includes(sourceId)) current.push(sourceId);
+    analysisEntryIdsByChallengeId.set(challenge.id, current);
+  }
 
   return (
     <div className="space-y-4">
@@ -91,7 +126,7 @@ export default async function CeoDashboardPage() {
             />
           </div>
           <aside
-            className="flex h-full min-h-0 shrink-0 flex-col xl:w-72 2xl:w-80"
+            className="flex h-full min-h-0 shrink-0 flex-col xl:w-[21.5rem] 2xl:w-96"
             aria-label="Kennzahlen zum Zyklus"
           >
             <section className="brand-card flex h-full min-h-0 flex-col overflow-hidden p-6">
@@ -105,7 +140,7 @@ export default async function CeoDashboardPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-white/80">
                   Leitkennzahlen
                 </p>
-                <h2 className="mt-2 text-xl font-semibold">Zyklus im Überblick</h2>
+                <h2 className="mt-2 text-xl font-semibold">OKR-Zyklus im Überblick</h2>
               </div>
               <div className="mt-6 flex min-h-0 flex-1 flex-col brand-surface rounded-xl p-4">
                 <KpiCards items={data.kpis} layout="aside" />
@@ -114,64 +149,78 @@ export default async function CeoDashboardPage() {
           </aside>
         </div>
 
-        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <article className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-            <div className="border-b border-zinc-100 px-3 py-2 sm:px-4 sm:py-3">
-              <h2 className="text-sm font-semibold text-zinc-900">Top 5 Challenges</h2>
-              <p className="text-[11px] text-zinc-500">Nach Challenge-Score sortiert</p>
-            </div>
-            <ul className="space-y-1.5 p-2 sm:p-3">
-              {topChallenges.map((challenge) => (
-                <li
-                  key={challenge.id}
-                  className="rounded-lg border border-zinc-100 bg-zinc-50/60 px-2.5 py-1.5"
-                >
-                  <p className="text-sm font-medium text-zinc-900">{challenge.title}</p>
-                  <p className="text-xs text-zinc-600">Score {Number(challenge.challenge_score ?? 0).toFixed(2)}</p>
-                </li>
-              ))}
-            </ul>
-          </article>
-          <article className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-            <div className="border-b border-zinc-100 px-3 py-2 sm:px-4 sm:py-3">
-              <h2 className="text-sm font-semibold text-zinc-900">Top 5 Directions</h2>
-              <p className="text-[11px] text-zinc-500">Nach Priorität sortiert</p>
-            </div>
-            <ul className="space-y-1.5 p-2 sm:p-3">
-              {topDirections.map((direction) => (
-                <li
-                  key={direction.id}
-                  className="rounded-lg border border-zinc-100 bg-zinc-50/60 px-2.5 py-1.5"
-                >
-                  <p className="text-sm font-medium text-zinc-900">{direction.title}</p>
-                  <p className="text-xs text-zinc-600">Priorität {Number(direction.priority ?? 0).toFixed(2)}</p>
-                </li>
-              ))}
-            </ul>
-          </article>
-          <article className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-            <div className="border-b border-zinc-100 px-3 py-2 sm:px-4 sm:py-3">
-              <h2 className="text-sm font-semibold text-zinc-900">Unadressierte Challenges</h2>
-              <p className="text-[11px] text-zinc-500">Ohne Stoßrichtungs-Verknüpfung</p>
-            </div>
-            <ul className="space-y-1.5 p-2 sm:p-3">
-              {uncoveredChallenges.length === 0 ? (
-                <li className="rounded-lg border border-emerald-100 bg-emerald-50/50 px-2.5 py-1.5 text-sm text-emerald-800">
-                  Alle Challenges sind adressiert.
-                </li>
-              ) : (
-                uncoveredChallenges.slice(0, 5).map((challenge) => (
-                  <li
-                    key={challenge.id}
-                    className="rounded-lg border border-zinc-100 bg-zinc-50/60 px-2.5 py-1.5 text-sm text-zinc-800"
-                  >
-                    {challenge.title}
-                  </li>
-                ))
-              )}
-            </ul>
-          </article>
-        </section>
+        <DashboardTopLists
+          topChallenges={topChallenges.map((challenge) => ({
+            id: challenge.id,
+            title: challenge.title,
+            description:
+              typeof (challenge as { description?: unknown }).description === "string"
+                ? String((challenge as { description: string }).description).trim() || null
+                : null,
+            score: Number(challenge.challenge_score ?? 0),
+            raw: challenge as Record<string, unknown>,
+            linkedDirections: (directionIdsByChallengeId.get(challenge.id) ?? [])
+              .map((id) => directionById.get(id))
+              .filter((row): row is NonNullable<typeof row> => Boolean(row))
+              .map((row) => ({
+                id: row.id,
+                title: row.title,
+                contributionLevel:
+                  contributionByChallengeDirectionPair.get(`${challenge.id}:${row.id}`) || null,
+                raw: row as Record<string, unknown>,
+              })),
+            linkedAnalysisEntries: (analysisEntryIdsByChallengeId.get(challenge.id) ?? [])
+              .map((id) => analysisEntryById.get(id))
+              .filter((row): row is NonNullable<typeof row> => Boolean(row))
+              .map((row) => ({
+                id: row.id,
+                title: row.title,
+                analysisType: row.analysis_type ?? null,
+                raw: row as Record<string, unknown>,
+              })),
+          }))}
+          topDirections={topDirections.map((direction) => ({
+            id: direction.id,
+            title: direction.title,
+            description:
+              typeof (direction as { description?: unknown }).description === "string"
+                ? String((direction as { description: string }).description).trim() || null
+                : null,
+            priority: Number(direction.priority ?? 0),
+            raw: direction as Record<string, unknown>,
+            linkedChallenges: (challengeIdsByDirectionId.get(direction.id) ?? [])
+              .map((id) => challengeById.get(id))
+              .filter((row): row is NonNullable<typeof row> => Boolean(row))
+              .map((row) => ({
+                id: row.id,
+                title: row.title,
+                score: Number(row.challenge_score ?? 0),
+                contributionLevel:
+                  contributionByChallengeDirectionPair.get(`${row.id}:${direction.id}`) || null,
+                raw: row as Record<string, unknown>,
+              })),
+          }))}
+          uncoveredChallenges={uncoveredChallenges.map((challenge) => ({
+            id: challenge.id,
+            title: challenge.title,
+            description:
+              typeof (challenge as { description?: unknown }).description === "string"
+                ? String((challenge as { description: string }).description).trim() || null
+                : null,
+            score: Number(challenge.challenge_score ?? 0),
+            raw: challenge as Record<string, unknown>,
+            linkedDirections: [],
+            linkedAnalysisEntries: (analysisEntryIdsByChallengeId.get(challenge.id) ?? [])
+              .map((id) => analysisEntryById.get(id))
+              .filter((row): row is NonNullable<typeof row> => Boolean(row))
+              .map((row) => ({
+                id: row.id,
+                title: row.title,
+                analysisType: row.analysis_type ?? null,
+                raw: row as Record<string, unknown>,
+              })),
+          }))}
+        />
       </div>
     </div>
   );
