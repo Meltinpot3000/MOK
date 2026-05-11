@@ -135,11 +135,20 @@ async function main() {
     ),
   ]);
 
-  type EntryRow = (typeof entryRows)[number];
-  const entries = entryRows as EntryRow[];
+  type AnalysisEntryRow = {
+    id: string;
+    title: string;
+    analysis_type: string;
+    sub_type: string | null;
+    description: string | null;
+    impact_level: number | null;
+    uncertainty_level: number | null;
+    quality_score: number | null;
+  };
+  const entries = entryRows as AnalysisEntryRow[];
   const entryIdSet = new Set(entries.map((e) => e.id));
-  const mergedEdges = [...approved, ...drafts]
-    .map((edge: Record<string, unknown>) => ({
+  const mergedEdges = ([...approved, ...drafts] as Record<string, unknown>[])
+    .map((edge) => ({
       source: String(edge.source_analysis_item_id),
       target: String(edge.target_analysis_item_id),
       linkType: String(edge.link_type ?? ""),

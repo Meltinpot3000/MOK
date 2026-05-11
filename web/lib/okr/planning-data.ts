@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getOkrCycles, getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
 import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
 import { orderOkrCyclesByPickPreference, pickDefaultOkrCycle } from "@/lib/okr/pick-default-okr-cycle";
@@ -216,11 +217,12 @@ export type OkrPlanningWorkspaceData = {
 export async function getOkrPlanningWorkspaceData(
   organizationId: string,
   cycleInstanceId: string,
-  preferredOkrCycleId?: string | null
+  preferredOkrCycleId?: string | null,
+  supabaseClient?: SupabaseClient
 ): Promise<OkrPlanningWorkspaceData> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = supabaseClient ?? (await createSupabaseServerClient());
 
-  const okrCyclesRaw = await getOkrCycles(organizationId, cycleInstanceId);
+  const okrCyclesRaw = await getOkrCycles(organizationId, cycleInstanceId, supabase);
   const okrCycles = okrCyclesRaw as OkrCycleOption[];
   const okrCycleIds = okrCycles.map((c) => c.id);
   const preferredExplicit =
@@ -230,7 +232,7 @@ export async function getOkrPlanningWorkspaceData(
       ? preferredOkrCycleId
       : null) ?? pickDefaultOkrCycle(okrCycles);
 
-  const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
+  const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId, supabase);
 
   const initiativesFirst = await supabase
     .schema("app")
@@ -296,15 +298,15 @@ export async function getOkrPlanningWorkspaceData(
       .select("id, strategic_direction_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
-    okrCycleIds.length > 0
+    okrScopeInstanceIds.length > 0
       ? supabase
           .schema("app")
           .from("okr_objectives")
           .select(
-            "id, title, description, status, okr_cycle_id, owner_membership_id, deputy_membership_id"
+            "id, title, description, status, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id"
           )
           .eq("organization_id", organizationId)
-          .in("okr_cycle_id", okrCycleIds)
+          .in("cycle_instance_id", okrScopeInstanceIds)
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as const, error: null }),
     supabase
@@ -377,6 +379,7 @@ export async function getOkrPlanningWorkspaceData(
     description: string | null;
     status: string;
     okr_cycle_id: string | null;
+    cycle_instance_id: string | null;
     owner_membership_id: string | null;
     deputy_membership_id: string | null;
   };
@@ -396,7 +399,12 @@ export async function getOkrPlanningWorkspaceData(
     }
   }
 
-  const objectives = objectivesAll.filter((o) => o.okr_cycle_id === effectiveOkrCycleId);
+  let objectives = objectivesAll.filter((o) => o.okr_cycle_id === effectiveOkrCycleId);
+  if (objectives.length === 0 && objectivesAll.length > 0) {
+    // Defensive fallback: falls okr_cycle_id inkonsistent ist, aber cycle_instance_id
+    // korrekt im Scope liegt, verlieren wir nicht den gesamten Objective-Kontext.
+    objectives = objectivesAll;
+  }
   const objectiveIds = objectives.map((o) => o.id);
 
   const leadingDirectionByObjectiveId = new Map<string, string>();

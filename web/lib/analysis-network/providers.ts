@@ -695,7 +695,7 @@ async function fetchWithRetry(
   return null;
 }
 
-async function scoreWithGemini(
+export async function scoreWithGemini(
   prompt: string,
   model: string,
   maxOutputTokens?: number
@@ -734,7 +734,7 @@ async function scoreWithGemini(
   };
 }
 
-async function scoreWithGroq(
+export async function scoreWithGroq(
   prompt: string,
   model: string,
   maxOutputTokens?: number

@@ -115,7 +115,7 @@ export function CycleSidebar({
   const showJobBell = permissions["strategy-cycle"]?.read ?? false;
 
   return (
-    <aside className="flex w-72 flex-col border-r border-zinc-200 bg-white p-4">
+    <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col overflow-y-auto border-r border-zinc-200 bg-white p-4">
       <div className="mb-6">
         <div className="flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">

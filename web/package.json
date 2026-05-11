@@ -10,6 +10,11 @@
     "test": "vitest run",
     "tenant:isolation": "node ./scripts/tenant-isolation-check.mjs",
     "strategy:rollout": "node ./scripts/strategy-rollout-smoke.mjs",
+    "ai:smoke": "node ./scripts/ai-assistant-smoke.mjs",
+    "ai:smoke:complex": "node ./scripts/ai-assistant-smoke-complex.mjs",
+    "ai:smoke:strategy-thomas": "node ./scripts/run-strategy-thomas-smoke.mjs",
+    "ai:smoke:strategy-thomas:full": "node ./scripts/run-strategy-thomas-smoke.mjs full",
+    "ai:smoke:strategy-thomas:preflight": "node ./scripts/run-strategy-thomas-smoke.mjs preflight",
     "db:ensure-review-rollup": "node ./scripts/ensure-initiative-review-rollup.mjs",
     "auth:set-password": "node ./scripts/set-auth-user-password.mjs"
   },

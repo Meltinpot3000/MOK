@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
 import { getOkrPlanningWorkspaceData, type OkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
 import { getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
@@ -29,17 +30,23 @@ function collectKeyResultIds(workspace: OkrPlanningWorkspaceData): string[] {
 export async function getOkrCycleContext(
   organizationId: string,
   cycleInstanceId: string,
-  preferredOkrCycleId?: string | null
+  preferredOkrCycleId?: string | null,
+  supabaseClient?: SupabaseClient
 ): Promise<OkrCycleContext> {
   const workspace = await getOkrPlanningWorkspaceData(
     organizationId,
     cycleInstanceId,
-    preferredOkrCycleId
+    preferredOkrCycleId,
+    supabaseClient
   );
 
   const keyResultIds = collectKeyResultIds(workspace);
-  const supabase = await createSupabaseServerClient();
-  const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
+  const supabase = supabaseClient ?? (await createSupabaseServerClient());
+  const okrScopeInstanceIds = await getOkrCycleInstanceScopeIds(
+    organizationId,
+    cycleInstanceId,
+    supabase
+  );
 
   const updatesByKeyResultId = new Map<string, OkrUpdateRow[]>();
   if (keyResultIds.length > 0) {

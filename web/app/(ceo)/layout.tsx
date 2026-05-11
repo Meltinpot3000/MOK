@@ -88,7 +88,7 @@ export default async function CeoLayout({
   } as CSSProperties;
 
   return (
-    <div className="brand-shell flex min-h-screen bg-zinc-50" style={brandStyle}>
+    <div className="brand-shell flex h-screen overflow-hidden bg-zinc-50" style={brandStyle}>
       <CycleSidebar
         cycles={cycles}
         branding={branding}
@@ -105,7 +105,7 @@ export default async function CeoLayout({
         userEmail={sidebarIdentity.email}
         primaryRoleLabel={primaryRoleLabel}
       />
-      <div className="flex-1 p-6">{children}</div>
+      <main className="flex-1 overflow-y-auto p-6">{children}</main>
     </div>
   );
 }

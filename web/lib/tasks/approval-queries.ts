@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cache } from "react";
 
@@ -102,12 +103,36 @@ export const getOpenTaskCountForMembership = cache(
   }
 );
 
-export async function fetchTasksForMembership(
+function taskStatusHistogram(rows: Pick<TaskRow, "status">[]): Record<string, number> {
+  const h: Record<string, number> = {};
+  for (const row of rows) {
+    const key = row.status ?? "null";
+    h[key] = (h[key] ?? 0) + 1;
+  }
+  return h;
+}
+
+export type TaskFetchDiagnostics = {
+  filter: "open" | "completed" | "all";
+  organizationId: string;
+  membershipId: string;
+  filteredQueryError: string | null;
+  filteredRowCount: number;
+  filteredStatusHistogram: Record<string, number>;
+  /** Alle Zeilen für diese Membership (ohne Status-Filter), nur zur Ursachenanalyse. */
+  allAssignedQueryError: string | null;
+  allAssignedRowCount: number;
+  allAssignedStatusHistogram: Record<string, number>;
+};
+
+async function fetchTasksForMembershipInternal(
   organizationId: string,
   membershipId: string,
-  filter: "open" | "completed" | "all"
-): Promise<TaskRow[]> {
-  const supabase = await createSupabaseServerClient();
+  filter: "open" | "completed" | "all",
+  includeDiagnostics: boolean,
+  supabaseClient?: SupabaseClient
+): Promise<{ rows: TaskRow[]; diagnostics?: TaskFetchDiagnostics }> {
+  const supabase = supabaseClient ?? (await createSupabaseServerClient());
   let q = supabase
     .schema("app")
     .from("tasks")
@@ -125,7 +150,31 @@ export async function fetchTasksForMembership(
   }
 
   const { data, error } = await q;
-  if (error || !data) return [];
+  const filteredError = error?.message ?? null;
+  if (error || !data) {
+    let diagnostics: TaskFetchDiagnostics | undefined;
+    if (includeDiagnostics) {
+      const allRes = await supabase
+        .schema("app")
+        .from("tasks")
+        .select("status")
+        .eq("organization_id", organizationId)
+        .eq("assigned_membership_id", membershipId);
+      const allRows = (allRes.data ?? []) as Pick<TaskRow, "status">[];
+      diagnostics = {
+        filter,
+        organizationId,
+        membershipId,
+        filteredQueryError: filteredError,
+        filteredRowCount: 0,
+        filteredStatusHistogram: {},
+        allAssignedQueryError: allRes.error?.message ?? null,
+        allAssignedRowCount: allRows.length,
+        allAssignedStatusHistogram: taskStatusHistogram(allRows),
+      };
+    }
+    return { rows: [], diagnostics };
+  }
 
   let rows = data as TaskRow[];
   if (filter === "open") {
@@ -135,7 +184,76 @@ export async function fetchTasksForMembership(
       return String(b.created_at).localeCompare(String(a.created_at));
     });
   }
+
+  let diagnostics: TaskFetchDiagnostics | undefined;
+  if (includeDiagnostics) {
+    const allRes = await supabase
+      .schema("app")
+      .from("tasks")
+      .select("status")
+      .eq("organization_id", organizationId)
+      .eq("assigned_membership_id", membershipId);
+    const allRows = (allRes.data ?? []) as Pick<TaskRow, "status">[];
+    diagnostics = {
+      filter,
+      organizationId,
+      membershipId,
+      filteredQueryError: filteredError,
+      filteredRowCount: rows.length,
+      filteredStatusHistogram: taskStatusHistogram(rows),
+      allAssignedQueryError: allRes.error?.message ?? null,
+      allAssignedRowCount: allRows.length,
+      allAssignedStatusHistogram: taskStatusHistogram(allRows),
+    };
+  }
+
+  return { rows, diagnostics };
+}
+
+export async function fetchTasksForMembership(
+  organizationId: string,
+  membershipId: string,
+  filter: "open" | "completed" | "all",
+  supabaseClient?: SupabaseClient
+): Promise<TaskRow[]> {
+  const { rows } = await fetchTasksForMembershipInternal(
+    organizationId,
+    membershipId,
+    filter,
+    false,
+    supabaseClient
+  );
   return rows;
+}
+
+/** Für Debugging: gleiche Daten wie fetchTasksForMembership plus Histogramm aller zugewiesenen Tasks (ohne Statusfilter). */
+export async function fetchTasksForMembershipWithDiagnostics(
+  organizationId: string,
+  membershipId: string,
+  filter: "open" | "completed" | "all",
+  supabaseClient?: SupabaseClient
+): Promise<{ rows: TaskRow[]; diagnostics: TaskFetchDiagnostics }> {
+  const { rows, diagnostics } = await fetchTasksForMembershipInternal(
+    organizationId,
+    membershipId,
+    filter,
+    true,
+    supabaseClient
+  );
+  return {
+    rows,
+    diagnostics: diagnostics ?? {
+      filter,
+      organizationId,
+      membershipId,
+      filteredQueryError: null,
+      filteredRowCount: rows.length,
+      filteredStatusHistogram: taskStatusHistogram(rows),
+      allAssignedQueryError: null,
+      allAssignedRowCount: rows.length,
+      allAssignedStatusHistogram: taskStatusHistogram(rows),
+    },
+  };
 }
 
 export function approvalRoutingLabelDe(mode: string | null): string {

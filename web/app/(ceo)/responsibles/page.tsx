@@ -241,7 +241,7 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
   }
 
   const unitAssignmentsForForm = assignments
-    .filter((a): assignment is ResponsibleAssignmentRow & { organization_unit_id: string } =>
+    .filter((a): a is ResponsibleAssignmentRow & { organization_unit_id: string } =>
       Boolean(a.organization_unit_id)
     )
     .map((a) => ({

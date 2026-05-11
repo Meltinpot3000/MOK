@@ -8,6 +8,7 @@ export type SidebarItemId =
   | "okr-workspace"
   | "reviews"
   | "my-tasks"
+  | "ai-assistant"
   | "organization"
   | "planning-cycles"
   | "invitations"
@@ -34,6 +35,7 @@ export type SidebarPermissionMap = Record<SidebarItemId, SidebarItemPermission>;
 export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard", section: "phase1" },
   { id: "my-tasks", href: "/my-tasks", label: "Meine Aufgaben", section: "top" },
+  { id: "ai-assistant", href: "/ai-assistant", label: "Sentinel Assistant", section: "top" },
   { id: "key-figures", href: "/key-figures", label: "Kennzahlen", section: "phase1" },
   { id: "strategy-cycle", href: "/strategy-cycle", label: "Strategiezyklus", section: "phase1" },
   { id: "reviews", href: "/reviews", label: "Reviewzyklus", section: "phase1" },
@@ -134,6 +136,10 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
     return "my-tasks";
   }
 
+  if (pathname === "/ai-assistant" || pathname.startsWith("/ai-assistant/")) {
+    return "ai-assistant";
+  }
+
   if (
     pathname === "/responsibles" ||
     pathname === "/industries" ||
@@ -169,6 +175,10 @@ export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boo
 
   if (item.id === "my-tasks") {
     return pathname === "/my-tasks" || pathname.startsWith("/my-tasks/");
+  }
+
+  if (item.id === "ai-assistant") {
+    return pathname === "/ai-assistant" || pathname.startsWith("/ai-assistant/");
   }
 
   if (item.id === "organization") {
