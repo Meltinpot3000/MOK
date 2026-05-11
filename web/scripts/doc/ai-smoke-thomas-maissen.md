@@ -129,28 +129,96 @@ Smoke-HTTP: `AI_SMOKE_SECRET` oder `CRON_SECRET`, `AI_SMOKE_BASE_URL`, Supabase 
 
 ## 8. Ergebnis des letzten dokumentierten Laufs
 
-**Datum/Zeit:** 2026-05-11 (Referenz, vor Einführung von Preflight/Evaluation).
+**Git:** Commit `42c6b8f` (`test(ai): verify strategy smoke path and planner readiness for Thomas preset`)
 
-| Kennzahl | Wert (historisch) |
-|----------|---------------------|
-| Modus | `fastMode: true`, kein Preflight |
-| Fragen | 5 (`strategy_directions`) |
-| Pfad | überwiegend **legacy**, **unknown** (Ollama Plan-Fallback) |
-| Antwort | `Smoke fast mode: no synthesis.` |
+**Umgebung:** Windows, lokales `npm run dev` auf `http://localhost:3000`, `web/.env.local` mit Thomas-Kontext und Sentinel-Ollama-Einstellungen (`SENTINEL_LOCAL_LLM_*`).
 
-**Interpretation (historisch):** Nur technischer Kontextnachweis — **keine** fachliche Verifikation.
-
-**Nach Implementierung:** Neuen Lauf ausführen und hier die Felder aus `summary` und `smokeMeta.plannerPreflight` eintragen:
-
-| Feld | Wert (nach nächstem Lauf ausfüllen) |
-|------|-------------------------------------|
-| `runQuality` | |
-| `totalQuestions` | |
-| `passed` / `failed` | |
-| `pipelineCount` / `legacyCount` / `unknownCount` / `compositeCount` | |
-| `plannerPreflight.reachable` / `modelAvailable` / `generateOk` | |
+**Datum:** 2026-05-11
 
 ---
+
+### 8.1 Preflight (`npm run ai:smoke:strategy-thomas:preflight`)
+
+| Feld | Wert |
+|------|------|
+| `plannerPreflight.provider` | `ollama` |
+| `plannerPreflight.baseUrl` | `http://localhost:11434` |
+| `plannerPreflight.model` | `qwen2.5:3b-instruct` |
+| `reachable` | **false** |
+| `modelAvailable` | **false** |
+| `error` | `fetch failed` (Host nicht erreichbar / kein Ollama-Prozess) |
+| `runQuality` | **`planner_unavailable`** |
+
+**Folge:** Es liegt **keine** fachliche Domain-Verifikation vor (`domainVerificationPass` kann nicht `true` sein).
+
+---
+
+### 8.2 Strategy-Smoke (`npm run ai:smoke:strategy-thomas`, Fast-Mode)
+
+| Feld | Wert |
+|------|------|
+| `runQuality` / `runQualityLabel` | **`planner_unavailable`** |
+| `domainVerificationPass` | **`false`** |
+| `fastMode` | `true` |
+| `totalQuestions` | 5 |
+| `passed` / `failed` | **0 / 5** |
+| `technicalOnly` | **true** |
+| `plannerAvailable` | **false** |
+| `pipelineCount` | 0 |
+| `legacyCount` | 5 |
+| `unknownCount` | 5 |
+| `compositeCount` | 0 |
+
+**Konsolen-Zusammenfassung (stderr):**
+
+`Planner: unavailable | Pipeline: 0/5 | Composite: 0/5 | Legacy: 5/5 | Unknown: 5/5 | PASS: 0/5 | FAIL: 5/5`
+
+**Diagnose je Frage (einheitlich):**
+
+- **`selectedPath`:** `legacy` (erwartet laut Katalog: `pipeline`)
+- **`queryClass`:** `unknown` (Plan-Fallback)
+- **`plan.usedFallback`:** `true`
+- **`plan.fallbackReason`:** `request_failed: [ollama] request_failed: fetch failed`
+- **`dispatch.pipelineRegistered`:** `false`
+- **`contract` (StructuredAnswer):** nicht vorhanden (`missing_structured_contract`)
+- **Antwort:** `Smoke fast mode: no synthesis.` → `answer_contains_placeholder_or_fast_mode_stub`
+- **Verifier:** `not_applicable` (kein Structured Contract)
+
+**Zyklus-Kontext:** `cycleInstanceId` z. B. `fdeb6ab9-5027-48fd-9d16-ab8358d82a9b` (`cycleSource: auto_like_app`).
+
+---
+
+### 8.3 `failReasons` pro Frage (alle 5 identisch)
+
+Pro Katalog-ID (`strategy_challenges_critical_scope`, `strategy_directions_density_gap`, `strategy_challenges_by_direction_responsible`, `strategy_direction_vs_measures_contradiction`, `strategy_review_bullets_per_direction`):
+
+1. `run_planner_unavailable_not_domain_verified`
+2. `expected_pipeline_got_legacy`
+3. `queryClass_unexpected:unknown`
+4. `queryClass_unknown_without_degradation_contract`
+5. `missing_structured_contract`
+6. `answer_contains_placeholder_or_fast_mode_stub`
+
+---
+
+### 8.4 `npm run ai:smoke:strategy-thomas:full`
+
+**Nicht ausgeführt.** Grund: Preflight und Hauptlauf hatten `runQuality: planner_unavailable` — ohne erreichbaren Planner/Ollama ist ein „Full“-Lauf keine sinnvolle **Domain**-Referenz (würde denselben Plan-Fallback erzeugen).
+
+**Nachholen, wenn** `plannerPreflight.reachable === true`, `modelAvailable === true` und idealerweise `generateOk !== false`, dann:
+
+`npm run ai:smoke:strategy-thomas:full`
+
+---
+
+### 8.5 Interpretation dieses Laufs
+
+| Klasse | Bewertung |
+|--------|-----------|
+| Technischer Smoke (HTTP, Kontext, Zyklus) | **bestanden** |
+| Fachliche Strategy-/Pipeline-Verifikation | **nicht bestanden** (`planner_unavailable`, `domainVerificationPass: false`) |
+
+Kein `retrievalStatus`, keine `missingOps`/`coveredOps`-Degradation, keine Composite-Diagnostics — durchweg Plan-Fallback ohne strukturierten Contract.
 
 ## 9. Interpretation (allgemein)
 
