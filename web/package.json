@@ -16,7 +16,13 @@
     "ai:smoke:strategy-thomas:full": "node ./scripts/run-strategy-thomas-smoke.mjs full",
     "ai:smoke:strategy-thomas:preflight": "node ./scripts/run-strategy-thomas-smoke.mjs preflight",
     "db:ensure-review-rollup": "node ./scripts/ensure-initiative-review-rollup.mjs",
-    "auth:set-password": "node ./scripts/set-auth-user-password.mjs"
+    "auth:set-password": "node ./scripts/set-auth-user-password.mjs",
+    "ai:semantic-map:build": "tsx scripts/semantic-map-cli.ts build",
+    "ai:semantic-map:validate": "tsx scripts/semantic-map-cli.ts validate",
+    "ai:semantic-map:publish": "tsx scripts/semantic-map-cli.ts publish",
+    "ai:semantic-map:inspect": "tsx scripts/semantic-map-cli.ts inspect",
+    "ai:semantic-map:test-reference": "tsx scripts/semantic-map-cli.ts test-reference",
+    "ai:semantic-map:backend-smoke": "tsx scripts/semantic-map-cli.ts backend-smoke"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
@@ -31,12 +37,14 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.15.6",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.19.4",
     "typescript": "^5",
     "vitest": "^2.1.9"
   }

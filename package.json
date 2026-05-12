@@ -11,6 +11,12 @@
     "db:push": "node scripts/run-dbmate.mjs --migrations-dir supabase/migrations up",
     "db:seed:programs": "node scripts/run-sql-seed.mjs supabase/seed/012_seed_programs_initiatives_multi_direction.sql",
     "tenant:isolation": "npm --prefix web run tenant:isolation",
-    "strategy:rollout": "npm --prefix web run strategy:rollout"
+    "strategy:rollout": "npm --prefix web run strategy:rollout",
+    "ai:semantic-map:build": "npm --prefix web run ai:semantic-map:build",
+    "ai:semantic-map:validate": "npm --prefix web run ai:semantic-map:validate",
+    "ai:semantic-map:publish": "npm --prefix web run ai:semantic-map:publish",
+    "ai:semantic-map:inspect": "npm --prefix web run ai:semantic-map:inspect",
+    "ai:semantic-map:test-reference": "npm --prefix web run ai:semantic-map:test-reference",
+    "ai:semantic-map:backend-smoke": "npm --prefix web run ai:semantic-map:backend-smoke"
   }
 }
