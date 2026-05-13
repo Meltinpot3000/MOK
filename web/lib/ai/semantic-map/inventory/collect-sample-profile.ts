@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { postgresConnectionOptions } from "./pg-remote-tls";
 import {
   SAMPLE_PROFILE_MAX_DISTINCT_VALUES,
   SAMPLE_PROFILE_MAX_SAMPLE_TITLES,
@@ -33,7 +34,7 @@ function guessEnumColumn(columns: SchemaTableInventory["columns"]): string | nul
 export async function collectSampleProfiles(
   options: CollectSampleProfileOptions
 ): Promise<TableSampleProfile[]> {
-  const client = new pg.Client({ connectionString: options.databaseUrl });
+  const client = new pg.Client(postgresConnectionOptions(options.databaseUrl));
   await client.connect();
   const out: TableSampleProfile[] = [];
   try {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import pg from "pg";
 
+import { postgresConnectionOptions } from "./pg-remote-tls";
 import {
   SCHEMA_INVENTORY_MAX_COLUMNS_PER_TABLE,
   SCHEMA_INVENTORY_MAX_FKS,
@@ -29,7 +30,7 @@ export async function collectSchemaInventory(
   functions: SchemaFunctionInventory[];
   schemaHash: string;
 }> {
-  const client = new pg.Client({ connectionString: options.databaseUrl });
+  const client = new pg.Client(postgresConnectionOptions(options.databaseUrl));
   await client.connect();
   try {
     const tablesRes = await client.query<{
