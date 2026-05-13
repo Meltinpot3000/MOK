@@ -218,14 +218,11 @@ export async function publishSemanticMapSnapshot(input: {
     roadsPayload?: unknown;
   };
 
-  const { data: runRow, error: re } = await admin
-    .schema("sentinel_map")
-    .from("map_runs")
-    .select("organization_id, model_provider, model_name")
-    .eq("id", input.runId)
-    .single();
-  if (re) throw new Error(`publishSemanticMapSnapshot: ${re.message}`);
-  const organization_id = (runRow?.organization_id as string | null) ?? null;
+  const runRow = await repo.fetchMapRunForPublish(admin, input.runId);
+  if (!runRow) {
+    throw new Error(`publishSemanticMapSnapshot: Run ${input.runId} nicht gefunden.`);
+  }
+  const organization_id = runRow.organization_id;
 
   await repo.deactivateSnapshots(admin, organization_id);
 
@@ -253,33 +250,18 @@ export async function publishSemanticMapSnapshot(input: {
     draft_id: input.validatedDraftId,
     organization_id,
     validation_summary,
-    model_provider: (runRow?.model_provider as string | null) ?? null,
-    model_name: (runRow?.model_name as string | null) ?? null,
+    model_provider: runRow.model_provider,
+    model_name: runRow.model_name,
     places: publishPlaces,
     roads: publishRoads,
     gapRows,
   });
 
-  const { data: row, error: se } = await admin
-    .schema("sentinel_map")
-    .from("map_snapshots")
-    .select("id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name")
-    .eq("id", snapshotId)
-    .single();
-  if (se || !row) {
+  const snap = await repo.fetchSnapshotById(admin, snapshotId);
+  if (!snap) {
     throw new Error("publishSemanticMapSnapshot: Snapshot nach Insert nicht lesbar.");
   }
-  return {
-    id: row.id as string,
-    runId: (row.run_id as string | null) ?? null,
-    draftId: (row.draft_id as string | null) ?? null,
-    organizationId: (row.organization_id as string | null) ?? null,
-    isActive: Boolean(row.is_active),
-    generatedAt: row.generated_at as string,
-    validationSummary: row.validation_summary as SemanticMapValidationSummary,
-    modelProvider: (row.model_provider as string | null) ?? null,
-    modelName: (row.model_name as string | null) ?? null,
-  };
+  return snap;
 }
 
 function validatedGapsFromRoads(roads: SemanticMapRoad[]): Array<{

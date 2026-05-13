@@ -8,15 +8,17 @@ import type {
   SemanticMapValidationSummary,
   SemanticMapPlace,
 } from "../types";
+import { getSentinelMapPool } from "./sentinel-map-db";
 
-const SCHEMA = "sentinel_map" as const;
+/** SupabaseClient bleibt in der Signatur (Aufrufer), wird für sentinel_map nicht genutzt — Zugriff nur per Postgres. */
+type Db = SupabaseClient;
 
-function db(client: SupabaseClient) {
-  return client.schema(SCHEMA);
+function j(row: unknown): string {
+  return JSON.stringify(row ?? null);
 }
 
 export async function insertMapRun(
-  client: SupabaseClient,
+  _client: Db,
   row: {
     organization_id: string | null;
     triggered_by_membership_id: string | null;
@@ -26,17 +28,35 @@ export async function insertMapRun(
     schema_hash: string | null;
   }
 ): Promise<{ id: string }> {
-  const { data, error } = await db(client)
-    .from("map_runs")
-    .insert(row)
-    .select("id")
-    .single();
-  if (error) throw new Error(`insertMapRun: ${error.message}`);
-  return { id: data!.id as string };
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{ id: string }>(
+    `insert into sentinel_map.map_runs
+      (organization_id, triggered_by_membership_id, status, model_provider, model_name, schema_hash)
+     values ($1,$2,$3,$4,$5,$6)
+     returning id`,
+    [
+      row.organization_id,
+      row.triggered_by_membership_id,
+      row.status,
+      row.model_provider,
+      row.model_name,
+      row.schema_hash,
+    ]
+  );
+  return { id: r.rows[0]!.id };
 }
 
+const MAP_RUN_PATCH_KEYS = [
+  "status",
+  "completed_at",
+  "error",
+  "model_provider",
+  "model_name",
+  "schema_hash",
+] as const;
+
 export async function updateMapRun(
-  client: SupabaseClient,
+  _client: Db,
   id: string,
   patch: Partial<{
     status: string;
@@ -47,49 +67,55 @@ export async function updateMapRun(
     schema_hash: string | null;
   }>
 ) {
-  const { error } = await db(client).from("map_runs").update(patch).eq("id", id);
-  if (error) throw new Error(`updateMapRun: ${error.message}`);
+  const entries = (Object.entries(patch) as [string, unknown][]).filter(
+    ([k, v]) => v !== undefined && (MAP_RUN_PATCH_KEYS as readonly string[]).includes(k)
+  );
+  if (!entries.length) return;
+  const pool = getSentinelMapPool();
+  const cols = entries.map(([k]) => k);
+  const setSql = cols.map((c, i) => `${c} = $${i + 2}`).join(", ");
+  const vals = [id, ...entries.map(([, v]) => v)];
+  const r = await pool.query(`update sentinel_map.map_runs set ${setSql} where id = $1`, vals);
+  if (r.rowCount === 0) {
+    throw new Error(`updateMapRun: keine Zeile für id=${id}`);
+  }
 }
 
 export async function insertSourceInventoryRow(
-  client: SupabaseClient,
+  _client: Db,
   row: { run_id: string; inventory: unknown; schema_hash: string | null }
 ) {
-  const { error } = await db(client).from("source_inventory").insert({
-    run_id: row.run_id,
-    inventory: row.inventory,
-    schema_hash: row.schema_hash,
-  });
-  if (error) throw new Error(`insertSourceInventoryRow: ${error.message}`);
+  const pool = getSentinelMapPool();
+  const r = await pool.query(
+    `insert into sentinel_map.source_inventory (run_id, inventory, schema_hash) values ($1, $2::jsonb, $3)`,
+    [row.run_id, j(row.inventory), row.schema_hash]
+  );
+  if (r.rowCount === 0) throw new Error("insertSourceInventoryRow: insert fehlgeschlagen");
 }
 
 export async function insertMapDraft(
-  client: SupabaseClient,
+  _client: Db,
   row: { run_id: string; draft: SemanticMapDraft; raw_llm_text: string | null }
 ): Promise<{ id: string }> {
-  const { data, error } = await db(client)
-    .from("map_drafts")
-    .insert({
-      run_id: row.run_id,
-      draft: row.draft,
-      raw_llm_text: row.raw_llm_text,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(`insertMapDraft: ${error.message}`);
-  return { id: data!.id as string };
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{ id: string }>(
+    `insert into sentinel_map.map_drafts (run_id, draft, raw_llm_text) values ($1, $2::jsonb, $3) returning id`,
+    [row.run_id, j(row.draft), row.raw_llm_text]
+  );
+  return { id: r.rows[0]!.id };
 }
 
-export async function markDraftValidated(client: SupabaseClient, draftId: string) {
-  const { error } = await db(client)
-    .from("map_drafts")
-    .update({ validated_at: new Date().toISOString() })
-    .eq("id", draftId);
-  if (error) throw new Error(`markDraftValidated: ${error.message}`);
+export async function markDraftValidated(_client: Db, draftId: string) {
+  const pool = getSentinelMapPool();
+  const r = await pool.query(
+    `update sentinel_map.map_drafts set validated_at = now() where id = $1`,
+    [draftId]
+  );
+  if (r.rowCount === 0) throw new Error(`markDraftValidated: keine Zeile für id=${draftId}`);
 }
 
 export async function insertValidationResultRow(
-  client: SupabaseClient,
+  _client: Db,
   row: {
     run_id: string | null;
     draft_id: string;
@@ -98,78 +124,96 @@ export async function insertValidationResultRow(
     summary: unknown;
   }
 ) {
-  const { error } = await db(client).from("validation_results").insert(row);
-  if (error) throw new Error(`insertValidationResultRow: ${error.message}`);
+  const pool = getSentinelMapPool();
+  const r = await pool.query(
+    `insert into sentinel_map.validation_results (run_id, draft_id, snapshot_id, passed, summary)
+     values ($1,$2,$3,$4,$5::jsonb)`,
+    [row.run_id, row.draft_id, row.snapshot_id, row.passed, j(row.summary)]
+  );
+  if (r.rowCount === 0) throw new Error("insertValidationResultRow: insert fehlgeschlagen");
 }
 
 export async function insertMapGaps(
-  client: SupabaseClient,
+  _client: Db,
   rows: Array<{ draft_id?: string | null; snapshot_id?: string | null; gap_type: string; detail: unknown }>
 ) {
   if (!rows.length) return;
-  const { error } = await db(client).from("map_gaps").insert(rows);
-  if (error) throw new Error(`insertMapGaps: ${error.message}`);
+  const pool = getSentinelMapPool();
+  const c = await pool.connect();
+  try {
+    await c.query("begin");
+    for (const g of rows) {
+      await c.query(
+        `insert into sentinel_map.map_gaps (draft_id, snapshot_id, gap_type, detail)
+         values ($1,$2,$3,$4::jsonb)`,
+        [g.draft_id ?? null, g.snapshot_id ?? null, g.gap_type, j(g.detail)]
+      );
+    }
+    await c.query("commit");
+  } catch (e) {
+    await c.query("rollback");
+    throw e;
+  } finally {
+    c.release();
+  }
 }
 
-export async function deleteMapGapsForDraft(client: SupabaseClient, draftId: string) {
-  const { error } = await db(client).from("map_gaps").delete().eq("draft_id", draftId);
-  if (error) throw new Error(`deleteMapGapsForDraft: ${error.message}`);
+export async function deleteMapGapsForDraft(_client: Db, draftId: string) {
+  const pool = getSentinelMapPool();
+  await pool.query(`delete from sentinel_map.map_gaps where draft_id = $1`, [draftId]);
 }
 
-export async function fetchDraft(client: SupabaseClient, draftId: string) {
-  const { data, error } = await db(client)
-    .from("map_drafts")
-    .select("id, run_id, draft, validated_at, created_at")
-    .eq("id", draftId)
-    .maybeSingle();
-  if (error) throw new Error(`fetchDraft: ${error.message}`);
-  return data as {
+export async function fetchDraft(_client: Db, draftId: string) {
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{
     id: string;
     run_id: string;
     draft: SemanticMapDraft;
     validated_at: string | null;
     created_at: string;
-  } | null;
+  }>(
+    `select id, run_id, draft, validated_at, created_at from sentinel_map.map_drafts where id = $1`,
+    [draftId]
+  );
+  return r.rows[0] ?? null;
 }
 
-export async function fetchInventoryForRun(client: SupabaseClient, runId: string) {
-  const { data, error } = await db(client)
-    .from("source_inventory")
-    .select("inventory")
-    .eq("run_id", runId)
-    .maybeSingle();
-  if (error) throw new Error(`fetchInventoryForRun: ${error.message}`);
-  return (data?.inventory ?? null) as SemanticSourceInventory | null;
+export async function fetchInventoryForRun(_client: Db, runId: string) {
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{ inventory: unknown }>(
+    `select inventory from sentinel_map.source_inventory where run_id = $1 limit 1`,
+    [runId]
+  );
+  return (r.rows[0]?.inventory ?? null) as SemanticSourceInventory | null;
 }
 
-export async function fetchRunForDraft(client: SupabaseClient, draftId: string) {
-  const draft = await fetchDraft(client, draftId);
+export async function fetchRunForDraft(_client: Db, draftId: string) {
+  const draft = await fetchDraft(_client, draftId);
   if (!draft) return null;
-  const { data, error } = await db(client)
-    .from("map_runs")
-    .select("id, organization_id")
-    .eq("id", draft.run_id)
-    .maybeSingle();
-  if (error) throw new Error(`fetchRunForDraft: ${error.message}`);
-  return { draft, run: data as { id: string; organization_id: string | null } | null };
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{ id: string; organization_id: string | null }>(
+    `select id, organization_id from sentinel_map.map_runs where id = $1`,
+    [draft.run_id]
+  );
+  return { draft, run: r.rows[0] ?? null };
 }
 
-export async function deactivateSnapshots(
-  client: SupabaseClient,
-  organizationId: string | null
-) {
-  const base = db(client).from("map_snapshots").update({ is_active: false }).eq("is_active", true);
+export async function deactivateSnapshots(_client: Db, organizationId: string | null) {
+  const pool = getSentinelMapPool();
   if (organizationId === null) {
-    const { error } = await base.is("organization_id", null);
-    if (error) throw new Error(`deactivateSnapshots: ${error.message}`);
+    await pool.query(
+      `update sentinel_map.map_snapshots set is_active = false where is_active = true and organization_id is null`
+    );
   } else {
-    const { error } = await base.eq("organization_id", organizationId);
-    if (error) throw new Error(`deactivateSnapshots: ${error.message}`);
+    await pool.query(
+      `update sentinel_map.map_snapshots set is_active = false where is_active = true and organization_id = $1`,
+      [organizationId]
+    );
   }
 }
 
 export async function insertSnapshotBundle(
-  client: SupabaseClient,
+  _client: Db,
   args: {
     run_id: string | null;
     draft_id: string | null;
@@ -182,135 +226,142 @@ export async function insertSnapshotBundle(
     gapRows: Array<{ gap_type: string; detail: Record<string, unknown> }>;
   }
 ): Promise<{ snapshotId: string }> {
-  const { data: snap, error: e1 } = await db(client)
-    .from("map_snapshots")
-    .insert({
-      run_id: args.run_id,
-      draft_id: args.draft_id,
-      organization_id: args.organization_id,
-      is_active: true,
-      validation_summary: args.validation_summary,
-      model_provider: args.model_provider,
-      model_name: args.model_name,
-    })
-    .select("id")
-    .single();
-  if (e1) throw new Error(`insertSnapshotBundle snapshot: ${e1.message}`);
-  const snapshotId = snap!.id as string;
-
-  const placeRows = args.places.map((p) => ({
-    snapshot_id: snapshotId,
-    place_key: p.placeKey,
-    canonical_name: p.canonicalName,
-    domain: p.domain,
-    business_meaning: p.businessMeaning,
-    description_for_planner: p.descriptionForPlanner,
-    evidence: p.evidence,
-    validation_status: p.validationStatus,
-    confidence: p.confidence,
-  }));
-  if (placeRows.length) {
-    const { error: e2 } = await db(client).from("map_places").insert(placeRows);
-    if (e2) throw new Error(`insertSnapshotBundle places: ${e2.message}`);
-  }
-
-  const roadRows = args.roads.map((r) => ({
-    snapshot_id: snapshotId,
-    road_key: r.roadKey,
-    from_place_key: r.fromPlaceKey,
-    to_place_key: r.toPlaceKey,
-    business_meaning: r.businessMeaning,
-    relation_type: r.relationType,
-    evidence: r.evidence,
-    validation_status: r.validationStatus,
-    confidence: r.confidence,
-  }));
-  if (roadRows.length) {
-    const { error: e3 } = await db(client).from("map_roads").insert(roadRows);
-    if (e3) throw new Error(`insertSnapshotBundle roads: ${e3.message}`);
-  }
-
-  if (args.gapRows.length) {
-    const { error: e4 } = await db(client).from("map_gaps").insert(
-      args.gapRows.map((g) => ({
-        snapshot_id: snapshotId,
-        gap_type: g.gap_type,
-        detail: g.detail,
-      }))
+  const pool = getSentinelMapPool();
+  const c = await pool.connect();
+  try {
+    await c.query("begin");
+    const ins = await c.query<{ id: string }>(
+      `insert into sentinel_map.map_snapshots
+        (run_id, draft_id, organization_id, is_active, validation_summary, model_provider, model_name)
+       values ($1,$2,$3,true,$4::jsonb,$5,$6)
+       returning id`,
+      [
+        args.run_id,
+        args.draft_id,
+        args.organization_id,
+        j(args.validation_summary),
+        args.model_provider,
+        args.model_name,
+      ]
     );
-    if (e4) throw new Error(`insertSnapshotBundle gaps: ${e4.message}`);
-  }
+    const snapshotId = ins.rows[0]!.id;
 
-  return { snapshotId };
+    for (const p of args.places) {
+      await c.query(
+        `insert into sentinel_map.map_places
+          (snapshot_id, place_key, canonical_name, domain, business_meaning, description_for_planner, evidence, validation_status, confidence)
+         values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
+        [
+          snapshotId,
+          p.placeKey,
+          p.canonicalName,
+          p.domain,
+          p.businessMeaning,
+          p.descriptionForPlanner,
+          j(p.evidence),
+          p.validationStatus,
+          p.confidence,
+        ]
+      );
+    }
+    for (const r of args.roads) {
+      await c.query(
+        `insert into sentinel_map.map_roads
+          (snapshot_id, road_key, from_place_key, to_place_key, business_meaning, relation_type, evidence, validation_status, confidence)
+         values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
+        [
+          snapshotId,
+          r.roadKey,
+          r.fromPlaceKey,
+          r.toPlaceKey,
+          r.businessMeaning,
+          r.relationType,
+          j(r.evidence),
+          r.validationStatus,
+          r.confidence,
+        ]
+      );
+    }
+    for (const g of args.gapRows) {
+      await c.query(
+        `insert into sentinel_map.map_gaps (snapshot_id, gap_type, detail) values ($1,$2,$3::jsonb)`,
+        [snapshotId, g.gap_type, j(g.detail)]
+      );
+    }
+    await c.query("commit");
+    return { snapshotId };
+  } catch (e) {
+    await c.query("rollback");
+    throw e;
+  } finally {
+    c.release();
+  }
 }
 
 export async function fetchActiveSnapshot(
-  client: SupabaseClient,
+  _client: Db,
   organizationId: string | undefined
 ): Promise<{ snapshot: Record<string, unknown>; places: unknown[]; roads: unknown[] } | null> {
-  async function load(whereOrg: "scoped" | "global") {
-    let q = client
-      .schema(SCHEMA)
-      .from("map_snapshots")
-      .select(
-        "id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name"
-      )
-      .eq("is_active", true);
-    if (whereOrg === "scoped" && organizationId) {
-      q = q.eq("organization_id", organizationId);
-    } else {
-      q = q.is("organization_id", null);
-    }
-    const { data: snap, error } = await q.maybeSingle();
-    if (error) throw new Error(`fetchActiveSnapshot: ${error.message}`);
-    if (!snap) return null;
+  const pool = getSentinelMapPool();
+
+  async function loadScoped(org: string) {
+    const s = await pool.query(
+      `select id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name
+       from sentinel_map.map_snapshots
+       where is_active = true and organization_id = $1
+       limit 1`,
+      [org]
+    );
+    return s.rows[0] ?? null;
+  }
+
+  async function loadGlobal() {
+    const s = await pool.query(
+      `select id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name
+       from sentinel_map.map_snapshots
+       where is_active = true and organization_id is null
+       limit 1`
+    );
+    return s.rows[0] ?? null;
+  }
+
+  async function loadPlacesRoads(snap: Record<string, unknown>) {
     const sid = snap.id as string;
-    const { data: places, error: ep } = await client
-      .schema(SCHEMA)
-      .from("map_places")
-      .select("*")
-      .eq("snapshot_id", sid);
-    if (ep) throw new Error(`fetchActiveSnapshot places: ${ep.message}`);
-    const { data: roads, error: er } = await client
-      .schema(SCHEMA)
-      .from("map_roads")
-      .select("*")
-      .eq("snapshot_id", sid);
-    if (er) throw new Error(`fetchActiveSnapshot roads: ${er.message}`);
-    return { snapshot: snap as Record<string, unknown>, places: places ?? [], roads: roads ?? [] };
+    const [pr, rr] = await Promise.all([
+      pool.query(`select * from sentinel_map.map_places where snapshot_id = $1`, [sid]),
+      pool.query(`select * from sentinel_map.map_roads where snapshot_id = $1`, [sid]),
+    ]);
+    return { snapshot: snap, places: pr.rows as unknown[], roads: rr.rows as unknown[] };
   }
 
+  let snap: Record<string, unknown> | null = null;
   if (organizationId) {
-    const scoped = await load("scoped");
-    if (scoped) return scoped;
-    return load("global");
+    snap = (await loadScoped(organizationId)) as Record<string, unknown> | null;
+    if (!snap) snap = (await loadGlobal()) as Record<string, unknown> | null;
+  } else {
+    snap = (await loadGlobal()) as Record<string, unknown> | null;
   }
-  return load("global");
+  if (!snap) return null;
+  return loadPlacesRoads(snap);
 }
 
-export async function fetchLatestValidationForDraft(client: SupabaseClient, draftId: string) {
-  const { data, error } = await db(client)
-    .from("validation_results")
-    .select("id, passed, summary, created_at")
-    .eq("draft_id", draftId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`fetchLatestValidationForDraft: ${error.message}`);
-  return data as { id: string; passed: boolean; summary: Record<string, unknown>; created_at: string } | null;
+export async function fetchLatestValidationForDraft(_client: Db, draftId: string) {
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{
+    id: string;
+    passed: boolean;
+    summary: Record<string, unknown>;
+    created_at: string;
+  }>(
+    `select id, passed, summary, created_at from sentinel_map.validation_results
+     where draft_id = $1 order by created_at desc limit 1`,
+    [draftId]
+  );
+  return r.rows[0] ?? null;
 }
 
-export async function listSnapshots(
-  client: SupabaseClient,
-  limit = 10
-): Promise<SemanticMapSnapshot[]> {
-  const { data, error } = await db(client)
-    .from("map_snapshots")
-    .select("id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name")
-    .order("generated_at", { ascending: false })
-    .limit(limit);
-  if (error) throw new Error(`listSnapshots: ${error.message}`);
-  return (data ?? []).map((row) => ({
+function mapSnapshotRow(row: Record<string, unknown>): SemanticMapSnapshot {
+  return {
     id: row.id as string,
     runId: (row.run_id as string | null) ?? null,
     draftId: (row.draft_id as string | null) ?? null,
@@ -320,5 +371,46 @@ export async function listSnapshots(
     validationSummary: row.validation_summary as SemanticMapValidationSummary,
     modelProvider: (row.model_provider as string | null) ?? null,
     modelName: (row.model_name as string | null) ?? null,
-  }));
+  };
+}
+
+export async function fetchMapRunForPublish(
+  _client: Db,
+  runId: string
+): Promise<{
+  organization_id: string | null;
+  model_provider: string | null;
+  model_name: string | null;
+} | null> {
+  const pool = getSentinelMapPool();
+  const r = await pool.query<{
+    organization_id: string | null;
+    model_provider: string | null;
+    model_name: string | null;
+  }>(
+    `select organization_id, model_provider, model_name from sentinel_map.map_runs where id = $1`,
+    [runId]
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function fetchSnapshotById(_client: Db, snapshotId: string): Promise<SemanticMapSnapshot | null> {
+  const pool = getSentinelMapPool();
+  const r = await pool.query(
+    `select id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name
+     from sentinel_map.map_snapshots where id = $1`,
+    [snapshotId]
+  );
+  const row = r.rows[0] as Record<string, unknown> | undefined;
+  return row ? mapSnapshotRow(row) : null;
+}
+
+export async function listSnapshots(_client: Db, limit = 10): Promise<SemanticMapSnapshot[]> {
+  const pool = getSentinelMapPool();
+  const r = await pool.query(
+    `select id, run_id, draft_id, organization_id, is_active, generated_at, validation_summary, model_provider, model_name
+     from sentinel_map.map_snapshots order by generated_at desc limit $1`,
+    [limit]
+  );
+  return (r.rows as Record<string, unknown>[]).map(mapSnapshotRow);
 }
