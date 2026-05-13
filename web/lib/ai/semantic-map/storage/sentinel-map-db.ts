@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
 
 import { resolveDatabaseUrl } from "../inventory/env";
 
@@ -18,13 +18,26 @@ export function getSentinelMapDatabaseUrl(): string {
   return url.trim();
 }
 
+/**
+ * TLS wie `web/scripts/ensure-initiative-review-rollup.mjs`: Query-String entfernen (sslmode in der URL
+ * kann sonst node-pg anders steuern) und bei Remote-Host explizit `rejectUnauthorized: false` setzen —
+ * typisch für Supabase Pooler ohne extra Firmen-CA in Node.
+ */
+function buildSentinelMapPoolConfig(connectionString: string): PoolConfig {
+  const trimmed = connectionString.trim();
+  const useSsl = !/localhost|127\.0\.0\.1/i.test(trimmed);
+  const connectionStringNoQuery = trimmed.replace(/\?[^#]*$/, "");
+  return {
+    connectionString: connectionStringNoQuery,
+    ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+    max: 8,
+    idleTimeoutMillis: 30_000,
+  };
+}
+
 export function getSentinelMapPool(): Pool {
   if (!pool) {
-    pool = new Pool({
-      connectionString: getSentinelMapDatabaseUrl(),
-      max: 8,
-      idleTimeoutMillis: 30_000,
-    });
+    pool = new Pool(buildSentinelMapPoolConfig(getSentinelMapDatabaseUrl()));
   }
   return pool;
 }
