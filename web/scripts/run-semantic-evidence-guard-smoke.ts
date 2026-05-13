@@ -161,6 +161,12 @@ async function runActiveSnapshotMode(): Promise<void> {
   loadEnvFiles();
   process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED = "true";
 
+  const { formatDatabaseTargetLogLine, getResolvedDatabaseUrlMeta } = await import(
+    "../lib/ai/semantic-map/inventory/resolve-database-url"
+  );
+  const dbMeta = getResolvedDatabaseUrlMeta();
+  console.error(formatDatabaseTargetLogLine("[semantic-evidence-guard:active]", dbMeta));
+
   const { createSupabaseAdminClient } = await import("../lib/supabase/admin");
   const { runChat } = await import("../lib/ai/orchestrator");
   const { getActiveSemanticMap } = await import("../lib/ai/semantic-map");
@@ -240,6 +246,21 @@ async function runActiveSnapshotMode(): Promise<void> {
     mode: "active-snapshot",
     question,
     env: { AI_SEMANTIC_EVIDENCE_GUARD_ENABLED: process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED },
+    databaseTarget: dbMeta.connection
+      ? {
+          databaseUrlSource: dbMeta.envSource,
+          host: dbMeta.connection.host,
+          port: dbMeta.connection.port,
+          database: dbMeta.connection.database,
+          user: dbMeta.connection.user,
+        }
+      : {
+          databaseUrlSource: dbMeta.envSource,
+          host: null,
+          port: null,
+          database: null,
+          user: null,
+        },
   };
 
   const iterator = runChat({
@@ -312,7 +333,7 @@ async function runActiveSnapshotMode(): Promise<void> {
       out.errorDetail = activeMapError;
       console.log(JSON.stringify(out, null, 2));
       console.error(
-        "\nActive-Snapshot-Smoke: sentinel_map per Postgres nicht erreichbar (z. B. SSL/Zertifikat). Siehe outcome.errorDetail — nicht mit fehlendem Snapshot verwechseln."
+        "\nActive-Snapshot-Smoke: Postgres/sentinel_map-Fehler (SSL, fehlendes Schema, o. Ä.). Siehe outcome.errorDetail — nicht mit fehlendem Snapshot verwechseln."
       );
       process.exit(1);
     }

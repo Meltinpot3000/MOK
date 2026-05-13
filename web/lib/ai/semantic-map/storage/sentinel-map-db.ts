@@ -5,14 +5,14 @@ import { resolveDatabaseUrl } from "../inventory/env";
 let pool: Pool | null = null;
 
 /**
- * Gleiche URL-Auflösung wie `scripts/run-dbmate.mjs` / `inventory/env.ts` (Pooler zuerst).
+ * Gleiche URL-Auflösung wie `scripts/run-dbmate.ts` / `inventory/resolve-database-url.ts` (Pooler zuerst).
  * Nur serverseitig (Service Role / direkte DB), kein Browser.
  */
 export function getSentinelMapDatabaseUrl(): string {
   const url = resolveDatabaseUrl();
   if (!url?.trim()) {
     throw new Error(
-      "sentinel_map: SUPABASE_POOLER_DB_URL oder DATABASE_URL fehlt (siehe .env.example / run-dbmate.mjs)."
+      "sentinel_map: SUPABASE_POOLER_DB_URL oder DATABASE_URL fehlt (siehe .env.example / run-dbmate.ts)."
     );
   }
   return url.trim();

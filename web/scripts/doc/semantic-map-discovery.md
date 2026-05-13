@@ -151,7 +151,7 @@ Die Thomas-Strategy-Smoke (`run-strategy-thomas-smoke.mjs` → `ai-assistant-smo
 
 ### sentinel_map: DB-Zugriff vs. PostgREST
 
-- Das **Semantic-Map-Repository** (`semantic-map-repository.ts`) spricht `sentinel_map` per **direktem Postgres** (`DATABASE_URL` / `SUPABASE_POOLER_DB_URL`, siehe `inventory/env.ts` / `run-dbmate.mjs`) an — das Schema muss **nicht** in den Supabase-API-**Exposed Schemas** stehen.
+- Das **Semantic-Map-Repository** (`semantic-map-repository.ts`) spricht `sentinel_map` per **direktem Postgres** (`DATABASE_URL` / `SUPABASE_POOLER_DB_URL`, siehe `inventory/resolve-database-url.ts` / `scripts/run-dbmate.ts`) an — das Schema muss **nicht** in den Supabase-API-**Exposed Schemas** stehen.
 - **Alternative (hier nicht umgesetzt):** `sentinel_map` für PostgREST exponieren — würde die API-Fläche für `authenticated`/`anon` vergrössern; nur sinnvoll, wenn bewusst öffentliche Lesepfade gewünscht sind.
 
 ### TODO (separates Thema)
@@ -161,11 +161,13 @@ Die Thomas-Strategy-Smoke (`run-strategy-thomas-smoke.mjs` → `ai-assistant-smo
 ### Semantic Evidence Guard — Smoke-Modi
 
 - **`npm run ai:semantic-evidence-guard:smoke`** — **Fixture-Modus**: prüft `verifyAnswer` + Evidence-Guard ohne DB/LLM (soll in CI immer grün sein, wenn die Guard-Logik passt).
-- **`npm run ai:semantic-evidence-guard:smoke:active`** — **Active-Snapshot-Modus**: `runChat` + echte Map aus DB. Fehlt ein aktiver Snapshot, lautet das Ergebnis `outcome: infra_missing_active_snapshot` mit **Exit 0** (Infrastruktur, kein Guard-Defekt). Schlägt der **direkte Postgres**-Zugriff auf `sentinel_map` fehl (z. B. SSL), lautet `outcome: infra_sentinel_map_db_error` mit **Exit 1**.
+- **`npm run ai:semantic-evidence-guard:smoke:active`** — **Active-Snapshot-Modus**: `runChat` + echte Map aus DB; stderr zeigt `[semantic-evidence-guard:active] databaseUrlSource=… host=…` (ohne Passwort), im JSON-Feld **`databaseTarget`**. Fehlt ein aktiver Snapshot → `outcome: infra_missing_active_snapshot`, **Exit 0**. Postgres-Fehler (SSL, fehlendes `sentinel_map`-Schema, …) → `outcome: infra_sentinel_map_db_error`, **Exit 1**.
+- **`npm run db:diagnose-sentinel-map`** (Repo-Root): dieselbe URL-Auflösung wie `db:migrate` / `sentinel_map`-Pool; prüft `information_schema` auf Schema `sentinel_map` und Tabellen.
 
 ## Smoke-Ablauf
 
-1. `npm run db:migrate` (Repo-Root) — sicherstellt, dass `sentinel_map` existiert.
+0. Optional: `npm run db:diagnose-sentinel-map` — zeigt **welche** DB (Host/User/Source) genutzt wird und ob `sentinel_map`-Tabellen existieren (gleiche Auflösung wie `npm run db:migrate`).
+1. `npm run db:migrate` (Repo-Root) — dieselbe URL wie Diagnose/Sentinel-Pool; legt `sentinel_map` an, falls Migrationen noch fehlen.
 2. `npm run ai:semantic-map:build`
 3. `npm run ai:semantic-map:validate -- --draft <id aus Schritt 2>`
 4. `npm run ai:semantic-map:publish -- --run <runId> --draft <draftId>`

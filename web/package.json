@@ -24,7 +24,8 @@
     "ai:semantic-map:test-reference": "tsx scripts/semantic-map-cli.ts test-reference",
     "ai:semantic-map:backend-smoke": "tsx scripts/semantic-map-cli.ts backend-smoke",
     "ai:semantic-evidence-guard:smoke": "tsx scripts/run-semantic-evidence-guard-smoke.ts",
-    "ai:semantic-evidence-guard:smoke:active": "tsx scripts/run-semantic-evidence-guard-smoke.ts --active-snapshot"
+    "ai:semantic-evidence-guard:smoke:active": "tsx scripts/run-semantic-evidence-guard-smoke.ts --active-snapshot",
+    "db:diagnose-sentinel-map": "tsx scripts/diagnose-sentinel-map-db.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
