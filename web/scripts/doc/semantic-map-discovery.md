@@ -143,6 +143,26 @@ Die stdout-JSON enthält zusätzlich `requiredEvidenceSlots` (abgeleitete Slot-L
 
 Die Thomas-Strategy-Smoke (`run-strategy-thomas-smoke.mjs` → `ai-assistant-smoke-complex.mjs`) ist ein breiter Assistant-Pfad. Eine Einbindung von `semanticMapDiagnostics` pro Frage würde dort eine durchgängige Tool-Call-Sammlung und Orchestrierung voraussetzen — **nicht** Teil dieses Auftrags. **TODO:** bei späterer Sentinel-Telemetrie (aggregierte Tool-Calls pro Turn) `buildSemanticMapRunDiagnostics` anbinden.
 
+### Answer-Verifier / Semantic Evidence Guard (Phase 15)
+
+- **Zweck:** Wenn `buildSemanticMapRunDiagnostics` (im Chat-Lauf bei aktivem Flag) `evidenceCoverage.answerAllowed=false` oder `cycleConsistency.ok=false` liefert — und die Lücke als **High-Risk** gilt — ersetzt `verifyAnswer` die finale freie LLM-Antwort durch einen **festen** deutschen Erklärungstext (keine UI, kein neuer Tool-Planner, kein Synthesis-Prompt-Tuning).
+- **Aktivierung:** `AI_SEMANTIC_EVIDENCE_GUARD_ENABLED=true` in der Server-Umgebung (siehe `.env.example`). Zusätzlich gilt: Übergibt der Aufrufer `SemanticMapRunDiagnostics` mit `diagnosticsOnly: false`, wirkt der Guard auch **ohne** Flag (Programmpfad für spätere harte Aktivierung).
+- **Telemetrie:** Im Orchestrator-Diagnose-JSON unter `verifier.semanticEvidenceGuard` (u. a. `attempted`, `diagnosticsLoaded`, `blockedBySemanticGuard`).
+
+### sentinel_map: DB-Zugriff vs. PostgREST
+
+- Das **Semantic-Map-Repository** (`semantic-map-repository.ts`) spricht `sentinel_map` per **direktem Postgres** (`DATABASE_URL` / `SUPABASE_POOLER_DB_URL`, siehe `inventory/env.ts` / `run-dbmate.mjs`) an — das Schema muss **nicht** in den Supabase-API-**Exposed Schemas** stehen.
+- **Alternative (hier nicht umgesetzt):** `sentinel_map` für PostgREST exponieren — würde die API-Fläche für `authenticated`/`anon` vergrössern; nur sinnvoll, wenn bewusst öffentliche Lesepfade gewünscht sind.
+
+### TODO (separates Thema)
+
+- **`ai_agent_runs` / `metadata`-Spalte:** Smoke oder Migration kann eine Spalten-Diskrepanz melden — **separat** klären, nicht mit Semantic-Map-Repository vermischen.
+
+### Semantic Evidence Guard — Smoke-Modi
+
+- **`npm run ai:semantic-evidence-guard:smoke`** — **Fixture-Modus**: prüft `verifyAnswer` + Evidence-Guard ohne DB/LLM (soll in CI immer grün sein, wenn die Guard-Logik passt).
+- **`npm run ai:semantic-evidence-guard:smoke:active`** — **Active-Snapshot-Modus**: `runChat` + echte Map aus DB. Fehlt ein aktiver Snapshot, lautet das Ergebnis `outcome: infra_missing_active_snapshot` mit **Exit 0** (Infrastruktur, kein Guard-Defekt). Schlägt der **direkte Postgres**-Zugriff auf `sentinel_map` fehl (z. B. SSL), lautet `outcome: infra_sentinel_map_db_error` mit **Exit 1**.
+
 ## Smoke-Ablauf
 
 1. `npm run db:migrate` (Repo-Root) — sicherstellt, dass `sentinel_map` existiert.
