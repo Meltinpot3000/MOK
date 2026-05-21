@@ -18,6 +18,7 @@
     "db:ensure-review-rollup": "node ./scripts/ensure-initiative-review-rollup.mjs",
     "auth:set-password": "node ./scripts/set-auth-user-password.mjs",
     "ai:semantic-map:build": "tsx scripts/semantic-map-cli.ts build",
+    "ai:semantic-map:seed-fixture": "tsx scripts/seed-semantic-map-fixture.ts",
     "ai:semantic-map:validate": "tsx scripts/semantic-map-cli.ts validate",
     "ai:semantic-map:publish": "tsx scripts/semantic-map-cli.ts publish",
     "ai:semantic-map:inspect": "tsx scripts/semantic-map-cli.ts inspect",

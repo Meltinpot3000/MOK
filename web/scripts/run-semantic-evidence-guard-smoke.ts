@@ -160,6 +160,8 @@ async function runFixtureMode(): Promise<void> {
 async function runActiveSnapshotMode(): Promise<void> {
   loadEnvFiles();
   process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED = "true";
+  // Lokaler Smoke: Question-Resolution ohne LLM (aktive Map aus DB bleibt echt).
+  process.env.AI_SEMANTIC_EVIDENCE_GUARD_MOCK_RESOLUTION = "true";
 
   const { formatDatabaseTargetLogLine, getResolvedDatabaseUrlMeta } = await import(
     "../lib/ai/semantic-map/inventory/resolve-database-url"

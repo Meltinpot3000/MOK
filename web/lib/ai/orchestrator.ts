@@ -122,6 +122,15 @@ export type OrchestratorEvent =
           applied: boolean;
           status: "ok" | "blocked" | "not_applicable";
           reason?: string;
+          semanticEvidenceGuard?: {
+            attempted: boolean;
+            diagnosticsLoaded: boolean;
+            answerAllowed?: boolean | null;
+            executionReadiness?: string | null;
+            missingEvidence?: string[] | null;
+            blockedClaims?: string[] | null;
+            blockedBySemanticGuard: boolean;
+          };
         };
       };
     }
@@ -340,6 +349,46 @@ export async function executePermissionedTool({
       latencyMs,
     });
     return failure;
+  }
+}
+
+async function tryLoadSemanticMapDiagnosticsForVerifier(input: {
+  question: string;
+  organizationId: string;
+  diagnosticsTools: Array<{ toolName: string; executed: boolean; success: boolean }>;
+}): Promise<import("@/lib/ai/semantic-map/types").SemanticMapRunDiagnostics | null> {
+  if (process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED !== "true") {
+    return null;
+  }
+  try {
+    const { getActiveSemanticMap, resolveQuestionAgainstSemanticMap, buildSemanticMapRunDiagnostics } =
+      await import("@/lib/ai/semantic-map");
+    const map = await getActiveSemanticMap({ organizationId: input.organizationId });
+    if (!map) return null;
+    const resolution =
+      process.env.AI_SEMANTIC_EVIDENCE_GUARD_MOCK_RESOLUTION === "true"
+        ? (
+            await import("@/lib/ai/semantic-map/__fixtures__/mock-resolve-question")
+          ).mockResolveQuestionForTests()
+        : await resolveQuestionAgainstSemanticMap({
+            question: input.question,
+            map,
+          });
+    const toolCalls = input.diagnosticsTools
+      .filter((t) => t.executed && t.success && !t.toolName.startsWith("lookup_pipeline_trace_"))
+      .map((t) => ({ toolName: t.toolName, status: "ok" as const }));
+    return await buildSemanticMapRunDiagnostics({
+      question: input.question,
+      toolCalls,
+      map,
+      resolution,
+      useMockResolver: false,
+      diagnosticsOnly: false,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[sentinel] semantic evidence guard diagnostics failed:", msg);
+    return null;
   }
 }
 
@@ -602,38 +651,49 @@ export async function* runChat(args: RunChatArgs): AsyncGenerator<OrchestratorEv
           : null;
   const selectedPath: "pipeline" | "legacy" = shouldRunPipeline ? "pipeline" : "legacy";
 
+  let semanticMapRunDiagnostics: Awaited<ReturnType<typeof tryLoadSemanticMapDiagnosticsForVerifier>> = null;
+  if (process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED === "true") {
+    semanticMapRunDiagnostics = await tryLoadSemanticMapDiagnosticsForVerifier({
+      question: args.question,
+      organizationId: args.userContext.organizationId,
+      diagnosticsTools,
+    });
+  }
+
   if (args.skipSynthesis === true) {
     const baselineText = structuredContract ? renderDeterministicNarration(structuredContract) : "";
     let answerText = baselineText || "Smoke fast mode: no synthesis.";
     let verifierStatus: "ok" | "blocked" | "not_applicable" = "not_applicable";
     let verifierReason: string | undefined;
 
-    if (structuredContract) {
-      const verifier = verifyAnswer({
-        contract: structuredContract,
-        llmText: answerText,
-        baselineText,
+    const verifier = verifyAnswer({
+      contract: structuredContract,
+      llmText: answerText,
+      baselineText: structuredContract ? baselineText : undefined,
+      semanticMapRunDiagnostics,
+    });
+    if (verifier.status === "blocked") {
+      verifierStatus = "blocked";
+      verifierReason = verifier.reason;
+      answerText = verifier.replacementText;
+      yield { type: "verifier_blocked", reason: verifier.reason };
+      await recordVerifierLog(args.supabase, {
+        agentRunId,
+        organizationId: args.userContext.organizationId,
+        success: false,
+        reason: verifier.reason,
       });
-      if (verifier.status === "blocked") {
-        verifierStatus = "blocked";
-        verifierReason = verifier.reason;
-        answerText = verifier.replacementText;
-        yield { type: "verifier_blocked", reason: verifier.reason };
-        await recordVerifierLog(args.supabase, {
-          agentRunId,
-          organizationId: args.userContext.organizationId,
-          success: false,
-          reason: verifier.reason,
-        });
-      } else {
-        verifierStatus = "ok";
-        await recordVerifierLog(args.supabase, {
-          agentRunId,
-          organizationId: args.userContext.organizationId,
-          success: true,
-          reason: pipelineWarnings.length > 0 ? pipelineWarnings.join("; ") : "ok",
-        });
-      }
+    } else {
+      verifierStatus =
+        structuredContract != null || (semanticMapRunDiagnostics && semanticMapRunDiagnostics.enabled)
+          ? "ok"
+          : "not_applicable";
+      await recordVerifierLog(args.supabase, {
+        agentRunId,
+        organizationId: args.userContext.organizationId,
+        success: true,
+        reason: pipelineWarnings.length > 0 ? pipelineWarnings.join("; ") : "ok",
+      });
     }
 
     const diagnosticsPayload = {
@@ -667,9 +727,21 @@ export async function* runChat(args: RunChatArgs): AsyncGenerator<OrchestratorEv
         warningCount: pipelineWarnings.length,
       },
       verifier: {
-        applied: structuredContract != null,
+        applied:
+          structuredContract != null || process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED === "true",
         status: verifierStatus,
         reason: verifierReason,
+        semanticEvidenceGuard: {
+          attempted: process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED === "true",
+          diagnosticsLoaded: semanticMapRunDiagnostics != null,
+          answerAllowed: semanticMapRunDiagnostics?.evidenceCoverage.answerAllowed ?? null,
+          executionReadiness: semanticMapRunDiagnostics?.executionReadiness ?? null,
+          missingEvidence: semanticMapRunDiagnostics?.evidenceCoverage.missingEvidence ?? null,
+          blockedClaims: semanticMapRunDiagnostics?.evidenceCoverage.blockedClaims ?? null,
+          blockedBySemanticGuard:
+            verifierReason === "semantic_evidence_incomplete" ||
+            verifierReason === "semantic_cycle_claim_mismatch",
+        },
       },
     };
     yield {
@@ -823,32 +895,34 @@ export async function* runChat(args: RunChatArgs): AsyncGenerator<OrchestratorEv
 
   let verifierStatus: "ok" | "blocked" | "not_applicable" = "not_applicable";
   let verifierReason: string | undefined;
-  if (structuredContract) {
-    const verifier = verifyAnswer({
-      contract: structuredContract,
-      llmText: answerText,
-      baselineText,
+  const verifier = verifyAnswer({
+    contract: structuredContract,
+    llmText: answerText,
+    baselineText,
+    semanticMapRunDiagnostics,
+  });
+  if (verifier.status === "blocked") {
+    verifierStatus = "blocked";
+    verifierReason = verifier.reason;
+    answerText = verifier.replacementText;
+    yield { type: "verifier_blocked", reason: verifier.reason };
+    await recordVerifierLog(args.supabase, {
+      agentRunId,
+      organizationId: args.userContext.organizationId,
+      success: false,
+      reason: verifier.reason,
     });
-    if (verifier.status === "blocked") {
-      verifierStatus = "blocked";
-      verifierReason = verifier.reason;
-      answerText = verifier.replacementText;
-      yield { type: "verifier_blocked", reason: verifier.reason };
-      await recordVerifierLog(args.supabase, {
-        agentRunId,
-        organizationId: args.userContext.organizationId,
-        success: false,
-        reason: verifier.reason,
-      });
-    } else {
-      verifierStatus = "ok";
-      await recordVerifierLog(args.supabase, {
-        agentRunId,
-        organizationId: args.userContext.organizationId,
-        success: true,
-        reason: pipelineWarnings.length > 0 ? pipelineWarnings.join("; ") : "ok",
-      });
-    }
+  } else {
+    verifierStatus =
+      structuredContract != null || (semanticMapRunDiagnostics && semanticMapRunDiagnostics.enabled)
+        ? "ok"
+        : "not_applicable";
+    await recordVerifierLog(args.supabase, {
+      agentRunId,
+      organizationId: args.userContext.organizationId,
+      success: true,
+      reason: pipelineWarnings.length > 0 ? pipelineWarnings.join("; ") : "ok",
+    });
   }
 
   const diagnosticsPayload = {
@@ -882,9 +956,21 @@ export async function* runChat(args: RunChatArgs): AsyncGenerator<OrchestratorEv
       warningCount: pipelineWarnings.length,
     },
     verifier: {
-      applied: structuredContract != null,
+      applied:
+        structuredContract != null || process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED === "true",
       status: verifierStatus,
       reason: verifierReason,
+      semanticEvidenceGuard: {
+        attempted: process.env.AI_SEMANTIC_EVIDENCE_GUARD_ENABLED === "true",
+        diagnosticsLoaded: semanticMapRunDiagnostics != null,
+        answerAllowed: semanticMapRunDiagnostics?.evidenceCoverage.answerAllowed ?? null,
+        executionReadiness: semanticMapRunDiagnostics?.executionReadiness ?? null,
+        missingEvidence: semanticMapRunDiagnostics?.evidenceCoverage.missingEvidence ?? null,
+        blockedClaims: semanticMapRunDiagnostics?.evidenceCoverage.blockedClaims ?? null,
+        blockedBySemanticGuard:
+          verifierReason === "semantic_evidence_incomplete" ||
+          verifierReason === "semantic_cycle_claim_mismatch",
+      },
     },
   };
   yield {
