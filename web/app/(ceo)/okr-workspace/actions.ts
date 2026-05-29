@@ -13,17 +13,24 @@ import {
   canAccessObjective,
   canCreateOkrKeyResult,
   canCreateOkrObjective,
+  isExplicitKeyResultDeputyRemoval,
+  isExplicitKeyResultOwnerRemoval,
+  resolveKeyResultDeputyMembershipPatch,
+  resolveKeyResultOwnerMembershipPatch,
 } from "@/lib/okr/okr-object-access";
 import { getOkrCycleInstanceScopeIds, getOkrCycles } from "@/lib/okr/queries";
 import { resolveNextOkrCycleId } from "@/lib/okr/okr-cycle-nav";
 import { scheduleOkrContributionAssessmentJob } from "@/lib/okr/contribution-assessment-schedule";
 import { scheduleKrInitiativeMatchingIfEnabled } from "@/lib/okr/kr-initiative-matching-schedule";
-import { fetchOkrContributionTargetsForObjective } from "@/lib/okr/contribution-assessment-triggers";
+import { fetchOkrContributionDirectionTargetForObjective } from "@/lib/okr/contribution-assessment-triggers";
 import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
 import {
   normalizeOkrContributionTier,
   type OkrContributionTier,
 } from "@/lib/strategy-cycle/coverage-level";
+import { okrObjectiveAllowsCheckIn, okrCheckInBlockedMessageDe } from "@/lib/okr/okr-execution-gate";
+import { okrPlanningEditBlockedMessageDe } from "@/lib/okr/okr-objective-lifecycle";
+import { resolveApprovalAssignee } from "@/lib/tasks/approval-routing";
 
 const OKR_APP_PATHS = [
   "/okr-workspace",
@@ -35,6 +42,11 @@ const OKR_APP_PATHS = [
 
 function revalidateOkrPaths() {
   for (const p of OKR_APP_PATHS) revalidatePath(p);
+}
+
+function blockOkrPlanningEdit(status: string | null | undefined): { error: string } | null {
+  const msg = okrPlanningEditBlockedMessageDe(status ?? "");
+  return msg ? { error: msg } : null;
 }
 
 /**
@@ -479,12 +491,8 @@ export async function updateOkrObjectiveAction(input: {
     return { error: "OKR-Objective nicht gefunden oder kein OKR-Zeitraum gesetzt." };
   }
 
-  if (existingObj.status === "shifted") {
-    return {
-      error:
-        "Dieses Objective wurde in einen späteren OKR-Zeitraum verschoben und ist hier schreibgeschützt.",
-    };
-  }
+  const planningBlock = blockOkrPlanningEdit(existingObj.status);
+  if (planningBlock) return planningBlock;
 
   const existingRow = {
     id: existingObj.id,
@@ -624,12 +632,9 @@ export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string;
     return { error: "OKR-Objective nicht gefunden." };
   }
 
-  if (objMeta.status === "shifted") {
-    return {
-      error:
-        "Verschobene Objectives können hier nicht gelöscht werden (nur lesen / Historie).",
-    };
-  }
+  const planningBlock = blockOkrPlanningEdit(objMeta.status);
+  if (planningBlock) return planningBlock;
+
   if (!(await canAccessObjective({
     currentMembershipId: auth.context.membershipId,
     action: "update",
@@ -705,12 +710,8 @@ export async function createKeyResultAction(input: {
 
   if (!obj?.okr_cycle_id) return { error: "OKR-Objective nicht gefunden." };
 
-  if (obj.status === "shifted") {
-    return {
-      error:
-        "Unter einem verschobenen Objective können keine neuen Key Results angelegt werden.",
-    };
-  }
+  const planningBlock = blockOkrPlanningEdit(obj.status);
+  if (planningBlock) return planningBlock;
 
   const parentObjective = {
     id: obj.id,
@@ -844,12 +845,8 @@ export async function updateKeyResultAction(input: {
     .maybeSingle();
   if (!objOwnRow?.id) return { error: "Objective nicht gefunden." };
 
-  if (objOwnRow.status === "shifted") {
-    return {
-      error:
-        "Key Results eines verschobenen Objectives können nicht bearbeitet werden.",
-    };
-  }
+  const planningBlock = blockOkrPlanningEdit(objOwnRow.status);
+  if (planningBlock) return planningBlock;
 
   const objectiveRow = {
     id: objOwnRow.id,
@@ -884,51 +881,51 @@ export async function updateKeyResultAction(input: {
   let ownerPatch: string | null | undefined = undefined;
   if (okrKrOwnerMustMatchObjective) {
     ownerPatch = objectiveRow.owner_membership_id;
-  } else if (input.ownerMembershipId !== undefined) {
-    if (input.ownerMembershipId === null || input.ownerMembershipId === "") {
-      ownerPatch = null;
-    } else {
+  } else {
+    ownerPatch = resolveKeyResultOwnerMembershipPatch(
+      krRow.owner_membership_id,
+      input.ownerMembershipId
+    );
+    if (typeof ownerPatch === "string") {
       const memOk = await assertMembershipInOrg(
         supabase,
         auth.context.organizationId,
-        input.ownerMembershipId
+        ownerPatch
       );
       if (!memOk) return { error: "Ungültiger Owner (Membership)." };
-      ownerPatch = input.ownerMembershipId;
     }
   }
 
-  if (ownerPatch === null && input.ownerMembershipId !== undefined) {
-    if (!krPermissionCodes.has("okr.key_result.update.all")) {
-      return { error: "KR-Owner entfernen ist nur mit okr.key_result.update.all erlaubt." };
-    }
+  if (
+    isExplicitKeyResultOwnerRemoval(krRow.owner_membership_id, ownerPatch) &&
+    !krPermissionCodes.has("okr.key_result.update.all")
+  ) {
+    return { error: "KR-Owner entfernen ist nur mit okr.key_result.update.all erlaubt." };
   }
 
-  let deputyPatch: string | null | undefined = undefined;
-  if (input.deputyMembershipId !== undefined) {
-    if (input.deputyMembershipId === null || input.deputyMembershipId === "") {
-      deputyPatch = null;
-    } else {
-      const memOk = await assertMembershipInOrg(
-        supabase,
-        auth.context.organizationId,
-        input.deputyMembershipId
-      );
-      if (!memOk) return { error: "Ungültiger Deputy (Membership)." };
-      deputyPatch = input.deputyMembershipId;
-    }
+  const deputyPatch = resolveKeyResultDeputyMembershipPatch(
+    krRow.deputy_membership_id,
+    input.deputyMembershipId
+  );
+  if (typeof deputyPatch === "string") {
+    const memOk = await assertMembershipInOrg(
+      supabase,
+      auth.context.organizationId,
+      deputyPatch
+    );
+    if (!memOk) return { error: "Ungültiger Deputy (Membership)." };
   }
 
-  if (deputyPatch === null && input.deputyMembershipId !== undefined) {
-    if (!krPermissionCodes.has("okr.key_result.update.all")) {
-      const mid = auth.context.membershipId;
-      const effOwner =
-        krRow.owner_membership_id ?? objectiveRow.owner_membership_id ?? null;
-      const isEffOwner = effOwner === mid;
-      const wasKrDeputy = krRow.deputy_membership_id === mid;
-      if (!isEffOwner && !wasKrDeputy) {
-        return { error: "KR-Deputy entfernen ist nur mit okr.key_result.update.all erlaubt." };
-      }
+  if (
+    isExplicitKeyResultDeputyRemoval(krRow.deputy_membership_id, deputyPatch) &&
+    !krPermissionCodes.has("okr.key_result.update.all")
+  ) {
+    const mid = auth.context.membershipId;
+    const effOwner = krRow.owner_membership_id ?? objectiveRow.owner_membership_id ?? null;
+    const isEffOwner = effOwner === mid;
+    const wasKrDeputy = krRow.deputy_membership_id === mid;
+    if (!isEffOwner && !wasKrDeputy) {
+      return { error: "KR-Deputy entfernen ist nur mit okr.key_result.update.all erlaubt." };
     }
   }
 
@@ -1016,9 +1013,9 @@ export async function deleteKeyResultAction(input: { keyResultId: string }) {
     .eq("organization_id", auth.context.organizationId)
     .maybeSingle();
   if (!objRow?.id) return { error: "Objective nicht gefunden." };
-  if (objRow.status === "shifted") {
-    return { error: "Key Results eines verschobenen Objectives können nicht gelöscht werden." };
-  }
+  const planningBlock = blockOkrPlanningEdit(objRow.status);
+  if (planningBlock) return planningBlock;
+
   if (!(await canAccessKeyResult({
     currentMembershipId: auth.context.membershipId,
     action: "update",
@@ -1055,6 +1052,67 @@ export async function deleteKeyResultAction(input: { keyResultId: string }) {
       trigger: "key_result_delete",
     });
   }
+  return {};
+}
+
+function parseKrInitiativeIdsFromForm(formData: FormData, krId: string): string[] {
+  const raw = String(formData.get(`kr_${krId}_initiative_ids_json`) ?? "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((x): x is string => typeof x === "string" && x.trim() !== ""))];
+  } catch {
+    return [];
+  }
+}
+
+async function replaceKeyResultInitiativeLinks(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  organizationId: string;
+  cycleInstanceId: string;
+  keyResultId: string;
+  okrObjectiveId: string;
+  initiativeIds: string[];
+  membershipId: string;
+}): Promise<{ error?: string }> {
+  const wanted = [...new Set(input.initiativeIds.filter(Boolean))];
+  if (wanted.length > 0) {
+    const { data: inits } = await input.supabase
+      .schema("app")
+      .from("initiatives")
+      .select("id")
+      .eq("organization_id", input.organizationId)
+      .eq("cycle_instance_id", input.cycleInstanceId)
+      .in("id", wanted);
+    const valid = new Set((inits ?? []).map((r: { id: string }) => r.id));
+    for (const id of wanted) {
+      if (!valid.has(id)) return { error: "Ungültige Initiative für diesen Zyklus." };
+    }
+  }
+
+  const { error: delErr } = await input.supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .delete()
+    .eq("organization_id", input.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("key_result_id", input.keyResultId);
+
+  if (delErr) return { error: delErr.message };
+
+  if (wanted.length > 0) {
+    const rows = wanted.map((initiative_id) => ({
+      organization_id: input.organizationId,
+      cycle_instance_id: input.cycleInstanceId,
+      initiative_id,
+      key_result_id: input.keyResultId,
+      created_by_membership_id: input.membershipId,
+    }));
+    const { error: insErr } = await input.supabase.schema("app").from("initiative_key_result_links").insert(rows);
+    if (insErr) return { error: insErr.message };
+  }
+
   return {};
 }
 
@@ -1106,42 +1164,16 @@ export async function setKeyResultInitiativeLinksAction(input: {
     return keyResultWriteDeniedError();
   }
 
-  const wanted = [...new Set(input.initiativeIds.filter(Boolean))];
-  if (wanted.length > 0) {
-    const { data: inits } = await supabase
-      .schema("app")
-      .from("initiatives")
-      .select("id")
-      .eq("organization_id", auth.context.organizationId)
-      .eq("cycle_instance_id", input.cycleInstanceId)
-      .in("id", wanted);
-    const valid = new Set((inits ?? []).map((r: { id: string }) => r.id));
-    for (const id of wanted) {
-      if (!valid.has(id)) return { error: "Ungültige Initiative für diesen Zyklus." };
-    }
-  }
-
-  const { error: delErr } = await supabase
-    .schema("app")
-    .from("initiative_key_result_links")
-    .delete()
-    .eq("organization_id", auth.context.organizationId)
-    .eq("cycle_instance_id", input.cycleInstanceId)
-    .eq("key_result_id", input.keyResultId);
-
-  if (delErr) return { error: delErr.message };
-
-  if (wanted.length > 0) {
-    const rows = wanted.map((initiative_id) => ({
-      organization_id: auth.context.organizationId,
-      cycle_instance_id: input.cycleInstanceId,
-      initiative_id,
-      key_result_id: input.keyResultId,
-      created_by_membership_id: auth.context.membershipId,
-    }));
-    const { error: insErr } = await supabase.schema("app").from("initiative_key_result_links").insert(rows);
-    if (insErr) return { error: insErr.message };
-  }
+  const linkRes = await replaceKeyResultInitiativeLinks({
+    supabase,
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    keyResultId: input.keyResultId,
+    okrObjectiveId: kr.okr_objective_id,
+    initiativeIds: input.initiativeIds,
+    membershipId: auth.context.membershipId,
+  });
+  if (linkRes.error) return linkRes;
 
   revalidateOkrPaths();
   await scheduleOkrContributionAssessmentJob({
@@ -1240,9 +1272,9 @@ export async function linkKeyResultInitiativeAction(input: {
         .maybeSingle()
     : { data: null };
   if (!krPerm?.id || !objPerm?.id) return { error: "Key Result nicht gefunden." };
-  if (objPerm.status === "shifted") {
-    return { error: "Initiative-Verknüpfung für verschobenes Objective nicht änderbar." };
-  }
+  const planningBlockLink = blockOkrPlanningEdit(objPerm.status);
+  if (planningBlockLink) return planningBlockLink;
+
   if (!(await canAccessKeyResult({
     currentMembershipId: auth.context.membershipId,
     action: "update",
@@ -1277,14 +1309,6 @@ export async function linkKeyResultInitiativeAction(input: {
   }
 
   revalidateOkrPaths();
-  await scheduleOkrContributionAssessmentJob({
-    supabase,
-    organizationId: auth.context.organizationId,
-    cycleInstanceId,
-    okrObjectiveId: krPerm.okr_objective_id,
-    membershipId: auth.context.membershipId,
-    trigger: "initiative_link_add",
-  });
   return {};
 }
 
@@ -1328,9 +1352,9 @@ export async function unlinkKeyResultInitiativeAction(input: {
         .maybeSingle()
     : { data: null };
   if (!krPerm?.id || !objPerm?.id) return { error: "Key Result nicht gefunden." };
-  if (objPerm.status === "shifted") {
-    return { error: "Initiative-Verknüpfung für verschobenes Objective nicht änderbar." };
-  }
+  const planningBlockUnlink = blockOkrPlanningEdit(objPerm.status);
+  if (planningBlockUnlink) return planningBlockUnlink;
+
   if (!(await canAccessKeyResult({
     currentMembershipId: auth.context.membershipId,
     action: "update",
@@ -1359,14 +1383,6 @@ export async function unlinkKeyResultInitiativeAction(input: {
 
   if (error) return { error: error.message };
   revalidateOkrPaths();
-  await scheduleOkrContributionAssessmentJob({
-    supabase,
-    organizationId: auth.context.organizationId,
-    cycleInstanceId,
-    okrObjectiveId: krPerm.okr_objective_id,
-    membershipId: auth.context.membershipId,
-    trigger: "initiative_link_remove",
-  });
   return {};
 }
 
@@ -1395,9 +1411,8 @@ async function loadKrSuggestionPermissionContext(params: {
   if (!obj?.id || obj.cycle_instance_id !== cycleInstanceId) {
     return { error: "Key Result gehört nicht zu diesem Zyklus." as const };
   }
-  if (obj.status === "shifted") {
-    return { error: "Initiative-Vorschläge für verschobenes Objective nicht änderbar." as const };
-  }
+  const planningBlock = blockOkrPlanningEdit(obj.status);
+  if (planningBlock) return { error: planningBlock.error as string };
   return { kr, obj };
 }
 
@@ -1619,7 +1634,8 @@ async function applyOkrObjectiveUnifiedManualContributionLevel(input: {
     .maybeSingle();
 
   if (!obj?.id) return { error: "Objective nicht gefunden." };
-  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  const planningBlock = blockOkrPlanningEdit(obj.status);
+  if (planningBlock) return planningBlock;
 
   if (
     !(await canAccessObjective({
@@ -1635,12 +1651,17 @@ async function applyOkrObjectiveUnifiedManualContributionLevel(input: {
     return objectiveWriteDeniedError();
   }
 
-  const targets = await fetchOkrContributionTargetsForObjective(
+  const directionTarget = await fetchOkrContributionDirectionTargetForObjective(
     supabase,
     organizationId,
     cycleInstanceId,
     okrObjectiveId
   );
+  if (!directionTarget) {
+    return { error: "Stoßrichtung fehlt — manuelle Einstufung nicht möglich." };
+  }
+
+  const targets = [directionTarget];
 
   for (const t of targets) {
     const { data: existing } = await supabase
@@ -1742,7 +1763,10 @@ async function runOkrPlanningPanelContributionFollowUp(input: {
     }
   }
 
-  if (contribLlmOn) {
+  const runContributionAssessment =
+    String(input.formData.get("run_contribution_assessment") ?? "").trim() === "1";
+
+  if (contribLlmOn && runContributionAssessment) {
     await scheduleOkrContributionAssessmentJob({
       supabase: input.supabase,
       organizationId: input.organizationId,
@@ -1792,12 +1816,8 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
     return { error: "OKR-Objective nicht gefunden." };
   }
 
-  if (existingObjective.status === "shifted") {
-    return {
-      error:
-        "Dieses Objective wurde verschoben — Bearbeitung im alten Zeitraum ist deaktiviert.",
-    };
-  }
+  const planningBlock = blockOkrPlanningEdit(existingObjective.status);
+  if (planningBlock) return planningBlock;
 
   const objectiveForAccess = {
     id: existingObjective.id,
@@ -1815,12 +1835,16 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
   const deputyRaw = String(formData.get("deputy_membership_id") ?? "").trim();
 
   if (canEditObj) {
+    const strategicDirectionId = String(formData.get("strategic_direction_id") ?? "").trim();
+    if (!strategicDirectionId) {
+      return { error: "Stoßrichtung fehlt." };
+    }
     const objRes = await updateOkrObjectiveAction({
       cycleInstanceId,
       objectiveId,
       title: String(formData.get("title") ?? ""),
       description: String(formData.get("description") ?? ""),
-      strategicDirectionId: String(formData.get("strategic_direction_id") ?? ""),
+      strategicDirectionId,
       ownerMembershipId: ownerRaw,
       deputyMembershipId: deputyRaw || null,
     });
@@ -1894,13 +1918,22 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
     let ownerForKr: string | null | undefined = undefined;
     if (settings.okrKrOwnerMustMatchObjective) {
       ownerForKr = resolvedObjectiveOwner;
-    } else {
+    } else if (formData.has(`kr_${krId}_owner_membership_id`)) {
       const krOwnerRaw = String(formData.get(`kr_${krId}_owner_membership_id`) ?? "").trim();
-      ownerForKr = krOwnerRaw || null;
+      ownerForKr = resolveKeyResultOwnerMembershipPatch(
+        row.owner_membership_id ?? null,
+        krOwnerRaw || null
+      );
     }
 
     const krDeputyFieldPresent = formData.has(`kr_${krId}_deputy_membership_id`);
-    const krDeputyRaw = String(formData.get(`kr_${krId}_deputy_membership_id`) ?? "").trim();
+    const krDeputyRaw = krDeputyFieldPresent
+      ? String(formData.get(`kr_${krId}_deputy_membership_id`) ?? "").trim()
+      : undefined;
+    const deputyForKr = resolveKeyResultDeputyMembershipPatch(
+      row.deputy_membership_id ?? null,
+      krDeputyFieldPresent ? krDeputyRaw || null : undefined
+    );
 
     const krRes = await updateKeyResultAction({
       keyResultId: krId,
@@ -1910,9 +1943,22 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
       targetValue: formDataOptionalNumber(formData.get(`kr_${krId}_target_value`)),
       measurementUnit: String(formData.get(`kr_${krId}_measurement_unit`) ?? "") || null,
       ownerMembershipId: ownerForKr,
-      deputyMembershipId: krDeputyFieldPresent ? krDeputyRaw || null : undefined,
+      deputyMembershipId: deputyForKr,
     });
     if ("error" in krRes && krRes.error) return krRes;
+
+    if (formData.has(`kr_${krId}_initiative_ids_json`)) {
+      const linkRes = await replaceKeyResultInitiativeLinks({
+        supabase,
+        organizationId: auth.context.organizationId,
+        cycleInstanceId,
+        keyResultId: krId,
+        okrObjectiveId: objectiveId,
+        initiativeIds: parseKrInitiativeIdsFromForm(formData, krId),
+        membershipId: auth.context.membershipId,
+      });
+      if (linkRes.error) return { error: linkRes.error };
+    }
   }
 
   const fin = await runOkrPlanningPanelContributionFollowUp({
@@ -1990,6 +2036,10 @@ export async function createOkrCheckInAction(input: {
     return { error: "Check-in nicht möglich: Objective ist als verschoben markiert." };
   }
 
+  if (!okrObjectiveAllowsCheckIn(obj.status)) {
+    return { error: okrCheckInBlockedMessageDe(obj.status) };
+  }
+
   if (!(await canAccessKeyResult({
     currentMembershipId: auth.context.membershipId,
     action: "update",
@@ -2008,21 +2058,88 @@ export async function createOkrCheckInAction(input: {
   }
 
   const conf = Math.min(10, Math.max(1, Math.round(input.confidenceLevel)));
+  const isHundred = progressClamped >= 100;
 
-  const { error: insErr } = await supabase.schema("app").from("okr_updates").insert({
-    organization_id: auth.context.organizationId,
-    cycle_instance_id: input.cycleInstanceId,
-    okr_cycle_id: input.okrCycleId,
-    key_result_id: input.keyResultId,
-    progress_value: progressClamped,
-    confidence_level: conf,
-    comment: commentTrimmed,
-    created_by_membership_id: auth.context.membershipId,
-  });
+  if (!isHundred) {
+    await supabase.schema("app").rpc("completion_review_cancel_open_for_key_result", {
+      p_organization_id: auth.context.organizationId,
+      p_key_result_id: input.keyResultId,
+      p_cancel_reason: "superseded_by_new_checkin",
+    });
+  }
+
+  const { data: insertedUpdate, error: insErr } = await supabase
+    .schema("app")
+    .from("okr_updates")
+    .insert({
+      organization_id: auth.context.organizationId,
+      cycle_instance_id: input.cycleInstanceId,
+      okr_cycle_id: input.okrCycleId,
+      key_result_id: input.keyResultId,
+      progress_value: progressClamped,
+      confidence_level: conf,
+      comment: commentTrimmed,
+      created_by_membership_id: auth.context.membershipId,
+      verification_status: isHundred ? "pending" : null,
+    })
+    .select("id")
+    .single();
 
   if (insErr) return { error: insErr.message };
 
+  if (isHundred) {
+    let assigneeResolution;
+    try {
+      assigneeResolution = await resolveApprovalAssignee(
+        auth.context.organizationId,
+        auth.context.membershipId
+      );
+    } catch {
+      await supabase
+        .schema("app")
+        .from("okr_updates")
+        .update({ verification_status: "superseded" })
+        .eq("id", insertedUpdate.id);
+      return {
+        error:
+          "Kein Vorgesetzter für die 100-%-Bestätigung ermittelbar. Bitte Hierarchie unter Verantwortliche pflegen.",
+      };
+    }
+
+    const { data: krTitleRow } = await supabase
+      .schema("app")
+      .from("key_results")
+      .select("title")
+      .eq("id", input.keyResultId)
+      .maybeSingle();
+    const krTitle = (krTitleRow?.title as string | undefined)?.trim() || "Key Result";
+
+    const { error: submitErr } = await supabase.schema("app").rpc("completion_review_submit", {
+      p_okr_update_id: insertedUpdate.id,
+      p_key_result_id: input.keyResultId,
+      p_assigned_membership_id: assigneeResolution.assigneeMembershipId,
+      p_routing_mode: assigneeResolution.routingMode,
+      p_routing_reason: assigneeResolution.routingReason,
+      p_title: `Abschluss bestätigen: ${krTitle}`,
+      p_description: commentTrimmed,
+    });
+
+    if (submitErr) {
+      await supabase
+        .schema("app")
+        .from("okr_updates")
+        .update({ verification_status: "superseded" })
+        .eq("id", insertedUpdate.id);
+      return {
+        error: submitErr.message.includes("completion-")
+          ? "Bestätigungs-Task konnte nicht erstellt werden."
+          : submitErr.message,
+      };
+    }
+  }
+
   revalidateOkrPaths();
+  revalidatePath("/my-tasks");
   return {};
 }
 
@@ -2633,7 +2750,7 @@ export async function deleteOkrReviewSessionAction(input: { sessionId: string })
 export async function acceptOkrContributionEdgeAction(input: {
   cycleInstanceId: string;
   okrObjectiveId: string;
-  targetType: "initiative" | "strategy_objective";
+  targetType: "initiative" | "strategy_objective" | "strategic_direction";
   targetId: string;
 }) {
   const auth = await requireOkrWrite();
@@ -2649,7 +2766,8 @@ export async function acceptOkrContributionEdgeAction(input: {
     .eq("cycle_instance_id", input.cycleInstanceId)
     .maybeSingle();
   if (!obj?.id) return { error: "Objective nicht gefunden." };
-  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  const planningBlockAccept = blockOkrPlanningEdit(obj.status);
+  if (planningBlockAccept) return planningBlockAccept;
   if (
     !(await canAccessObjective({
       currentMembershipId: auth.context.membershipId,
@@ -2695,7 +2813,7 @@ export async function acceptOkrContributionEdgeAction(input: {
 export async function dismissOkrContributionSuggestionAction(input: {
   cycleInstanceId: string;
   okrObjectiveId: string;
-  targetType: "initiative" | "strategy_objective";
+  targetType: "initiative" | "strategy_objective" | "strategic_direction";
   targetId: string;
 }) {
   const auth = await requireOkrWrite();
@@ -2711,7 +2829,8 @@ export async function dismissOkrContributionSuggestionAction(input: {
     .eq("cycle_instance_id", input.cycleInstanceId)
     .maybeSingle();
   if (!obj?.id) return { error: "Objective nicht gefunden." };
-  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  const planningBlockDismiss = blockOkrPlanningEdit(obj.status);
+  if (planningBlockDismiss) return planningBlockDismiss;
   if (
     !(await canAccessObjective({
       currentMembershipId: auth.context.membershipId,
@@ -2743,7 +2862,12 @@ export async function dismissOkrContributionSuggestionAction(input: {
     .update({
       llm_suggestion_dismissed: true,
       llm_level: null,
+      llm_alignment_level: null,
+      llm_ambition_level: null,
+      llm_formulation_level: null,
+      llm_scope_fit_level: null,
       llm_reason: null,
+      llm_tension_note: null,
       llm_assessment_run_id: null,
     })
     .eq("id", edge.id);
@@ -2756,7 +2880,7 @@ export async function dismissOkrContributionSuggestionAction(input: {
 export async function setOkrContributionManualAction(input: {
   cycleInstanceId: string;
   okrObjectiveId: string;
-  targetType: "initiative" | "strategy_objective";
+  targetType: "initiative" | "strategy_objective" | "strategic_direction";
   targetId: string;
   level: string;
 }) {
@@ -2775,7 +2899,8 @@ export async function setOkrContributionManualAction(input: {
     .eq("cycle_instance_id", input.cycleInstanceId)
     .maybeSingle();
   if (!obj?.id) return { error: "Objective nicht gefunden." };
-  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  const planningBlockManual = blockOkrPlanningEdit(obj.status);
+  if (planningBlockManual) return planningBlockManual;
   if (
     !(await canAccessObjective({
       currentMembershipId: auth.context.membershipId,
@@ -2845,7 +2970,8 @@ export async function recalculateOkrContributionAssessmentAction(input: {
     .eq("cycle_instance_id", input.cycleInstanceId)
     .maybeSingle();
   if (!obj?.id) return { error: "Objective nicht gefunden." };
-  if (obj.status === "shifted") return { error: "Schreibgeschützt." };
+  const planningBlockRecalc = blockOkrPlanningEdit(obj.status);
+  if (planningBlockRecalc) return planningBlockRecalc;
   if (
     !(await canAccessObjective({
       currentMembershipId: auth.context.membershipId,

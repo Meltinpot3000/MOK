@@ -1,4 +1,6 @@
 import type { OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
+import { okrObjectiveAllowsCheckIn } from "@/lib/okr/okr-execution-gate";
+import { okrObjectiveVisibleInTracking } from "@/lib/okr/okr-objective-lifecycle";
 import type { OkrPlanningObjectiveRow } from "@/lib/okr/planning-data";
 import {
   canReadKeyResultFromBulk,
@@ -85,6 +87,13 @@ export function filterPlanningObjectivesForRead(
   );
 }
 
+/** Entwürfe erscheinen nicht im Tracking (nur Planung). */
+export function filterObjectiveViewsForTrackingLifecycle(
+  views: OkrObjectiveView[]
+): OkrObjectiveView[] {
+  return views.filter((ov) => okrObjectiveVisibleInTracking(ov.objective.status));
+}
+
 export function filterObjectiveViewsForTrackingRead(
   views: OkrObjectiveView[],
   bulk: OkrBulkAccessContext
@@ -114,15 +123,18 @@ export function buildKeyResultUpdateFlagsForTracking(
       owner_membership_id: ov.objective.ownerMembershipId,
       deputy_membership_id: ov.objective.deputyMembershipId ?? null,
     };
+    const executionOpen = okrObjectiveAllowsCheckIn(ov.objective.status);
     for (const kv of ov.keyResults) {
-      out[kv.keyResult.id] = canUpdateKeyResultFromBulk(
-        bulk,
-        {
-          owner_membership_id: kv.keyResult.ownerMembershipId,
-          deputy_membership_id: kv.keyResult.deputyMembershipId ?? null,
-        },
-        objRow
-      );
+      out[kv.keyResult.id] =
+        executionOpen &&
+        canUpdateKeyResultFromBulk(
+          bulk,
+          {
+            owner_membership_id: kv.keyResult.ownerMembershipId,
+            deputy_membership_id: kv.keyResult.deputyMembershipId ?? null,
+          },
+          objRow
+        );
     }
   }
   return out;

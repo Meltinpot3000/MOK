@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { OkrCycleKpis, OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
+import {
+  buildOkrDashboardGroups,
+  type OkrDashboardGroupMode,
+} from "@/lib/okr/okr-dashboard-grouping";
 import { ExpandableTable, type ColumnDef } from "@/components/ceo/ExpandableTable";
+import { OkrDashboardGroupSummaryBar } from "@/components/ceo/okr/OkrDashboardGroupSummary";
 import { OkrKpiBar } from "@/components/ceo/okr/OkrKpiBar";
 import { OkrObjectiveProgressLineChart } from "@/components/ceo/okr/OkrObjectiveProgressLineChart";
 import { OkrProgressBar } from "@/components/ceo/okr/OkrProgressBar";
@@ -31,6 +36,12 @@ function confidenceLabel(level: number | null | undefined): string {
   return `${Math.round(Number(level))}/10`;
 }
 
+const GROUP_MODE_OPTIONS: { value: OkrDashboardGroupMode; label: string }[] = [
+  { value: "none", label: "Keine" },
+  { value: "direction", label: "Stoßrichtung" },
+  { value: "owner", label: "Owner" },
+];
+
 type OkrDashboardClientProps = {
   kpis: OkrCycleKpis;
   objectiveViews: OkrObjectiveView[];
@@ -46,6 +57,8 @@ export function OkrDashboardClient({
   selectedOkrCycleLabel,
   updatesByKeyResultId,
 }: OkrDashboardClientProps) {
+  const [groupMode, setGroupMode] = useState<OkrDashboardGroupMode>("none");
+
   const trackingHref = useMemo(
     () => (objectiveId: string) => {
       const q = new URLSearchParams({ okrCycle: okrCycleId, objective: objectiveId });
@@ -62,6 +75,14 @@ export function OkrDashboardClient({
         sortValue: (ov) => ov.objective.title,
         render: (ov) => (
           <span className="text-sm font-medium text-zinc-900">{ov.objective.title}</span>
+        ),
+      },
+      {
+        id: "owner",
+        label: "Owner",
+        sortValue: (ov) => ov.objective.ownerDisplayName ?? "",
+        render: (ov) => (
+          <span className="text-xs text-zinc-700">{ov.objective.ownerDisplayName ?? "—"}</span>
         ),
       },
       {
@@ -111,6 +132,87 @@ export function OkrDashboardClient({
     []
   );
 
+  const groups = useMemo(
+    () => buildOkrDashboardGroups(objectiveViews, groupMode),
+    [objectiveViews, groupMode]
+  );
+
+  const groupSectionLabel = groupMode === "direction" ? "Stoßrichtung" : "Owner";
+
+  const renderExpandedContent = (ov: OkrObjectiveView) => {
+    const rollupPoints = buildRollupSeries(ov, updatesByKeyResultId);
+    return (
+      <div className="border-t border-zinc-100 bg-zinc-50/60 px-2 py-3 sm:px-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-200/80 pb-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-900">{ov.objective.title}</p>
+            <p className="truncate text-[11px] text-zinc-500">
+              {ov.objective.leadingStrategicDirectionTitle ?? "—"} · {ov.objective.ownerDisplayName ?? "—"}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <OkrStatusBadge status={ov.rollupStatus} />
+            <span className="text-[11px] text-zinc-400">{formatDeDate(ov.lastActivityAt)}</span>
+          </div>
+        </div>
+
+        {ov.warnings.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {ov.warnings.map((w) => (
+              <OkrWarningBadge key={w} kind={w} />
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-3 rounded-md border border-zinc-200/80 bg-white px-2 py-2">
+          <OkrRollupSparkline points={rollupPoints} />
+        </div>
+
+        <ul className="mt-2 divide-y divide-zinc-100 rounded-md border border-zinc-200 bg-white">
+          {ov.keyResults.map((kv) => {
+            const updates = updatesByKeyResultId[kv.keyResult.id] ?? [];
+            const lastIn = updates[0];
+            return (
+              <li key={kv.keyResult.id} className="px-2 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium text-zinc-900">{kv.keyResult.title}</p>
+                    <p className="truncate text-[10px] text-zinc-500">
+                      {Math.round(kv.progress)}%
+                      {Math.round(kv.metricProgress) !== Math.round(kv.progress)
+                        ? ` · Metrik ${Math.round(kv.metricProgress)}%`
+                        : ""}{" "}
+                      · Zuversicht {confidenceLabel(kv.confidenceLevel)}
+                      {lastIn ? ` · zuletzt ${formatDeDate(lastIn.created_at)}` : ""}
+                    </p>
+                  </div>
+                  <OkrStatusBadge status={kv.reviewStatus} />
+                  <div className="h-1 w-20 shrink-0 sm:w-24">
+                    <OkrProgressBar value={kv.progress} />
+                  </div>
+                </div>
+                {kv.warnings.length > 0 ? (
+                  <div className="mt-1 flex flex-wrap gap-0.5">
+                    {kv.warnings.map((w) => (
+                      <OkrWarningBadge key={w} kind={w} />
+                    ))}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+
+        <Link
+          href={trackingHref(ov.objective.id)}
+          className="mt-3 inline-block text-[11px] font-medium text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+        >
+          Im Tracking bearbeiten →
+        </Link>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5">
       <OkrKpiBar kpis={kpis} okrCycleId={okrCycleId} />
@@ -122,92 +224,56 @@ export function OkrDashboardClient({
       <OkrObjectiveProgressLineChart objectiveViews={objectiveViews} updatesByKeyResultId={updatesByKeyResultId} />
 
       <div className="rounded-lg border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 px-3 py-2">
-          <h2 className="text-sm font-semibold text-zinc-900">OKR-Objectives</h2>
-          <p className="text-[11px] text-zinc-500">Zeile aufklappen für Key Results und Verlauf.</p>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-100 px-3 py-2">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-900">OKR-Objectives</h2>
+            <p className="text-[11px] text-zinc-500">Zeile aufklappen für Key Results und Verlauf.</p>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-zinc-600">
+            <span className="font-medium text-zinc-700">Gruppieren nach</span>
+            <select
+              value={groupMode}
+              onChange={(e) => setGroupMode(e.target.value as OkrDashboardGroupMode)}
+              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800"
+            >
+              {GROUP_MODE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+
         <div className="p-2 sm:p-3">
-          <ExpandableTable<OkrObjectiveView>
-            columns={tableColumns}
-            rows={objectiveViews}
-            getRowId={(ov) => ov.objective.id}
-            enableColumnPickerUi={false}
-            expandLabel=""
-            emptyMessage="Keine OKR-Objectives."
-            renderExpandedContent={(ov) => {
-              const rollupPoints = buildRollupSeries(ov, updatesByKeyResultId);
-              return (
-                <div className="border-t border-zinc-100 bg-zinc-50/60 px-2 py-3 sm:px-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-200/80 pb-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-zinc-900">{ov.objective.title}</p>
-                      <p className="truncate text-[11px] text-zinc-500">
-                        {ov.objective.leadingStrategicDirectionTitle ?? "—"} · {ov.objective.ownerDisplayName ?? "—"}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <OkrStatusBadge status={ov.rollupStatus} />
-                      <span className="text-[11px] text-zinc-400">{formatDeDate(ov.lastActivityAt)}</span>
-                    </div>
-                  </div>
-
-                  {ov.warnings.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {ov.warnings.map((w) => (
-                        <OkrWarningBadge key={w} kind={w} />
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 rounded-md border border-zinc-200/80 bg-white px-2 py-2">
-                    <OkrRollupSparkline points={rollupPoints} />
-                  </div>
-
-                  <ul className="mt-2 divide-y divide-zinc-100 rounded-md border border-zinc-200 bg-white">
-                    {ov.keyResults.map((kv) => {
-                      const updates = updatesByKeyResultId[kv.keyResult.id] ?? [];
-                      const lastIn = updates[0];
-                      return (
-                        <li key={kv.keyResult.id} className="px-2 py-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium text-zinc-900">{kv.keyResult.title}</p>
-                              <p className="truncate text-[10px] text-zinc-500">
-                                {Math.round(kv.progress)}%
-                                {Math.round(kv.metricProgress) !== Math.round(kv.progress)
-                                  ? ` · Metrik ${Math.round(kv.metricProgress)}%`
-                                  : ""}{" "}
-                                · Zuversicht {confidenceLabel(kv.confidenceLevel)}
-                                {lastIn ? ` · zuletzt ${formatDeDate(lastIn.created_at)}` : ""}
-                              </p>
-                            </div>
-                            <OkrStatusBadge status={kv.reviewStatus} />
-                            <div className="h-1 w-20 shrink-0 sm:w-24">
-                              <OkrProgressBar value={kv.progress} />
-                            </div>
-                          </div>
-                          {kv.warnings.length > 0 ? (
-                            <div className="mt-1 flex flex-wrap gap-0.5">
-                              {kv.warnings.map((w) => (
-                                <OkrWarningBadge key={w} kind={w} />
-                              ))}
-                            </div>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-
-                  <Link
-                    href={trackingHref(ov.objective.id)}
-                    className="mt-3 inline-block text-[11px] font-medium text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
-                  >
-                    Im Tracking bearbeiten →
-                  </Link>
-                </div>
-              );
-            }}
-          />
+          {groups ? (
+            <div className="space-y-6">
+              {groups.map((group) => (
+                <section key={group.key}>
+                  <OkrDashboardGroupSummaryBar group={group} groupLabel={groupSectionLabel} />
+                  <ExpandableTable<OkrObjectiveView>
+                    columns={tableColumns}
+                    rows={group.objectives}
+                    getRowId={(ov) => ov.objective.id}
+                    enableColumnPickerUi
+                    expandLabel=""
+                    emptyMessage="Keine OKR-Objectives in dieser Gruppe."
+                    renderExpandedContent={renderExpandedContent}
+                  />
+                </section>
+              ))}
+            </div>
+          ) : (
+            <ExpandableTable<OkrObjectiveView>
+              columns={tableColumns}
+              rows={objectiveViews}
+              getRowId={(ov) => ov.objective.id}
+              enableColumnPickerUi
+              expandLabel=""
+              emptyMessage="Keine OKR-Objectives."
+              renderExpandedContent={renderExpandedContent}
+            />
+          )}
         </div>
       </div>
     </div>

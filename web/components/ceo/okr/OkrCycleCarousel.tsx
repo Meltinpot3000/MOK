@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useOkrPlanningDirty } from "@/components/ceo/okr/okr-planning-dirty";
 import type { OkrCycleOption } from "@/lib/okr/planning-data";
 
 function formatDeRange(startIso: string, endIso: string): string {
@@ -22,6 +23,7 @@ function OkrCycleCarouselInner({ cycles, selectedId }: InnerProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { requestNavigation } = useOkrPlanningDirty();
 
   const sorted = useMemo(
     () => [...cycles].sort((a, b) => Date.parse(a.start_date) - Date.parse(b.start_date)),
@@ -41,12 +43,13 @@ function OkrCycleCarouselInner({ cycles, selectedId }: InnerProps) {
       if (sorted.length === 0) return;
       const clamped = Math.max(0, Math.min(sorted.length - 1, nextIdx));
       const id = sorted[clamped]?.id;
-      if (!id) return;
+      if (!id || id === selectedId) return;
       const p = new URLSearchParams(searchParams.toString());
       p.set("okrCycle", id);
-      router.push(`${pathname}?${p.toString()}`);
+      const href = `${pathname}?${p.toString()}`;
+      requestNavigation(() => router.push(href));
     },
-    [pathname, router, searchParams, sorted]
+    [pathname, requestNavigation, router, searchParams, selectedId, sorted]
   );
 
   if (sorted.length === 0) {

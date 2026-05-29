@@ -5,7 +5,7 @@ import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
 import { OkrDashboardClient } from "@/components/ceo/okr/OkrDashboardClient";
-import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
+import { OkrAreaNavWithCounts } from "@/components/ceo/okr/OkrAreaNavWithCounts";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 
 function pageHeader() {
@@ -36,7 +36,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts okrCycle={null} />
         <div className="brand-card p-6">
           <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
         </div>
@@ -45,7 +45,8 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   }
 
   const params = await searchParams;
-  const ctx = await getOkrCycleContext(context.organizationId, cycle.id, params.okrCycle?.trim() || null);
+  const okrCycleParam = params.okrCycle?.trim() || null;
+  const ctx = await getOkrCycleContext(context.organizationId, cycle.id, okrCycleParam);
   const { workspace, objectiveViews, kpis } = ctx;
   const selectedCycle = workspace.okrCycles.find((c) => c.id === workspace.selectedOkrCycleId);
 
@@ -58,7 +59,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts okrCycle={okrCycleParam} />
         {cycleStrip}
         <div className="brand-card space-y-2 p-6">
           <p className="text-sm text-zinc-600">Kein OKR-Zeitraum verfügbar oder auswählbar.</p>
@@ -74,7 +75,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
     return (
       <section className="space-y-4">
         {pageHeader()}
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts okrCycle={okrCycleParam} />
         {cycleStrip}
         <div className="brand-card p-6 text-sm text-zinc-600">
           <p>Keine OKR-Objectives in diesem Zeitraum.</p>
@@ -94,7 +95,7 @@ export default async function OkrDashboardPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-4">
       {pageHeader()}
-      <OkrAreaNav />
+      <OkrAreaNavWithCounts okrCycle={okrCycleParam} />
       {cycleStrip}
 
       <OkrDashboardClient

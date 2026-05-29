@@ -12,6 +12,9 @@ export type CollectSampleProfileOptions = {
   databaseUrl: string;
   tables: SchemaTableInventory[];
   organizationId?: string;
+  maxTables?: number;
+  maxDistinctValues?: number;
+  maxSampleTitles?: number;
 };
 
 function guessTitleColumn(columns: SchemaTableInventory["columns"]): string | null {
@@ -38,7 +41,10 @@ export async function collectSampleProfiles(
   await client.connect();
   const out: TableSampleProfile[] = [];
   try {
-    const subset = options.tables.slice(0, SAMPLE_PROFILE_MAX_TABLES);
+    const maxTables = options.maxTables ?? SAMPLE_PROFILE_MAX_TABLES;
+    const maxDistinct = options.maxDistinctValues ?? SAMPLE_PROFILE_MAX_DISTINCT_VALUES;
+    const maxTitles = options.maxSampleTitles ?? SAMPLE_PROFILE_MAX_SAMPLE_TITLES;
+    const subset = options.tables.slice(0, maxTables);
     for (const t of subset) {
       const full = t.fullName;
       const quoted = full.split(".").map((p) => `"${p.replace(/"/g, "")}"`).join(".");
@@ -58,19 +64,19 @@ export async function collectSampleProfiles(
         try {
           if (orgId && t.columns.some((c) => c.name === "organization_id")) {
             const sRes = await client.query<{ v: string }>(
-              `select distinct ${qTitle}::text as v from ${quoted} where organization_id = '${orgId}' and ${qTitle} is not null limit ${SAMPLE_PROFILE_MAX_SAMPLE_TITLES}`
+              `select distinct ${qTitle}::text as v from ${quoted} where organization_id = '${orgId}' and ${qTitle} is not null limit ${maxTitles}`
             );
             for (const r of sRes.rows) {
-              if (r.v && sampleTitles.length < SAMPLE_PROFILE_MAX_SAMPLE_TITLES) {
+              if (r.v && sampleTitles.length < maxTitles) {
                 sampleTitles.push(r.v.slice(0, 200));
               }
             }
           } else {
             const sRes = await client.query<{ v: string }>(
-              `select distinct ${qTitle}::text as v from ${quoted} where ${qTitle} is not null limit ${SAMPLE_PROFILE_MAX_SAMPLE_TITLES}`
+              `select distinct ${qTitle}::text as v from ${quoted} where ${qTitle} is not null limit ${maxTitles}`
             );
             for (const r of sRes.rows) {
-              if (r.v && sampleTitles.length < SAMPLE_PROFILE_MAX_SAMPLE_TITLES) {
+              if (r.v && sampleTitles.length < maxTitles) {
                 sampleTitles.push(r.v.slice(0, 200));
               }
             }
@@ -86,7 +92,7 @@ export async function collectSampleProfiles(
         const qe = `"${enumCol.replace(/"/g, "")}"`;
         try {
           const eRes = await client.query<{ v: string }>(
-            `select distinct ${qe}::text as v from ${quoted} where ${qe} is not null limit ${SAMPLE_PROFILE_MAX_DISTINCT_VALUES}`
+            `select distinct ${qe}::text as v from ${quoted} where ${qe} is not null limit ${maxDistinct}`
           );
           distinctEnumLike.push({
             column: enumCol,

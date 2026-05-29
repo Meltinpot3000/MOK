@@ -48,7 +48,7 @@ export function RequestApprovalButton({
             organizationId,
             sourceObjectType,
             sourceObjectId,
-            title: `Approval: ${objectTitle.trim() || sourceObjectType}`,
+            title: `Freigabe: ${objectTitle.trim() || sourceObjectType}`,
             description: description ?? null,
           });
           if (!r.ok) {

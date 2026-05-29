@@ -323,6 +323,6 @@ export type SemanticMapRunDiagnostics = {
     | "missing_evidence"
     | "missing_route"
     | "failed";
-  /** true: nur Diagnose, keine harte Blockade der produktiven Chat-Antwort (MVP). */
-  diagnosticsOnly: true;
+  /** false: Diagnose für Verifier-Enforcement (Feature-Flag oder bewusster Produktionspfad). */
+  diagnosticsOnly: boolean;
 };

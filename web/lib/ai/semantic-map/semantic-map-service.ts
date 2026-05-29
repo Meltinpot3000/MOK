@@ -2,6 +2,7 @@ import { getProvider, type LlmProviderName } from "@/lib/llm/providers";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import { buildMapDraftWithLlm } from "./builder/build-map-draft";
+import { resolveSemanticMapBuildScope } from "./inventory/build-scope";
 import { collectFullSemanticSourceInventory } from "./inventory/collect-full-inventory";
 import { resolveDatabaseUrl } from "./inventory/env";
 import { buildCompactMapForPlanner } from "./runtime/build-compact-map-for-planner";
@@ -52,6 +53,8 @@ export async function buildSemanticMapDraft(input: {
   triggeredByMembershipId?: string;
   model?: { provider: string; name: string };
   webRoot?: string;
+  /** `full` oder `strategy`; Fallback: `AI_SEMANTIC_MAP_BUILD_SCOPE`. */
+  scope?: string;
 }): Promise<SemanticMapDraftResult> {
   const admin = requireAdmin();
   const dbUrl = resolveDatabaseUrl();
@@ -59,10 +62,16 @@ export async function buildSemanticMapDraft(input: {
     throw new Error("buildSemanticMapDraft: DATABASE_URL / SUPABASE_POOLER_DB_URL fehlt.");
   }
 
+  const scope = resolveSemanticMapBuildScope({
+    scopeArg: input.scope ?? null,
+    envScope: process.env.AI_SEMANTIC_MAP_BUILD_SCOPE,
+  });
+
   const inventory = await collectFullSemanticSourceInventory({
     databaseUrl: dbUrl,
     organizationId: input.organizationId,
     webRoot: input.webRoot,
+    scope,
   });
 
   const { id: runId } = await repo.insertMapRun(admin, {
@@ -86,6 +95,11 @@ export async function buildSemanticMapDraft(input: {
     draftResult = await buildMapDraftWithLlm({
       inventoryJson: invJson,
       model: input.model,
+      scope,
+      inventoryTableCount: inventory.tables.length,
+      inventoryToolCount: inventory.tools.length,
+      inventoryUiRouteCount: inventory.uiRoutes.length,
+      inventoryForeignKeyCount: inventory.foreignKeys.length,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

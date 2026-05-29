@@ -11,12 +11,22 @@ import {
   type OkrObjectiveView,
 } from "@/lib/okr/okr-cycle-view-model";
 
+export type KeyResultSupervisorFeedbackRow = {
+  id: string;
+  keyResultId: string;
+  okrUpdateId: string | null;
+  authorMembershipId: string;
+  comment: string;
+  createdAt: string;
+};
+
 export type OkrCycleContext = {
   workspace: OkrPlanningWorkspaceData;
   objectiveViews: OkrObjectiveView[];
   kpis: OkrCycleKpis;
   initiativeIdsWithoutKr: string[];
   updatesByKeyResultId: Map<string, OkrUpdateRow[]>;
+  supervisorFeedbackByKeyResultId: Map<string, KeyResultSupervisorFeedbackRow[]>;
 };
 
 function collectKeyResultIds(workspace: OkrPlanningWorkspaceData): string[] {
@@ -53,27 +63,31 @@ export async function getOkrCycleContext(
     const { data: updatesRaw } = await supabase
       .schema("app")
       .from("okr_updates")
-      .select("key_result_id, progress_value, confidence_level, comment, created_at")
+      .select("id, key_result_id, progress_value, confidence_level, comment, created_at, verification_status")
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", okrScopeInstanceIds)
       .in("key_result_id", keyResultIds)
       .order("created_at", { ascending: false });
 
     const rows = (updatesRaw ?? []) as Array<{
+      id: string;
       key_result_id: string;
       progress_value: number | null;
       confidence_level: number | null;
       comment: string | null;
       created_at: string;
+      verification_status: string | null;
     }>;
 
     for (const row of rows) {
       const list = updatesByKeyResultId.get(row.key_result_id) ?? [];
       list.push({
+        id: row.id,
         progress_value: row.progress_value,
         confidence_level: row.confidence_level,
         created_at: row.created_at,
         comment: row.comment,
+        verification_status: row.verification_status as OkrUpdateRow["verification_status"],
       });
       updatesByKeyResultId.set(row.key_result_id, list);
     }
@@ -113,11 +127,37 @@ export async function getOkrCycleContext(
 
   const kpis = computeOkrCycleKpis(objectiveViews, new Set(initiativeIdsWithoutKr));
 
+  const supervisorFeedbackByKeyResultId = new Map<string, KeyResultSupervisorFeedbackRow[]>();
+  if (keyResultIds.length > 0) {
+    const { data: feedbackRaw } = await supabase
+      .schema("app")
+      .from("key_result_supervisor_feedback")
+      .select("id, key_result_id, okr_update_id, author_membership_id, comment, created_at")
+      .eq("organization_id", organizationId)
+      .in("key_result_id", keyResultIds)
+      .order("created_at", { ascending: false });
+
+    for (const row of feedbackRaw ?? []) {
+      const krId = row.key_result_id as string;
+      const list = supervisorFeedbackByKeyResultId.get(krId) ?? [];
+      list.push({
+        id: row.id as string,
+        keyResultId: krId,
+        okrUpdateId: (row.okr_update_id as string | null) ?? null,
+        authorMembershipId: row.author_membership_id as string,
+        comment: row.comment as string,
+        createdAt: row.created_at as string,
+      });
+      supervisorFeedbackByKeyResultId.set(krId, list);
+    }
+  }
+
   return {
     workspace,
     objectiveViews,
     kpis,
     initiativeIdsWithoutKr,
     updatesByKeyResultId,
+    supervisorFeedbackByKeyResultId,
   };
 }

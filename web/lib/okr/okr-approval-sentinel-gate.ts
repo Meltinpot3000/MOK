@@ -3,7 +3,7 @@ import type { OkrContributionEdgePlanningRow, OkrPlanningObjectiveRow } from "@/
 
 type ContributionEdgeLike = Pick<
   OkrContributionEdgePlanningRow,
-  "confirmedLevel" | "llmLevel" | "llmSuggestionDismissed"
+  "targetType" | "confirmedLevel" | "llmLevel" | "llmSuggestionDismissed"
 >;
 
 /** Wirksame Stufe für Freigabe-Prüfung: bestätigter Wert schlägt LLM; abgelehnte LLM-Vorschläge zählen nicht. */
@@ -13,7 +13,7 @@ export function effectiveOkrContributionEdgeTier(edge: ContributionEdgeLike): st
   return edge.llmLevel ?? null;
 }
 
-const MSG_CONTRIBUTION = `Freigabe wurde nicht angefragt: Sentinel✨ stuft mindestens eine Einzahlungs-Verknüpfung als «unzureichend beschrieben» ein. Bitte Objective-/Kontext-Beschreibungen verbessern, die Stufe in der Planung anpassen und mit «Alles speichern» persistieren — danach kannst du die Freigabe erneut anfragen.`;
+const MSG_CONTRIBUTION = `Freigabe wurde nicht angefragt: Sentinel✨ stuft die Stoßrichtungs-Einstufung (Alignment, Ambition oder Gesamt) als «unzureichend» ein. Bitte Objective und Key Results schärfen, speichern und die Freigabe erneut anfragen.`;
 
 const MSG_KR_CONTEXT = `Freigabe wurde nicht angefragt: Für mindestens ein Key Result meldet Sentinel✨ unzureichenden Kontext (Treiber-/Matching). Bitte KR und Beschreibungen ergänzen, speichern und die Freigabe erneut anfragen.`;
 
@@ -22,6 +22,7 @@ export function getOkrPlanningObjectiveSentinelApprovalBlockMessageDe(
 ): string | null {
   let hasContribution = false;
   for (const e of objective.contributionEdges) {
+    if (e.targetType !== "strategic_direction") continue;
     const t = effectiveOkrContributionEdgeTier(e);
     if (t === "insufficient") hasContribution = true;
   }
@@ -54,13 +55,15 @@ export async function fetchOkrObjectiveSentinelApprovalBlockMessageDe(
   const { data: edgeRows } = await supabase
     .schema("app")
     .from("okr_contribution_edges")
-    .select("confirmed_level, llm_level, llm_suggestion_dismissed")
+    .select("target_type, confirmed_level, llm_level, llm_suggestion_dismissed")
     .eq("organization_id", organizationId)
     .eq("okr_objective_id", okrObjectiveId);
 
   let hasContribution = false;
   for (const row of edgeRows ?? []) {
+    if ((row.target_type as string) !== "strategic_direction") continue;
     const e: ContributionEdgeLike = {
+      targetType: "strategic_direction",
       confirmedLevel: (row.confirmed_level as ContributionEdgeLike["confirmedLevel"]) ?? null,
       llmLevel: (row.llm_level as ContributionEdgeLike["llmLevel"]) ?? null,
       llmSuggestionDismissed: Boolean(row.llm_suggestion_dismissed),

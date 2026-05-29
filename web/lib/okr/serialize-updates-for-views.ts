@@ -13,10 +13,12 @@ export function updatesRecordForObjectiveViews(
       const list = source.get(id);
       if (list && list.length > 0) {
         out[id] = list.map((row) => ({
+          id: row.id,
           progress_value: row.progress_value,
           confidence_level: row.confidence_level,
           created_at: row.created_at,
           comment: row.comment ?? null,
+          verification_status: row.verification_status ?? null,
         }));
       }
     }

@@ -11,6 +11,7 @@
     "db:push": "npx tsx scripts/run-dbmate.ts --migrations-dir supabase/migrations up",
     "db:diagnose-sentinel-map": "npm --prefix web run db:diagnose-sentinel-map",
     "db:seed:programs": "node scripts/run-sql-seed.mjs supabase/seed/012_seed_programs_initiatives_multi_direction.sql",
+    "db:seed:engineering-initiatives": "node scripts/run-sql-seed.mjs supabase/seed/014_seed_engineering_skills_okr_initiatives.sql",
     "tenant:isolation": "npm --prefix web run tenant:isolation",
     "strategy:rollout": "npm --prefix web run strategy:rollout",
     "ai:semantic-map:build": "npm --prefix web run ai:semantic-map:build",

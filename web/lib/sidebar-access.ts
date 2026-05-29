@@ -12,6 +12,7 @@ export type SidebarItemId =
   | "organization"
   | "planning-cycles"
   | "invitations"
+  | "directory-sync"
   | "branding"
   | "access-control"
   | "llm-usage";
@@ -58,6 +59,12 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "llm-usage", href: "/llm-usage", label: "Systemkonfiguration und -information", section: "admin" },
   { id: "branding", href: "/branding", label: "Markenauftritt", section: "admin" },
   { id: "invitations", href: "/invitations", label: "Benutzer", section: "admin" },
+  {
+    id: "directory-sync",
+    href: "/directory-sync",
+    label: "Entra ID (optional)",
+    section: "admin",
+  },
   { id: "planning-cycles", href: "/planning-cycles", label: "Neuer Planungszyklus", section: "cycles" },
 ];
 
@@ -162,6 +169,9 @@ export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boo
   }
 
   if (item.id === "strategy-cycle") {
+    if (pathname === "/unternehmensinfo" || pathname.startsWith("/unternehmensinfo/")) {
+      return false;
+    }
     return (
       pathname === item.href ||
       pathname === "/strategy-matrix" ||

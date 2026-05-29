@@ -4,6 +4,10 @@
  */
 
 import {
+  effectiveProgressFromCheckIns,
+  hasPendingHundredCheckIn,
+} from "@/lib/okr/effective-check-in-progress";
+import {
   computeKeyResultProgress,
   computeKeyResultTrend,
   type KeyResultRow,
@@ -72,6 +76,7 @@ export type OkrKeyResultView = {
   effectiveDeputyMembershipId: string | null;
   effectiveDeputyDisplayName: string | null;
   confidenceLevel: number | null;
+  pendingHundredCheckIn: boolean;
   warnings: OkrWarningKind[];
 };
 
@@ -150,11 +155,8 @@ export function buildOkrKeyResultView(
   const row = krToKeyResultRow(kr);
   const metricProgress = computeKeyResultProgress(row);
   const latestConf = updatesDescending[0];
-  const latestPv = latestConf?.progress_value;
-  const progress =
-    latestPv != null && Number.isFinite(Number(latestPv))
-      ? Math.min(100, Math.max(0, Number(latestPv)))
-      : metricProgress;
+  const progress = effectiveProgressFromCheckIns(updatesDescending, metricProgress);
+  const pendingHundredCheckIn = hasPendingHundredCheckIn(updatesDescending);
   const trend = computeKeyResultTrend(row, updatesDescending);
   const reviewStatus =
     okrCycleDates != null
@@ -208,6 +210,7 @@ export function buildOkrKeyResultView(
     effectiveDeputyMembershipId,
     effectiveDeputyDisplayName,
     confidenceLevel,
+    pendingHundredCheckIn,
     warnings,
   };
 }

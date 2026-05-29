@@ -19,6 +19,13 @@ const SCHEMA = "app";
 
 export type CollectSchemaInventoryOptions = {
   databaseUrl: string;
+  maxTables?: number;
+  maxColumnsPerTable?: number;
+  maxForeignKeys?: number;
+  /** Wenn gesetzt: nur diese Tabellennamen in `app`. */
+  tableAllowlist?: readonly string[] | null;
+  maxViews?: number;
+  maxFunctions?: number;
 };
 
 export async function collectSchemaInventory(
@@ -30,6 +37,13 @@ export async function collectSchemaInventory(
   functions: SchemaFunctionInventory[];
   schemaHash: string;
 }> {
+  const maxTables = options.maxTables ?? SCHEMA_INVENTORY_MAX_TABLES;
+  const maxColumns = options.maxColumnsPerTable ?? SCHEMA_INVENTORY_MAX_COLUMNS_PER_TABLE;
+  const maxFks = options.maxForeignKeys ?? SCHEMA_INVENTORY_MAX_FKS;
+  const maxViews = options.maxViews ?? SCHEMA_INVENTORY_MAX_TABLES;
+  const maxFunctions = options.maxFunctions ?? 200;
+  const allowlist = options.tableAllowlist?.length ? [...options.tableAllowlist] : null;
+
   const client = new pg.Client(postgresConnectionOptions(options.databaseUrl));
   await client.connect();
   try {
@@ -45,10 +59,11 @@ export async function collectSchemaInventory(
       where n.nspname = $1
         and c.relkind = 'r'
         and c.relname not like 'pg_%'
+        and ($3::text[] is null or c.relname = any($3::text[]))
       order by c.relname
       limit $2
       `,
-      [SCHEMA, SCHEMA_INVENTORY_MAX_TABLES]
+      [SCHEMA, maxTables, allowlist]
     );
 
     const tables: SchemaTableInventory[] = [];
@@ -65,7 +80,7 @@ export async function collectSchemaInventory(
         order by ordinal_position
         limit $3
         `,
-        [SCHEMA, row.table_name, SCHEMA_INVENTORY_MAX_COLUMNS_PER_TABLE]
+        [SCHEMA, row.table_name, maxColumns]
       );
       const rowEst =
         row.row_estimate !== null && row.row_estimate !== ""
@@ -109,16 +124,25 @@ export async function collectSchemaInventory(
       order by tc.table_name, tc.constraint_name
       limit $2
       `,
-      [SCHEMA, SCHEMA_INVENTORY_MAX_FKS]
+      [SCHEMA, maxFks]
     );
 
-    const foreignKeys: SchemaForeignKeyInventory[] = fkRes.rows.map((r) => ({
+    let foreignKeys: SchemaForeignKeyInventory[] = fkRes.rows.map((r) => ({
       constraintName: r.constraint_name,
       sourceTableFull: r.src_table,
       sourceColumn: r.src_col,
       targetTableFull: r.tgt_table,
       targetColumn: r.tgt_col,
     }));
+
+    if (allowlist) {
+      const allowed = new Set(allowlist.map((n) => n.toLowerCase()));
+      foreignKeys = foreignKeys.filter((fk) => {
+        const src = fk.sourceTableFull.split(".")[1]?.toLowerCase();
+        const tgt = fk.targetTableFull.split(".")[1]?.toLowerCase();
+        return src && tgt && allowed.has(src) && allowed.has(tgt);
+      });
+    }
 
     const viewRes = await client.query<{ table_name: string }>(
       `
@@ -128,7 +152,7 @@ export async function collectSchemaInventory(
       order by table_name
       limit $2
       `,
-      [SCHEMA, SCHEMA_INVENTORY_MAX_TABLES]
+      [SCHEMA, maxViews]
     );
 
     const views: SchemaViewInventory[] = viewRes.rows.map((v) => ({
@@ -146,9 +170,9 @@ export async function collectSchemaInventory(
       from information_schema.routines
       where routine_schema = $1 and routine_type = 'FUNCTION'
       order by routine_name
-      limit 200
+      limit $2
       `,
-      [SCHEMA]
+      [SCHEMA, maxFunctions]
     );
 
     const functions: SchemaFunctionInventory[] = fnRes.rows.map((f) => ({

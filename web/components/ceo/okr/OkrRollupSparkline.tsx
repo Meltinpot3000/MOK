@@ -16,32 +16,20 @@ function formatDeShort(isoMs: number): string {
   }
 }
 
-/** Monotone cubic Hermite — weiche Kurve durch die Punkte ohne starke Überschwinger. */
-function smoothPathD(
+/** Gerade Verbindung zwischen Check-in-Punkten — kein Spline, damit der Fortschritt nicht überschwingt. */
+function linePathD(
   points: Point[],
   xAt: (t: number) => number,
   yAt: (yp: number) => number
 ): string {
   if (points.length === 0) return "";
-  if (points.length === 1) {
-    const x = xAt(points[0].t);
-    const y = yAt(points[0].y);
-    return `M ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }
-  const pts = points.map((p) => ({ x: xAt(p.t), y: yAt(p.y) }));
-  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
-  }
-  return d;
+  return points
+    .map((p, i) => {
+      const x = xAt(p.t).toFixed(2);
+      const y = yAt(p.y).toFixed(2);
+      return `${i === 0 ? "M" : "L"} ${x} ${y}`;
+    })
+    .join(" ");
 }
 
 type SparkGeom = {
@@ -67,7 +55,7 @@ function buildGeom(points: Point[]): SparkGeom | null {
   const xAt = (t: number) => PAD.l + ((t - t0v) / span) * iw;
   const yAt = (yp: number) => PAD.t + ih - (Math.min(100, Math.max(0, yp)) / 100) * ih;
 
-  const lineD = smoothPathD(points, xAt, yAt);
+  const lineD = linePathD(points, xAt, yAt);
   let areaD = "";
   if (points.length >= 2 && lineD) {
     const baseY = PAD.t + ih;

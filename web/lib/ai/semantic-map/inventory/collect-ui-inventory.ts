@@ -26,10 +26,17 @@ function routeFromAppRelativePath(appRelativeDir: string): string {
 /**
  * Heuristik: `web/app` relativ zu `webRoot` (Default: cwd, z. B. bei `npm --prefix web`).
  */
-export function collectUiInventory(webRoot: string = process.cwd()): UiRouteInventoryEntry[] {
+export function collectUiInventory(
+  webRoot: string = process.cwd(),
+  options?: {
+    maxRoutes?: number;
+    pathFilter?: (path: string) => boolean;
+  }
+): UiRouteInventoryEntry[] {
   const appDir = join(webRoot, "app");
   const out: UiRouteInventoryEntry[] = [];
-  let remaining = UI_INVENTORY_MAX_ROUTES;
+  let remaining = options?.maxRoutes ?? UI_INVENTORY_MAX_ROUTES;
+  const pathFilter = options?.pathFilter;
 
   function visitDir(dir: string) {
     if (remaining <= 0 || !existsSync(dir)) return;
@@ -55,8 +62,10 @@ export function collectUiInventory(webRoot: string = process.cwd()): UiRouteInve
         try {
           const raw = readFileSync(pagePath, "utf8");
           const rel = full.slice(appDir.length).replace(/\\/g, "/").replace(/^\//, "");
+          const path = routeFromAppRelativePath(rel);
+          if (pathFilter && !pathFilter(path)) continue;
           out.push({
-            path: routeFromAppRelativePath(rel),
+            path,
             label: extractExportConstMetadataTitle(raw),
           });
           remaining -= 1;

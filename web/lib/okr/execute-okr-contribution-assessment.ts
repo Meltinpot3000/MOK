@@ -57,16 +57,30 @@ export async function executeOkrContributionAssessmentJob(input: {
     cycleInstanceId: input.cycleInstanceId,
     okrObjectiveId: input.okrObjectiveId,
   });
-  if (!ctx) return;
 
+  if (!ctx) {
+    await input.supabase.schema("app").from("okr_contribution_assessment_runs").insert({
+      organization_id: input.organizationId,
+      cycle_instance_id: input.cycleInstanceId,
+      okr_objective_id: input.okrObjectiveId,
+      trigger: input.trigger,
+      status: "failed",
+      raw_response: null,
+      last_error: "missing_strategic_direction",
+    });
+    return;
+  }
+
+  const strategicDirectionId = ctx.strategicDirection.id;
   const initiativeIds = [...new Set(ctx.keyResults.flatMap((kr) => kr.initiatives.map((i) => i.id)))];
-  const strategyObjectiveIds = ctx.strategyObjectives.map((s) => s.id);
+  const strategyObjectiveIds = ctx.strategyObjectivesUnderDirection.map((s) => s.id);
 
   const contextJson = contextToPromptJson(ctx);
   const maxTokens = resolveLlmMaxOutputTokens(policy, "okr_contribution_assessment");
   const response = await assessOkrContributionsWithLlm({
     contextJson,
     okrObjectiveId: input.okrObjectiveId,
+    strategicDirectionId,
     initiativeIds,
     strategyObjectiveIds,
     maxOutputTokens: maxTokens,
@@ -94,8 +108,9 @@ export async function executeOkrContributionAssessmentJob(input: {
   const rawPayload = response.result
     ? {
         okr_id: response.result.okrId,
-        initiative_contributions: response.result.initiativeContributions,
+        strategic_direction_contribution: response.result.strategicDirectionContribution,
         strategy_objective_contributions: response.result.strategyObjectiveContributions,
+        initiative_contributions: response.result.initiativeContributions,
       }
     : null;
 
@@ -122,18 +137,17 @@ export async function executeOkrContributionAssessmentJob(input: {
   const runId = runRow.id as string;
   if (!response.result) return;
 
-  const byInitiative = new Map(
-    response.result.initiativeContributions.map((x) => [x.initiativeId, x])
-  );
-  const bySo = new Map(
-    response.result.strategyObjectiveContributions.map((x) => [x.objectiveId, x])
-  );
+  const dir = response.result.strategicDirectionContribution;
 
   const upsertEdge = async (params: {
-    targetType: "initiative" | "strategy_objective";
+    targetType: "strategic_direction" | "strategy_objective" | "initiative";
     targetId: string;
     level: OkrContributionTier;
     reason: string;
+    improvementHint: string;
+    alignmentLevel?: OkrContributionTier | null;
+    formulationLevel?: OkrContributionTier | null;
+    scopeFitLevel?: OkrContributionTier | null;
   }) => {
     const { data: existing } = await input.supabase
       .schema("app")
@@ -146,7 +160,12 @@ export async function executeOkrContributionAssessmentJob(input: {
 
     const patch = {
       llm_level: params.level,
+      llm_alignment_level: params.alignmentLevel ?? null,
+      llm_formulation_level: params.formulationLevel ?? null,
+      llm_scope_fit_level: params.scopeFitLevel ?? null,
+      llm_ambition_level: null,
       llm_reason: params.reason.slice(0, 2000),
+      llm_tension_note: params.improvementHint ? params.improvementHint.slice(0, 2000) : null,
       llm_assessment_run_id: runId,
       llm_suggestion_dismissed: false,
     };
@@ -171,24 +190,38 @@ export async function executeOkrContributionAssessmentJob(input: {
     }
   };
 
-  for (const iid of initiativeIds) {
-    const row = byInitiative.get(iid);
-    const level = row?.level ?? "insufficient";
-    const reason =
-      row?.reason ??
-      "Kein Bewertungs-Eintrag aus dem Modell — als «unzureichend beschrieben» gespeichert.";
-    await upsertEdge({ targetType: "initiative", targetId: iid, level, reason });
-  }
+  await upsertEdge({
+    targetType: "strategic_direction",
+    targetId: dir.strategicDirectionId,
+    level: dir.overallLevel,
+    reason: dir.reason,
+    improvementHint: dir.improvementHint,
+    alignmentLevel: dir.alignmentLevel,
+    formulationLevel: dir.formulationLevel,
+    scopeFitLevel: dir.scopeFitLevel,
+  });
 
-  for (const soId of strategyObjectiveIds) {
-    const row = bySo.get(soId);
+  const relevantSoIds = new Set<string>();
+  for (const row of response.result.strategyObjectiveContributions) {
+    if (row.relevance === "not_relevant") continue;
+    if (!row.fitLevel) continue;
+    relevantSoIds.add(row.objectiveId);
     await upsertEdge({
       targetType: "strategy_objective",
-      targetId: soId,
-      level: row?.level ?? "insufficient",
-      reason:
-        row?.reason ??
-        "Kein Bewertungs-Eintrag aus dem Modell — als «unzureichend beschrieben» gespeichert.",
+      targetId: row.objectiveId,
+      level: row.fitLevel,
+      reason: row.reason,
+      improvementHint: row.improvementHint,
+    });
+  }
+
+  for (const row of response.result.initiativeContributions) {
+    await upsertEdge({
+      targetType: "initiative",
+      targetId: row.initiativeId,
+      level: row.executionLinkageLevel,
+      reason: row.reason,
+      improvementHint: row.improvementHint,
     });
   }
 
@@ -205,7 +238,6 @@ export async function executeOkrContributionAssessmentJob(input: {
     }
   }
 
-  const soSet = new Set(strategyObjectiveIds);
   const { data: staleSoEdges } = await input.supabase
     .schema("app")
     .from("okr_contribution_edges")
@@ -213,7 +245,19 @@ export async function executeOkrContributionAssessmentJob(input: {
     .eq("okr_objective_id", input.okrObjectiveId)
     .eq("target_type", "strategy_objective");
   for (const e of staleSoEdges ?? []) {
-    if (!soSet.has(e.target_id as string)) {
+    if (!relevantSoIds.has(e.target_id as string)) {
+      await input.supabase.schema("app").from("okr_contribution_edges").delete().eq("id", e.id);
+    }
+  }
+
+  const { data: staleDirEdges } = await input.supabase
+    .schema("app")
+    .from("okr_contribution_edges")
+    .select("id, target_id")
+    .eq("okr_objective_id", input.okrObjectiveId)
+    .eq("target_type", "strategic_direction");
+  for (const e of staleDirEdges ?? []) {
+    if (e.target_id !== strategicDirectionId) {
       await input.supabase.schema("app").from("okr_contribution_edges").delete().eq("id", e.id);
     }
   }

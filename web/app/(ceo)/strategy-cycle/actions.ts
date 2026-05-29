@@ -788,6 +788,10 @@ async function recomputeAndPersistGraphLayout(params: {
   };
 }
 
+/**
+ * Pflicht fuer mutierende Strategiezyklus-/Workspace-Actions: Phase0-Kontext,
+ * **nav.strategy-cycle.write** (über `canWrite`, nicht nur Read) und aktiver Planungszyklus.
+ */
 async function getWorkspaceContextOrRedirect(): Promise<WorkspaceContext> {
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
@@ -1143,7 +1147,12 @@ export async function saveStrategyReferenceText(formData: FormData) {
     .eq("organization_id", context.organizationId);
 
   await invalidateStrategicContextCache(supabase, context.organizationId);
-  done("/unternehmensinfo?success=strategy-reference-saved");
+  const returnL2Raw = String(formData.get("unternehmensinfo_return_l2") ?? "").trim();
+  const referenceOnlyTabs = new Set(["mission", "vision", "werte", "kultur", "leadership"]);
+  const safeL2 = referenceOnlyTabs.has(returnL2Raw) ? returnL2Raw : "";
+  const qp = new URLSearchParams({ success: "strategy-reference-saved" });
+  if (safeL2) qp.set("l2", safeL2);
+  done(`/unternehmensinfo?${qp.toString()}`);
 }
 
 export async function saveCompanyKennzahlen(formData: FormData) {

@@ -10,6 +10,13 @@ import {
   resolveSourceObjectTitles,
 } from "@/lib/tasks/approval-queries";
 import { getApprovalLifecycleEntry } from "@/lib/tasks/approval-lifecycle-registry";
+import {
+  approvalObjectRowLabelDe,
+  formatApprovalTaskTitleDe,
+  taskPriorityLabelDe,
+  taskStatusLabelDe,
+  taskTypeLabelDe,
+} from "@/lib/tasks/approval-ui-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +50,7 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
   return (
     <section className="space-y-4">
       <div className="brand-card p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Workspace</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Arbeitsbereich</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Meine Aufgaben</h1>
         <nav className="mt-4 flex flex-wrap gap-2 text-sm">
           <FilterLink href="/my-tasks?filter=open" active={filter === "open"}>
@@ -76,7 +83,7 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center text-zinc-500">
-                  Keine Tasks in dieser Ansicht.
+                  Keine Aufgaben in dieser Ansicht.
                 </td>
               </tr>
             ) : (
@@ -95,7 +102,7 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
                       </td>
                       <td className="px-4 py-3 text-zinc-700">OKR-Planung</td>
                       <td className="px-4 py-3 text-zinc-700">
-                        {okrObjReg?.table ?? "okr_objectives"}: {d.title.trim() || "(ohne Titel)"}
+                        {approvalObjectRowLabelDe("okr_objective", d.title.trim() || "(ohne Titel)")}
                       </td>
                       <td className="px-4 py-3 text-zinc-700">Entwurf</td>
                       <td className="px-4 py-3 text-zinc-700">—</td>
@@ -115,15 +122,15 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
                   <tr key={t.id} className="border-b border-zinc-100 hover:bg-zinc-50/80">
                     <td className="px-4 py-3 font-medium text-zinc-900">
                       <Link href={`/my-tasks/${t.id}`} className="text-blue-700 hover:underline">
-                        {t.title}
+                        {formatApprovalTaskTitleDe(t.title)}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-zinc-700">{t.task_type}</td>
+                    <td className="px-4 py-3 text-zinc-700">{taskTypeLabelDe(t.task_type)}</td>
                     <td className="px-4 py-3 text-zinc-700">
-                      {reg?.table ?? t.source_object_type}: {objTitle}
+                      {approvalObjectRowLabelDe(t.source_object_type, objTitle)}
                     </td>
-                    <td className="px-4 py-3 text-zinc-700">{t.status}</td>
-                    <td className="px-4 py-3 text-zinc-700">{t.priority}</td>
+                    <td className="px-4 py-3 text-zinc-700">{taskStatusLabelDe(t.status)}</td>
+                    <td className="px-4 py-3 text-zinc-700">{taskPriorityLabelDe(t.priority)}</td>
                     <td className="px-4 py-3 text-zinc-700">
                       {creatorNames.get(t.created_by_membership_id) ?? "—"}
                     </td>

@@ -7,6 +7,92 @@ export type ApprovalAssigneeResolution = {
   routingReason: ApprovalRoutingReason;
 };
 
+export type DirectManagerResolution = {
+  assigneeMembershipId: string;
+  managerDisplayName: string | null;
+};
+
+type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+/**
+ * Ermittelt den direkten Vorgesetzten (Responsible-Hierarchie → aktive Membership).
+ * Kein Executive-/Admin-Fallback.
+ */
+export async function tryResolveDirectManagerAssignee(
+  organizationId: string,
+  submitterMembershipId: string
+): Promise<DirectManagerResolution | null> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data: submitter, error: subErr } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("id, responsible_id, status, display_name")
+    .eq("id", submitterMembershipId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (subErr || !submitter || submitter.status !== "active") {
+    return null;
+  }
+
+  const responsibleId = submitter.responsible_id;
+  if (!responsibleId) return null;
+
+  const { data: edge } = await supabase
+    .schema("app")
+    .from("responsible_hierarchy")
+    .select("manager_responsible_id")
+    .eq("report_responsible_id", responsibleId)
+    .maybeSingle();
+
+  if (!edge?.manager_responsible_id) return null;
+
+  const { data: managerResp } = await supabase
+    .schema("app")
+    .from("responsibles")
+    .select("membership_id")
+    .eq("id", edge.manager_responsible_id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  const mid = managerResp?.membership_id;
+  if (!mid) return null;
+
+  const { data: mgrMem } = await supabase
+    .schema("app")
+    .from("organization_memberships")
+    .select("id, status, display_name")
+    .eq("id", mid)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (!mgrMem?.id || mgrMem.status !== "active") return null;
+
+  return {
+    assigneeMembershipId: mgrMem.id,
+    managerDisplayName: mgrMem.display_name?.trim() || null,
+  };
+}
+
+/**
+ * OKR-Freigabe: ausschließlich direkter Vorgesetzter (kein Fallback).
+ */
+export async function resolveOkrApprovalAssignee(
+  organizationId: string,
+  submitterMembershipId: string
+): Promise<ApprovalAssigneeResolution> {
+  const direct = await tryResolveDirectManagerAssignee(organizationId, submitterMembershipId);
+  if (!direct) {
+    throw new Error("approval-no-direct-manager");
+  }
+  return {
+    assigneeMembershipId: direct.assigneeMembershipId,
+    routingMode: "direct_manager",
+    routingReason: null,
+  };
+}
+
 /**
  * Primär: Manager über responsible_hierarchy (Report = einreichender Responsible).
  * Fallback: erster aktiver Executive, dann Admin — deterministisch sortiert.
@@ -15,57 +101,16 @@ export async function resolveApprovalAssignee(
   organizationId: string,
   submitterMembershipId: string
 ): Promise<ApprovalAssigneeResolution> {
+  const direct = await tryResolveDirectManagerAssignee(organizationId, submitterMembershipId);
+  if (direct) {
+    return {
+      assigneeMembershipId: direct.assigneeMembershipId,
+      routingMode: "direct_manager",
+      routingReason: null,
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
-
-  const { data: submitter, error: subErr } = await supabase
-    .schema("app")
-    .from("organization_memberships")
-    .select("id, responsible_id, status")
-    .eq("id", submitterMembershipId)
-    .eq("organization_id", organizationId)
-    .maybeSingle();
-
-  if (subErr || !submitter || submitter.status !== "active") {
-    throw new Error("approval-submitter-not-found");
-  }
-
-  const responsibleId = submitter.responsible_id;
-  if (responsibleId) {
-    const { data: edge } = await supabase
-      .schema("app")
-      .from("responsible_hierarchy")
-      .select("manager_responsible_id")
-      .eq("report_responsible_id", responsibleId)
-      .maybeSingle();
-
-    if (edge?.manager_responsible_id) {
-      const { data: managerResp } = await supabase
-        .schema("app")
-        .from("responsibles")
-        .select("membership_id")
-        .eq("id", edge.manager_responsible_id)
-        .eq("organization_id", organizationId)
-        .maybeSingle();
-
-      const mid = managerResp?.membership_id;
-      if (mid) {
-        const { data: mgrMem } = await supabase
-          .schema("app")
-          .from("organization_memberships")
-          .select("id, status")
-          .eq("id", mid)
-          .eq("organization_id", organizationId)
-          .maybeSingle();
-        if (mgrMem?.status === "active") {
-          return {
-            assigneeMembershipId: mid,
-            routingMode: "direct_manager",
-            routingReason: null,
-          };
-        }
-      }
-    }
-  }
 
   const exec = await pickFallbackMembership(supabase, organizationId, "executive");
   if (exec) {
@@ -87,8 +132,6 @@ export async function resolveApprovalAssignee(
 
   throw new Error("approval-no-assignee");
 }
-
-type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 async function pickFallbackMembership(
   supabase: SupabaseServer,

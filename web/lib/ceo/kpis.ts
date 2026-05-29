@@ -11,6 +11,7 @@ type BuildKpisInput = {
   /** Abweichung vom Plan: Key Results (Review-Status wackelig/kritisch). */
   atRiskKeyResultCount: number;
   okrObjectiveCount: number;
+  keyResultCount: number;
   trendDeltaPercent: number | null;
   okrAssigneeCount: number;
   activeMemberCount: number;
@@ -30,6 +31,7 @@ export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
     atRiskObjectiveCount,
     atRiskKeyResultCount,
     okrObjectiveCount,
+    keyResultCount,
     trendDeltaPercent,
     okrAssigneeCount,
     activeMemberCount,
@@ -74,12 +76,20 @@ export function buildCeoKpis(input: BuildKpisInput): KpiCard[] {
       hint: `${completedObjectives} von ${objectiveCount} OKR-Objectives abgeschlossen`,
     },
     {
-      label: "OKR-Ziele (Quartal)",
+      label: "OKRs",
       value: String(okrObjectiveCount),
       hint:
         okrObjectiveCount === 0
-          ? "Keine OKR-Objectives in diesem Zyklus"
-          : `${okrObjectiveCount} OKR-Objectives im Zyklus`,
+          ? "Keine OKRs in diesem Quartal"
+          : "OKRs im aktuellen Quartal",
+    },
+    {
+      label: "Key Results",
+      value: String(keyResultCount),
+      hint:
+        keyResultCount === 0
+          ? "Keine Key Results in diesem Quartal"
+          : `Key Results zu ${okrObjectiveCount} OKR${okrObjectiveCount === 1 ? "" : "s"}`,
     },
     {
       label: "Trend zum vorherigen Zyklus",

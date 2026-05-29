@@ -1,9 +1,11 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAppShellAccess } from "@/lib/rbac/page-access";
 import { getAuthenticatedUserId } from "@/lib/ceo/queries";
-import { resolveApprovalAssignee } from "@/lib/tasks/approval-routing";
+import { resolveApprovalAssignee, resolveOkrApprovalAssignee } from "@/lib/tasks/approval-routing";
 import type { ApprovalSourceObjectType } from "@/lib/tasks/approval-source-types";
 import { getApprovalLifecycleEntry } from "@/lib/tasks/approval-lifecycle-registry";
 import { getOrgOkrSettings } from "@/lib/okr/org-okr-settings";
@@ -21,6 +23,10 @@ function rpcErrorMessage(code: string): string {
       return "Keine Berechtigung zur Freigabe-Anfrage.";
     case "approval-not-draft":
       return "Nur Entwürfe können eingereicht werden.";
+    case "approval-no-direct-manager":
+      return "Kein Vorgesetzter hinterlegt. Bitte Responsible und Hierarchie unter Verantwortliche pflegen.";
+    case "approval-invalid-routing":
+      return "Ungültiges Routing für OKR-Freigabe.";
     case "approval-invalid-assignee":
       return "Ungültiger Approver.";
     case "approval-invalid-decision":
@@ -58,11 +64,15 @@ export async function submitForApprovalAction(input: {
 
   let resolution;
   try {
-    resolution = await resolveApprovalAssignee(
-      input.organizationId,
-      shell.access.membershipId
-    );
-  } catch {
+    resolution =
+      input.sourceObjectType === "okr_objective"
+        ? await resolveOkrApprovalAssignee(input.organizationId, shell.access.membershipId)
+        : await resolveApprovalAssignee(input.organizationId, shell.access.membershipId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "approval-no-direct-manager") {
+      return { ok: false, error: rpcErrorMessage("approval-no-direct-manager") };
+    }
     return { ok: false, error: "Kein Approver ermittelbar." };
   }
 
@@ -100,16 +110,28 @@ export async function submitForApprovalAction(input: {
   return { ok: true, taskId };
 }
 
+const APPROVAL_DECIDE_REVALIDATE_PATHS = [
+  "/my-tasks",
+  "/okr/planning",
+  "/okr/tracking",
+  "/okr/dashboard",
+  "/okr/review",
+] as const;
+
+function revalidateAfterApprovalDecision(taskId: string) {
+  for (const path of APPROVAL_DECIDE_REVALIDATE_PATHS) {
+    revalidatePath(path);
+  }
+  revalidatePath(`/my-tasks/${taskId}`);
+}
+
 export async function decideApprovalTaskAction(input: {
   taskId: string;
   decision: "approve" | "reject" | "request_changes";
   comment?: string | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: false; error: string } | void> {
   const userId = await getAuthenticatedUserId();
   if (!userId) return { ok: false, error: "Nicht angemeldet." };
-
-  const shell = await getAppShellAccess(userId);
-  if (!shell) return { ok: false, error: "Kein Zugriff." };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.schema("app").rpc("approval_decide_task", {
@@ -123,5 +145,6 @@ export async function decideApprovalTaskAction(input: {
     return { ok: false, error: code ? rpcErrorMessage(code) : error.message };
   }
 
-  return { ok: true };
+  revalidateAfterApprovalDecision(input.taskId);
+  redirect("/my-tasks?filter=completed");
 }

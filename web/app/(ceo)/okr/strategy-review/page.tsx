@@ -6,7 +6,7 @@ import {
   fetchStrategyReviewFeedbackEntries,
   fetchStrategyReviewRow,
 } from "@/lib/strategy-review/queries";
-import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
+import { OkrAreaNavWithCounts } from "@/components/ceo/okr/OkrAreaNavWithCounts";
 import { StrategyReviewProcedureShell } from "@/components/ceo/strategy-review/StrategyReviewProcedureShell";
 
 type PageProps = {
@@ -31,7 +31,7 @@ export default async function StrategyReviewProcedurePage({ searchParams }: Page
           <h1 className="text-xl font-semibold text-zinc-900">Strategy Review</h1>
           <p className="mt-2 text-sm text-zinc-600">Keine passende Zyklus-Instanz.</p>
         </div>
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts />
       </section>
     );
   }
@@ -56,7 +56,7 @@ export default async function StrategyReviewProcedurePage({ searchParams }: Page
           Planungszyklus: {cycle.name} ({cycle.start_date} – {cycle.end_date})
         </p>
       </article>
-      <OkrAreaNav />
+      <OkrAreaNavWithCounts />
       <StrategyReviewProcedureShell
         cycleInstanceId={cycle.id}
         cycleLabel={cycle.name}

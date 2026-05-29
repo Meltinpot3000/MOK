@@ -6,7 +6,6 @@ export type KrInitiativeMatchingContext = {
   keyResult: {
     id: string;
     title: string;
-    description: string | null;
     metricType: string;
     startValue: number | null;
     targetValue: number | null;
@@ -43,7 +42,7 @@ export async function buildKrInitiativeMatchingContext(input: {
     .schema("app")
     .from("key_results")
     .select(
-      "id, title, description, metric_type, start_value, target_value, measurement_unit, okr_objective_id"
+      "id, title, metric_type, start_value, target_value, measurement_unit, okr_objective_id"
     )
     .eq("organization_id", organizationId)
     .eq("id", keyResultId)
@@ -134,7 +133,6 @@ export async function buildKrInitiativeMatchingContext(input: {
     keyResult: {
       id: kr.id,
       title: kr.title,
-      description: kr.description ?? null,
       metricType: kr.metric_type,
       startValue: kr.start_value,
       targetValue: kr.target_value,
@@ -158,7 +156,6 @@ export function contextToKrInitiativeMatchingPromptJson(ctx: KrInitiativeMatchin
       key_result: {
         id: ctx.keyResult.id,
         title: ctx.keyResult.title,
-        description: ctx.keyResult.description,
         metric_type: ctx.keyResult.metricType,
         start_value: ctx.keyResult.startValue,
         target_value: ctx.keyResult.targetValue,

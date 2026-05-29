@@ -10,7 +10,7 @@ import {
 } from "@/lib/okr/review-sessions";
 import { getOkrReviewSessionCheckInTracking } from "@/lib/okr/review-session-tracking";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
-import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
+import { OkrAreaNavWithCounts } from "@/components/ceo/okr/OkrAreaNavWithCounts";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrReviewSessionWorkspace } from "@/components/ceo/okr/OkrReviewSessionWorkspace";
 import { ReviewHeaderTrigger } from "@/components/ceo/strategy-review/ReviewHeaderTrigger";
@@ -37,7 +37,7 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-semibold text-zinc-900">OKR-Review</h1>
           <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
         </div>
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts />
       </section>
     );
   }
@@ -130,7 +130,7 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
         </div>
       </header>
 
-      <OkrAreaNav />
+      <OkrAreaNavWithCounts okrCycle={okrCycleParam} />
 
       {ctx.workspace.okrCycles.length > 0 ? (
         <OkrCycleCarousel cycles={ctx.workspace.okrCycles} selectedId={ctx.workspace.selectedOkrCycleId} />

@@ -139,11 +139,17 @@ export type OkrPlanningKeyResultRow = {
 };
 
 export type OkrContributionEdgePlanningRow = {
-  targetType: "initiative" | "strategy_objective";
+  targetType: "initiative" | "strategy_objective" | "strategic_direction";
   targetId: string;
   targetTitle: string;
   llmLevel: "low" | "medium" | "high" | "insufficient" | null;
+  llmAlignmentLevel: "low" | "medium" | "high" | "insufficient" | null;
+  /** @deprecated v4 — Lesen: llmFormulationLevel ?? llmAmbitionLevel */
+  llmAmbitionLevel: "low" | "medium" | "high" | "insufficient" | null;
+  llmFormulationLevel: "low" | "medium" | "high" | "insufficient" | null;
+  llmScopeFitLevel: "low" | "medium" | "high" | "insufficient" | null;
   llmReason: string | null;
+  llmImprovementHint: string | null;
   confirmedLevel: "low" | "medium" | "high" | "insufficient" | null;
   valueSource: "none" | "llm_accepted" | "manual";
   llmSuggestionDismissed: boolean;
@@ -663,7 +669,7 @@ export async function getOkrPlanningWorkspaceData(
       .schema("app")
       .from("okr_contribution_edges")
       .select(
-        "okr_objective_id, target_type, target_id, llm_level, llm_reason, confirmed_level, value_source, llm_suggestion_dismissed"
+        "okr_objective_id, target_type, target_id, llm_level, llm_alignment_level, llm_ambition_level, llm_formulation_level, llm_scope_fit_level, llm_reason, llm_tension_note, confirmed_level, value_source, llm_suggestion_dismissed"
       )
       .eq("organization_id", organizationId)
       .in("okr_objective_id", objectiveIds);
@@ -672,6 +678,13 @@ export async function getOkrPlanningWorkspaceData(
       ...new Set(
         (edgeRows ?? [])
           .filter((e) => e.target_type === "strategy_objective")
+          .map((e) => e.target_id as string)
+      ),
+    ];
+    const dirIds = [
+      ...new Set(
+        (edgeRows ?? [])
+          .filter((e) => e.target_type === "strategic_direction")
           .map((e) => e.target_id as string)
       ),
     ];
@@ -687,24 +700,51 @@ export async function getOkrPlanningWorkspaceData(
         soTitleById.set(r.id, r.title);
       }
     }
+    const dirTitleById = new Map<string, string>();
+    if (dirIds.length > 0) {
+      const { data: dirRows } = await supabase
+        .schema("app")
+        .from("strategic_directions")
+        .select("id, title")
+        .eq("organization_id", organizationId)
+        .in("id", dirIds);
+      for (const r of dirRows ?? []) {
+        dirTitleById.set(r.id as string, r.title as string);
+      }
+    }
 
     const edgesByOkr = new Map<string, OkrContributionEdgePlanningRow[]>();
     for (const e of edgeRows ?? []) {
       const oid = e.okr_objective_id as string;
       const tt = e.target_type as string;
-      if (tt !== "initiative" && tt !== "strategy_objective") continue;
+      if (tt !== "initiative" && tt !== "strategy_objective" && tt !== "strategic_direction") {
+        continue;
+      }
       const targetType = tt as OkrContributionEdgePlanningRow["targetType"];
       const targetId = e.target_id as string;
       const targetTitle =
         targetType === "initiative"
           ? initiativeTitleById.get(targetId) ?? targetId
-          : soTitleById.get(targetId) ?? targetId;
+          : targetType === "strategic_direction"
+            ? dirTitleById.get(targetId) ?? targetId
+            : soTitleById.get(targetId) ?? targetId;
       const row: OkrContributionEdgePlanningRow = {
         targetType,
         targetId,
         targetTitle,
         llmLevel: (e.llm_level as OkrContributionEdgePlanningRow["llmLevel"]) ?? null,
+        llmAlignmentLevel:
+          (e.llm_alignment_level as OkrContributionEdgePlanningRow["llmAlignmentLevel"]) ?? null,
+        llmAmbitionLevel:
+          (e.llm_ambition_level as OkrContributionEdgePlanningRow["llmAmbitionLevel"]) ?? null,
+        llmFormulationLevel:
+          (e.llm_formulation_level as OkrContributionEdgePlanningRow["llmFormulationLevel"]) ??
+          (e.llm_ambition_level as OkrContributionEdgePlanningRow["llmFormulationLevel"]) ??
+          null,
+        llmScopeFitLevel:
+          (e.llm_scope_fit_level as OkrContributionEdgePlanningRow["llmScopeFitLevel"]) ?? null,
         llmReason: (e.llm_reason as string | null) ?? null,
+        llmImprovementHint: (e.llm_tension_note as string | null) ?? null,
         confirmedLevel: (e.confirmed_level as OkrContributionEdgePlanningRow["confirmedLevel"]) ?? null,
         valueSource: (e.value_source as OkrContributionEdgePlanningRow["valueSource"]) ?? "none",
         llmSuggestionDismissed: Boolean(e.llm_suggestion_dismissed),

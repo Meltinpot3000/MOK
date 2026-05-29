@@ -1,5 +1,6 @@
 import type { AnalysisEntryRecord, AnalysisLinkType } from "@/lib/analysis-network/types";
 import type { OkrContributionTier } from "@/lib/strategy-cycle/coverage-level";
+import { computeStrategicDirectionOverallLevel, minContributionTier } from "@/lib/okr/contribution-tier";
 import { z } from "zod";
 
 type QualityEntryInput = Pick<
@@ -106,7 +107,7 @@ const GRAPH_LAYOUT_SUPPLEMENT_CHUNK_SIZE = Number(
 const GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS = Number(
   process.env.ANALYSIS_GRAPH_LAYOUT_SUPPLEMENT_MAX_ROUNDS ?? 48
 );
-const OKR_CONTRIBUTION_PROMPT_VERSION = "okr-contribution-v3";
+const OKR_CONTRIBUTION_PROMPT_VERSION = "okr-contribution-v5";
 const KR_INITIATIVE_MATCHING_PROMPT_VERSION = "kr-initiative-matching-v1";
 
 export const GEMINI_MODEL_QUALITY = process.env.ANALYSIS_LLM_MODEL_GEMINI ?? "gemini-2.5-pro";
@@ -1410,10 +1411,40 @@ export async function invokeLlmForJson(
   };
 }
 
+export type StrategyObjectiveRelevance = "direct" | "indirect" | "not_relevant";
+
+export type LlmOkrDirectionContribution = {
+  strategicDirectionId: string;
+  alignmentLevel: OkrContributionTier;
+  /** Klarheit, Messbarkeit, Überprüfbarkeit (hoch = gut). */
+  formulationLevel: OkrContributionTier;
+  /** Scope zum OKR-Zeitraum (high = überladen, medium = passend, low = zu eng). */
+  scopeFitLevel: OkrContributionTier;
+  overallLevel: OkrContributionTier;
+  reason: string;
+  improvementHint: string;
+};
+
+export type LlmOkrStrategyObjectiveContribution = {
+  objectiveId: string;
+  relevance: StrategyObjectiveRelevance;
+  fitLevel: OkrContributionTier | null;
+  reason: string;
+  improvementHint: string;
+};
+
+export type LlmOkrInitiativeContribution = {
+  initiativeId: string;
+  executionLinkageLevel: OkrContributionTier;
+  reason: string;
+  improvementHint: string;
+};
+
 export type LlmOkrContributionAssessment = {
   okrId: string;
-  initiativeContributions: Array<{ initiativeId: string; level: OkrContributionTier; reason: string }>;
-  strategyObjectiveContributions: Array<{ objectiveId: string; level: OkrContributionTier; reason: string }>;
+  strategicDirectionContribution: LlmOkrDirectionContribution;
+  strategyObjectiveContributions: LlmOkrStrategyObjectiveContribution[];
+  initiativeContributions: LlmOkrInitiativeContribution[];
   provider: "gemini" | "groq";
   model: string;
   promptVersion: string;
@@ -1457,25 +1488,120 @@ function normalizeLlmContributionTier(raw: unknown): OkrContributionTier {
   return "insufficient";
 }
 
-function parseOkrContributionItems(
+function parseImprovementHint(raw: unknown, level: OkrContributionTier): string {
+  const hint = String(raw ?? "")
+    .trim()
+    .slice(0, 500);
+  if (level === "high") return "";
+  return hint;
+}
+
+function parseStrategyObjectiveRelevance(raw: unknown): StrategyObjectiveRelevance {
+  const v = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (v === "direct") return "direct";
+  if (v === "indirect") return "indirect";
+  return "not_relevant";
+}
+
+function parseOkrDirectionContribution(
+  raw: unknown,
+  expectedDirectionId: string
+): LlmOkrDirectionContribution | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const strategicDirectionId = String(o.strategic_direction_id ?? "").trim();
+  if (strategicDirectionId !== expectedDirectionId) return null;
+  const alignmentLevel = normalizeLlmContributionTier(o.alignment_level);
+  const formulationLevel = normalizeLlmContributionTier(
+    o.formulation_level ?? o.ambition_level
+  );
+  const scopeFitLevel = normalizeLlmContributionTier(o.scope_fit_level ?? "medium");
+  const modelOverall =
+    o.overall_level == null || String(o.overall_level).trim() === ""
+      ? null
+      : normalizeLlmContributionTier(o.overall_level);
+  const overallLevel = computeStrategicDirectionOverallLevel({
+    alignmentLevel,
+    formulationLevel,
+    scopeFitLevel,
+    modelOverallLevel: modelOverall,
+  });
+  const reason = String(o.reason ?? "")
+    .trim()
+    .slice(0, 400);
+  const improvementHint = parseImprovementHint(o.improvement_hint, overallLevel);
+  return {
+    strategicDirectionId,
+    alignmentLevel,
+    formulationLevel,
+    scopeFitLevel,
+    overallLevel,
+    reason,
+    improvementHint,
+  };
+}
+
+function parseOkrStrategyObjectiveContributions(
   rawList: unknown,
-  idKey: "initiative_id" | "objective_id",
   allowed: Set<string>
-): Array<{ id: string; level: OkrContributionTier; reason: string }> {
+): LlmOkrStrategyObjectiveContribution[] {
   if (!Array.isArray(rawList)) return [];
-  const out: Array<{ id: string; level: OkrContributionTier; reason: string }> = [];
+  const out: LlmOkrStrategyObjectiveContribution[] = [];
   const seen = new Set<string>();
   for (const row of rawList) {
     if (!row || typeof row !== "object") continue;
     const o = row as Record<string, unknown>;
-    const id = String(o[idKey] ?? "").trim();
-    if (!id || !allowed.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    const level = normalizeLlmContributionTier(o.level);
+    const objectiveId = String(o.objective_id ?? "").trim();
+    if (!objectiveId || !allowed.has(objectiveId) || seen.has(objectiveId)) continue;
+    seen.add(objectiveId);
+    const relevance = parseStrategyObjectiveRelevance(o.relevance);
+    const fitLevel =
+      relevance === "not_relevant" ? null : normalizeLlmContributionTier(o.fit_level);
     const reason = String(o.reason ?? "")
       .trim()
       .slice(0, 400);
-    out.push({ id, level, reason });
+    const levelForHint = fitLevel ?? "high";
+    const improvementHint =
+      relevance === "not_relevant" ? "" : parseImprovementHint(o.improvement_hint, levelForHint);
+    out.push({
+      objectiveId,
+      relevance,
+      fitLevel,
+      reason,
+      improvementHint,
+    });
+  }
+  return out;
+}
+
+function parseOkrInitiativeContributions(
+  rawList: unknown,
+  allowed: Set<string>
+): LlmOkrInitiativeContribution[] {
+  if (!Array.isArray(rawList)) return [];
+  const out: LlmOkrInitiativeContribution[] = [];
+  const seen = new Set<string>();
+  for (const row of rawList) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    const initiativeId = String(o.initiative_id ?? "").trim();
+    if (!initiativeId || !allowed.has(initiativeId) || seen.has(initiativeId)) continue;
+    seen.add(initiativeId);
+    const executionLinkageLevel = normalizeLlmContributionTier(
+      o.execution_linkage_level ?? o.level
+    );
+    const reason = String(o.reason ?? "")
+      .trim()
+      .slice(0, 400);
+    const improvementHint = parseImprovementHint(o.improvement_hint, executionLinkageLevel);
+    out.push({
+      initiativeId,
+      executionLinkageLevel,
+      reason,
+      improvementHint,
+    });
   }
   return out;
 }
@@ -1483,6 +1609,7 @@ function parseOkrContributionItems(
 function parseOkrContributionJson(
   text: string,
   expectedOkrId: string,
+  strategicDirectionId: string,
   initiativeIds: string[],
   strategyObjectiveIds: string[]
 ): Omit<LlmOkrContributionAssessment, "provider" | "model" | "promptVersion"> | null {
@@ -1490,35 +1617,33 @@ function parseOkrContributionJson(
   if (!json) return null;
   const okrId = String(json.okr_id ?? "").trim();
   if (okrId !== expectedOkrId) return null;
+
+  const strategicDirectionContribution = parseOkrDirectionContribution(
+    json.strategic_direction_contribution,
+    strategicDirectionId
+  );
+  if (!strategicDirectionContribution) return null;
+
   const initAllowed = new Set(initiativeIds);
   const soAllowed = new Set(strategyObjectiveIds);
-  const initiativeContributions = parseOkrContributionItems(
-    json.initiative_contributions,
-    "initiative_id",
-    initAllowed
-  ).map((x) => ({
-    initiativeId: x.id,
-    level: x.level,
-    reason: x.reason,
-  }));
-  const strategyObjectiveContributions = parseOkrContributionItems(
-    json.strategy_objective_contributions,
-    "objective_id",
-    soAllowed
-  ).map((x) => ({
-    objectiveId: x.id,
-    level: x.level,
-    reason: x.reason,
-  }));
 
-  const initSeen = new Set(initiativeContributions.map((x) => x.initiativeId));
+  const initiativeContributions = parseOkrInitiativeContributions(
+    json.initiative_contributions,
+    initAllowed
+  );
+  const strategyObjectiveContributions = parseOkrStrategyObjectiveContributions(
+    json.strategy_objective_contributions,
+    soAllowed
+  );
+
   for (const iid of initiativeIds) {
-    if (!initSeen.has(iid)) {
+    if (!initiativeContributions.some((x) => x.initiativeId === iid)) {
       initiativeContributions.push({
         initiativeId: iid,
-        level: "insufficient",
+        executionLinkageLevel: "insufficient",
         reason:
           "Kein gültiger Modell-Eintrag für diese Initiative — technisch als «unzureichend beschrieben» erfasst.",
+        improvementHint: "Initiative-Verknüpfung und KR-Text präzisieren.",
       });
     }
   }
@@ -1528,50 +1653,119 @@ function parseOkrContributionJson(
     if (!soSeen.has(sid)) {
       strategyObjectiveContributions.push({
         objectiveId: sid,
-        level: "insufficient",
-        reason:
-          "Kein gültiger Modell-Eintrag für dieses Strategieziel — technisch als «unzureichend beschrieben» erfasst.",
+        relevance: "not_relevant",
+        fitLevel: null,
+        reason: "Kein Modell-Eintrag — als nicht relevant behandelt.",
+        improvementHint: "",
       });
     }
   }
 
-  return { okrId, initiativeContributions, strategyObjectiveContributions };
+  return {
+    okrId,
+    strategicDirectionContribution,
+    strategyObjectiveContributions,
+    initiativeContributions,
+  };
 }
 
 function buildOkrContributionPrompt(
   contextJson: string,
+  strategicDirectionId: string,
   initiativeIds: string[],
   strategyObjectiveIds: string[]
 ): string {
-  return `Du bist ein strategischer Analyst. Bewerte, wie stark das OKR (über Key Results) in die **konkret verknüpften** Initiativen einzahlt, und — zurückhaltend — den Beitrag zu den genannten Strategiezielen im Kontext der Stoßrichtung (keine parallele Zielhierarchie erfinden).
+  const initiativeRule =
+    initiativeIds.length > 0
+      ? `- initiative_contributions: genau ein Eintrag pro ID ${JSON.stringify(initiativeIds)} mit execution_linkage_level (operative Umsetzung über KR-Links).`
+      : `- initiative_contributions: leeres Array [] (keine Initiative-Verknüpfungen).`;
+
+  return `Du bist ein strategischer OKR-Analyst. Bewerte in dieser Reihenfolge:
+1) Strategic Alignment, Formulierung und Quartals-Fit des OKR zur führenden Stoßrichtung (Pflicht)
+2) Portfolio-Strategieziele unter derselben Stoßrichtung (Relevanz zuerst, dann Fit)
+3) Initiativen nur als Execution Linkage (nachrangig, optional)
 
 Antworte ausschließlich mit einem JSON-Objekt (kein Markdown), exakt dieser Struktur:
 {
   "okr_id": "<uuid>",
-  "initiative_contributions": [ { "initiative_id": "<uuid>", "level": "low"|"medium"|"high"|"insufficient", "reason": "<kurz, max 2 Sätze, nur Transparenz>" } ],
-  "strategy_objective_contributions": [ { "objective_id": "<uuid>", "level": "low"|"medium"|"high"|"insufficient", "reason": "<kurz>" } ]
+  "strategic_direction_contribution": {
+    "strategic_direction_id": "<uuid>",
+    "alignment_level": "low"|"medium"|"high"|"insufficient",
+    "formulation_level": "low"|"medium"|"high"|"insufficient",
+    "scope_fit_level": "low"|"medium"|"high"|"insufficient",
+    "overall_level": "low"|"medium"|"high"|"insufficient",
+    "reason": "<max 3 Sätze: Alignment, Formulierung und Quartals-Fit getrennt benennen>",
+    "improvement_hint": "<leer wenn overall_level=high, sonst konkreter Rat>"
+  },
+  "strategy_objective_contributions": [
+    {
+      "objective_id": "<uuid>",
+      "relevance": "direct"|"indirect"|"not_relevant",
+      "fit_level": "low"|"medium"|"high"|"insufficient",
+      "reason": "<kurz>",
+      "improvement_hint": "<nur wenn relevance≠not_relevant und fit_level≠high>"
+    }
+  ],
+  "initiative_contributions": [
+    {
+      "initiative_id": "<uuid>",
+      "execution_linkage_level": "low"|"medium"|"high"|"insufficient",
+      "reason": "<kurz>",
+      "improvement_hint": "<leer wenn high>"
+    }
+  ]
 }
 
-Regeln:
-- level nur low, medium, high oder insufficient (Synonyme weak=low, strong=high; insufficient = fachlich keine sinnvolle Einzahlungsbewertung möglich — im Output exakt «insufficient» schreiben, keine Umlaute).
-- Für jede Initiative in dieser ID-Liste muss genau ein Eintrag existieren: ${JSON.stringify(initiativeIds)}
+Regeln Stoßrichtung (strategic_direction_id exakt ${JSON.stringify(strategicDirectionId)}):
+- alignment_level: strategischer Fit zur Stoßrichtung (hoch = guter Fit).
+- formulation_level: Klarheit und Messbarkeit von Objective und KRs (hoch = SMART genug, eindeutig prüfbar). NICHT verwechseln mit Scope: vage Booleans oder fehlende Zielwerte → eher low/medium.
+- scope_fit_level: passt die Menge der Outcomes zum OKR-Zeitraum im Kontext (okr_cycle)? low = zu eng/unterfordert; medium = passend; high = überladen/zu viel für den Zeitraum (z. B. Recruiting + volle Einsatzfähigkeit + Beschaffung in einem Quartal). Nutze okr_cycle.start_date und end_date.
+- overall_level: zusammenfassend; konservativ (schwächt sich aus überladenem Scope, schwacher Formulierung oder schwachem Alignment).
+- improvement_hint Pflicht wenn overall_level nicht high.
+
+Strategieziele (Portfolio unter der Stoßrichtung):
 - Für jedes Strategieziel in dieser ID-Liste genau ein Eintrag: ${JSON.stringify(strategyObjectiveIds)}
-- Wenn OKR-, KR- oder Initiativentexte **zu dünn, generisch oder nicht belegbar** sind, sodass eine Stärke der Einzahlung **nicht verantwortbar** beurteilt werden kann, wähle **insufficient** (nicht medium/high). low nur wenn Inhalt zwar schwach aber **beurteilbar** ist; medium/high nur bei erkennbarer, textlich begründbarer Einzahlung.
-- reason ist nur für Menschen lesbar; bei insufficient kurz sagen, was fehlt (z. B. fehlende Zieldefinition).
+- Zuerst relevance: not_relevant = OKR muss nicht zu diesem SO beitragen → kein negatives Fit-Urteil erzwingen.
+- fit_level nur bei direct oder indirect bewerten; bei not_relevant fit_level weglassen oder insufficient nur wenn wirklich unklar.
+
+Initiativen:
+${initiativeRule}
+- execution_linkage_level bewertet operative Verknüpfung; ersetzt nicht Stoßrichtungs-Overall.
+
+Stufen nur low, medium, high oder insufficient (Synonyme weak=low, strong=high; insufficient exakt so schreiben).
 
 Kontext (JSON):
 ${contextJson}`;
 }
 
+/** @internal Tests */
+export function parseOkrContributionAssessmentV4Response(
+  text: string,
+  expectedOkrId: string,
+  strategicDirectionId: string,
+  initiativeIds: string[],
+  strategyObjectiveIds: string[]
+): Omit<LlmOkrContributionAssessment, "provider" | "model" | "promptVersion"> | null {
+  return parseOkrContributionJson(
+    text,
+    expectedOkrId,
+    strategicDirectionId,
+    initiativeIds,
+    strategyObjectiveIds
+  );
+}
+
 export async function assessOkrContributionsWithLlm(input: {
   contextJson: string;
   okrObjectiveId: string;
+  strategicDirectionId: string;
   initiativeIds: string[];
   strategyObjectiveIds: string[];
   maxOutputTokens?: number;
 }): Promise<LlmScoreResponse<LlmOkrContributionAssessment>> {
   const prompt = buildOkrContributionPrompt(
     input.contextJson,
+    input.strategicDirectionId,
     input.initiativeIds,
     input.strategyObjectiveIds
   );
@@ -1580,6 +1774,7 @@ export async function assessOkrContributionsWithLlm(input: {
   const parsed = parseOkrContributionJson(
     invoked.text,
     input.okrObjectiveId,
+    input.strategicDirectionId,
     input.initiativeIds,
     input.strategyObjectiveIds
   );

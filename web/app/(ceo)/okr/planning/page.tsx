@@ -6,11 +6,13 @@ import {
   filterPlanningObjectivesForRead,
   loadPlanningReadBulkContext,
 } from "@/lib/okr/okr-tracking-filter";
-import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
+import { OkrAreaNavWithCounts } from "@/components/ceo/okr/OkrAreaNavWithCounts";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
+import { OkrPlanningDirtyProvider } from "@/components/ceo/okr/okr-planning-dirty";
 import { OkrPlanningWorkspace } from "@/components/ceo/okr/OkrPlanningWorkspace";
 import { buildOkrPlanningEditFlags } from "@/app/(ceo)/okr/planning/build-okr-planning-edit-flags";
 import { filterResponsiblesForOkrObjectiveOwnerSelect } from "@/lib/okr/okr-planning-owner-choices";
+import { buildOkrApprovalSubmitEligibilityByObjectiveId } from "@/lib/okr/okr-approval-submit-eligibility";
 
 /** Frische Workspace-Daten nach Server-Mutationen (`router.refresh()`). */
 export const dynamic = "force-dynamic";
@@ -37,7 +39,7 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-semibold text-zinc-900">OKR-Planung</h1>
           <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus vorhanden.</p>
         </div>
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts okrCycle={null} />
       </section>
     );
   }
@@ -62,6 +64,11 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
   };
 
   const editFlags = await buildOkrPlanningEditFlags(context.membershipId, workspace);
+  const approvalSubmitByObjectiveId = await buildOkrApprovalSubmitEligibilityByObjectiveId(
+    context.organizationId,
+    context.membershipId,
+    workspace.okrObjectives
+  );
   const objectiveOwnerChoices = await filterResponsiblesForOkrObjectiveOwnerSelect({
     organizationId: context.organizationId,
     currentMembershipId: context.membershipId,
@@ -78,29 +85,33 @@ export default async function OkrPlanningPage({ searchParams }: PageProps) {
         </p>
       </article>
 
-      <OkrAreaNav />
+      <OkrPlanningDirtyProvider>
+        <OkrAreaNavWithCounts okrCycle={preferredOkrCycle} />
 
-      {workspace.okrCycles.length > 0 ? (
-        <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />
-      ) : null}
+        {workspace.okrCycles.length > 0 ? (
+          <OkrCycleCarousel cycles={workspace.okrCycles} selectedId={workspace.selectedOkrCycleId} />
+        ) : null}
 
-      {!canWriteOkrArea ? (
-        <p className="brand-surface p-3 text-sm text-zinc-600">
-          Leserechte: Bearbeitung ist deaktiviert.
-        </p>
-      ) : null}
+        {!canWriteOkrArea ? (
+          <p className="brand-surface p-3 text-sm text-zinc-600">
+            Leserechte: Bearbeitung ist deaktiviert.
+          </p>
+        ) : null}
 
-      <OkrPlanningWorkspace
-        data={workspace}
-        cycleInstanceId={cycle.id}
-        canWrite={canWriteOkrArea}
-        currentMembershipId={context.membershipId}
-        objectiveOwnerChoices={objectiveOwnerChoices}
-        objectiveEditById={editFlags.objectiveEditById}
-        keyResultEditById={editFlags.keyResultEditById}
-        canCreateKeyResultByObjectiveId={editFlags.canCreateKeyResultByObjectiveId}
-        inCycleOkrObjectiveCountBeforeReadFilter={inCycleOkrObjectiveCountBeforeReadFilter}
-      />
+        <OkrPlanningWorkspace
+          data={workspace}
+          organizationId={context.organizationId}
+          cycleInstanceId={cycle.id}
+          canWrite={canWriteOkrArea}
+          currentMembershipId={context.membershipId}
+          approvalSubmitByObjectiveId={approvalSubmitByObjectiveId}
+          objectiveOwnerChoices={objectiveOwnerChoices}
+          objectiveEditById={editFlags.objectiveEditById}
+          keyResultEditById={editFlags.keyResultEditById}
+          canCreateKeyResultByObjectiveId={editFlags.canCreateKeyResultByObjectiveId}
+          inCycleOkrObjectiveCountBeforeReadFilter={inCycleOkrObjectiveCountBeforeReadFilter}
+        />
+      </OkrPlanningDirtyProvider>
     </section>
   );
 }

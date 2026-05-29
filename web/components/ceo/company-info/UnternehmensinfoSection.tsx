@@ -218,6 +218,7 @@ export function UnternehmensinfoSection({
             <h2 className="text-lg font-semibold text-zinc-900">Mission</h2>
             <p className="mt-2 text-sm text-zinc-600">Unternehmensauftrag und Zweck.</p>
             <form action={saveStrategyReferenceText} className="mt-4">
+              <input type="hidden" name="unternehmensinfo_return_l2" value="mission" />
               <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
               <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
               <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
@@ -240,6 +241,7 @@ export function UnternehmensinfoSection({
             <h2 className="text-lg font-semibold text-zinc-900">Vision</h2>
             <p className="mt-2 text-sm text-zinc-600">Langfristiges Zukunftsbild.</p>
             <form action={saveStrategyReferenceText} className="mt-4">
+              <input type="hidden" name="unternehmensinfo_return_l2" value="vision" />
               <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
               <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
               <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
@@ -262,6 +264,7 @@ export function UnternehmensinfoSection({
             <h2 className="text-lg font-semibold text-zinc-900">Werte</h2>
             <p className="mt-2 text-sm text-zinc-600">Werte und Entscheidungsgrundsätze.</p>
             <form action={saveStrategyReferenceText} className="mt-4">
+              <input type="hidden" name="unternehmensinfo_return_l2" value="werte" />
               <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
               <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
               <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />
@@ -284,6 +287,7 @@ export function UnternehmensinfoSection({
             <h2 className="text-lg font-semibold text-zinc-900">Kultur</h2>
             <p className="mt-2 text-sm text-zinc-600">Zusammenarbeit, Verhalten und Prinzipien.</p>
             <form action={saveStrategyReferenceText} className="mt-4">
+              <input type="hidden" name="unternehmensinfo_return_l2" value="kultur" />
               <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
               <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
               <input type="hidden" name="strategy_reference_values" value={strategyReferenceFields.values} />
@@ -306,6 +310,7 @@ export function UnternehmensinfoSection({
             <h2 className="text-lg font-semibold text-zinc-900">Leadership</h2>
             <p className="mt-2 text-sm text-zinc-600">Führungsprinzipien und Erwartung an Leadership-Verhalten.</p>
             <form action={saveStrategyReferenceText} className="mt-4">
+              <input type="hidden" name="unternehmensinfo_return_l2" value="leadership" />
               <input type="hidden" name="strategy_reference_mission" value={strategyReferenceFields.mission} />
               <input type="hidden" name="strategy_reference_vision" value={strategyReferenceFields.vision} />
               <input type="hidden" name="strategy_reference_culture" value={strategyReferenceFields.culture} />

@@ -9,6 +9,7 @@ import {
   type SidebarPermissionMap,
 } from "@/lib/sidebar-access";
 import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
+import { MemberNotificationsBell } from "@/components/ceo/MemberNotificationsBell";
 import { SidebarAccountMenu } from "@/components/ceo/SidebarAccountMenu";
 
 type CycleSidebarProps = {
@@ -147,6 +148,7 @@ export function CycleSidebar({
               <UserManualIcon />
             </Link>
             {showJobBell ? <JobNotificationsBell /> : null}
+            <MemberNotificationsBell />
           </div>
         </div>
         <h1 className="mt-2.5 break-words text-lg font-semibold leading-tight text-zinc-900">{productName}</h1>

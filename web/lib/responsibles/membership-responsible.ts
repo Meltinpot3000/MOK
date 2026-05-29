@@ -35,9 +35,10 @@ export type EnsureResponsibleResult = { ok: true; responsibleId: string } | { ok
  */
 export async function ensureResponsibleForMembership(
   organizationId: string,
-  membershipId: string
+  membershipId: string,
+  supabaseClient?: SupabaseClient
 ): Promise<EnsureResponsibleResult> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = supabaseClient ?? (await createSupabaseServerClient());
 
   const { data: membership, error: memErr } = await supabase
     .schema("app")

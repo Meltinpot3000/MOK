@@ -1,4 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT,
+} from "@/lib/okr/contribution-assessment-context";
 import { getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
 
 type Supabase = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -28,6 +31,26 @@ export async function fetchLeadingStrategicDirectionIdForOkr(
     .limit(1)
     .maybeSingle();
   return link?.strategic_direction_id ?? null;
+}
+
+export async function fetchStrategyObjectiveIdsUnderDirection(
+  supabase: Supabase,
+  organizationId: string,
+  cycleInstanceId: string,
+  strategicDirectionId: string
+): Promise<string[]> {
+  const scopeIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
+  const { data: dirLinks } = await supabase
+    .schema("app")
+    .from("strategic_direction_objective_links")
+    .select("strategy_objective_id")
+    .eq("organization_id", organizationId)
+    .eq("strategic_direction_id", strategicDirectionId)
+    .in("cycle_instance_id", scopeIds);
+
+  return [...new Set((dirLinks ?? []).map((l) => l.strategy_objective_id as string))]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT);
 }
 
 export type KeyResultContentSignatureRow = {
@@ -124,19 +147,38 @@ export function keyResultContentFieldsChanged(
 }
 
 export type OkrContributionTargetRef = {
-  targetType: "initiative" | "strategy_objective";
+  targetType: "strategic_direction" | "strategy_objective" | "initiative";
   targetId: string;
 };
 
-/**
- * Alle Kanten-Ziele für die einheitliche OKR-Einstufung (Initiativen über KR-Links + Strategieziele).
- */
+/** Bewertungsziele v4: Stoßrichtung → SO unter Richtung → Initiativen (optional). */
 export async function fetchOkrContributionTargetsForObjective(
   supabase: Supabase,
   organizationId: string,
   cycleInstanceId: string,
   okrObjectiveId: string
 ): Promise<OkrContributionTargetRef[]> {
+  const targets: OkrContributionTargetRef[] = [];
+
+  const directionId = await fetchLeadingStrategicDirectionIdForOkr(
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    okrObjectiveId
+  );
+  if (directionId) {
+    targets.push({ targetType: "strategic_direction", targetId: directionId });
+    const soIds = await fetchStrategyObjectiveIdsUnderDirection(
+      supabase,
+      organizationId,
+      cycleInstanceId,
+      directionId
+    );
+    for (const sid of soIds) {
+      targets.push({ targetType: "strategy_objective", targetId: sid });
+    }
+  }
+
   const { data: krs } = await supabase
     .schema("app")
     .from("key_results")
@@ -157,20 +199,26 @@ export async function fetchOkrContributionTargetsForObjective(
       initiativeIds.add(l.initiative_id as string);
     }
   }
-
-  const { data: soRows } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", okrObjectiveId);
-
-  const targets: OkrContributionTargetRef[] = [];
   for (const iid of [...initiativeIds].sort((a, b) => a.localeCompare(b))) {
     targets.push({ targetType: "initiative", targetId: iid });
   }
-  for (const row of soRows ?? []) {
-    const sid = row.strategy_objective_id as string | undefined;
-    if (sid) targets.push({ targetType: "strategy_objective", targetId: sid });
-  }
+
   return targets;
+}
+
+/** Nur die Stoßrichtungs-Kante für manuelle Einstufung. */
+export async function fetchOkrContributionDirectionTargetForObjective(
+  supabase: Supabase,
+  organizationId: string,
+  cycleInstanceId: string,
+  okrObjectiveId: string
+): Promise<OkrContributionTargetRef | null> {
+  const directionId = await fetchLeadingStrategicDirectionIdForOkr(
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    okrObjectiveId
+  );
+  if (!directionId) return null;
+  return { targetType: "strategic_direction", targetId: directionId };
 }

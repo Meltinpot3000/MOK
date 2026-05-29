@@ -4,8 +4,10 @@ import {
   canCreateOkrObjective,
   hasKeyResultPermissionForRelation,
   hasObjectivePermissionForRelation,
+  isExplicitKeyResultOwnerRemoval,
   keyResultRelationFromBulk,
   objectiveRelationFromBulk,
+  resolveKeyResultOwnerMembershipPatch,
   strongerAccessRelation,
   type OkrBulkAccessContext,
 } from "./okr-object-access";
@@ -132,6 +134,17 @@ describe("okr-object-access", () => {
     expect(
       canCreateKeyResultOnObjectiveFromBulk(bulkOwn, { owner_membership_id: "other", deputy_membership_id: null })
     ).toBe(false);
+  });
+
+  it("resolveKeyResultOwnerMembershipPatch: leer bei bereits null ist kein Entfernen", () => {
+    expect(resolveKeyResultOwnerMembershipPatch(null, "")).toBeUndefined();
+    expect(resolveKeyResultOwnerMembershipPatch(null, null)).toBeUndefined();
+    expect(isExplicitKeyResultOwnerRemoval(null, undefined)).toBe(false);
+  });
+
+  it("resolveKeyResultOwnerMembershipPatch: leer bei gesetztem Owner ist Entfernen", () => {
+    expect(resolveKeyResultOwnerMembershipPatch("owner-1", "")).toBeNull();
+    expect(isExplicitKeyResultOwnerRemoval("owner-1", null)).toBe(true);
   });
 
   it("canCreateKeyResultOnObjectiveFromBulk: owner UUID casing matches session", () => {

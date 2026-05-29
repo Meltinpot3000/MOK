@@ -3,7 +3,13 @@
 import { useMemo } from "react";
 import type { OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
 import type { OkrUpdateRow } from "@/lib/review/key-result-progress";
-import { buildAggregateObjectiveProgressSeries, buildRollupSeries } from "@/lib/okr/rollup-series";
+import {
+  buildAggregateObjectiveProgressSeries,
+  buildRollupSeriesWeekly,
+  startOfWeekLocalMs,
+} from "@/lib/okr/rollup-series";
+
+const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
 const W = 720;
 const H = 200;
@@ -45,7 +51,7 @@ export function OkrObjectiveProgressLineChart({
       id: ov.objective.id,
       label: ov.objective.title.length > 42 ? `${ov.objective.title.slice(0, 40)}…` : ov.objective.title,
       color: LINE_PALETTE[i % LINE_PALETTE.length] ?? "#71717a",
-      points: buildRollupSeries(ov, updatesByKeyResultId),
+      points: buildRollupSeriesWeekly(ov, updatesByKeyResultId),
     }));
 
     let minT = Number.POSITIVE_INFINITY;
@@ -65,13 +71,16 @@ export function OkrObjectiveProgressLineChart({
 
     if (!Number.isFinite(minT) || !Number.isFinite(maxT) || minT === maxT) {
       if (aggregatePoints.length === 1) {
-        minT = aggregatePoints[0].t - 86400000;
-        maxT = aggregatePoints[0].t + 86400000;
+        minT = aggregatePoints[0].t;
+        maxT = aggregatePoints[0].t + MS_PER_WEEK;
       } else {
         const now = Date.now();
-        minT = now - 7 * 86400000;
-        maxT = now;
+        minT = startOfWeekLocalMs(now - 3 * MS_PER_WEEK);
+        maxT = startOfWeekLocalMs(now);
       }
+    } else {
+      minT = startOfWeekLocalMs(minT);
+      maxT = startOfWeekLocalMs(maxT) + MS_PER_WEEK;
     }
 
     return {
@@ -95,6 +104,19 @@ export function OkrObjectiveProgressLineChart({
       .map((p, i) => `${i === 0 ? "M" : "L"} ${xAt(p.t).toFixed(1)} ${yAt(p.y).toFixed(1)}`)
       .join(" ");
   }, [aggregate, t0, t1]);
+
+  const weekTicks = useMemo(() => {
+    const ticks: number[] = [];
+    let w = startOfWeekLocalMs(t0);
+    const end = startOfWeekLocalMs(t1);
+    while (w <= end) {
+      ticks.push(w);
+      w += MS_PER_WEEK;
+    }
+    if (ticks.length <= 8) return ticks;
+    const step = Math.ceil(ticks.length / 7);
+    return ticks.filter((_, i) => i % step === 0 || i === ticks.length - 1);
+  }, [t0, t1]);
 
   const aggregateAreaD = useMemo(() => {
     if (aggregate.length === 0) return "";
@@ -127,7 +149,7 @@ export function OkrObjectiveProgressLineChart({
           </p>
           <h3 className="mt-0.5 text-sm font-semibold text-zinc-900">Verlauf im Zeitraum</h3>
           <p className="mt-0.5 text-[11px] text-zinc-500">
-            Linie: Mittel aller Objectives · Farben: bis zu sechs Einzelziele (nach Dringlichkeit sortiert)
+            Kalenderwochen · Mittelwert aller Objectives · bis zu sechs Einzelziele (nach Dringlichkeit)
           </p>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-zinc-500">
@@ -231,12 +253,18 @@ export function OkrObjectiveProgressLineChart({
             );
           })}
 
-          <text x={PAD.l} y={H - 10} fill="#71717a" fontSize={10}>
-            {formatDeShort(t0)}
-          </text>
-          <text x={W - PAD.r} y={H - 10} textAnchor="end" fill="#71717a" fontSize={10}>
-            {formatDeShort(t1)}
-          </text>
+          {weekTicks.map((wt) => (
+            <text
+              key={wt}
+              x={xAt(wt)}
+              y={H - 10}
+              textAnchor="middle"
+              fill="#71717a"
+              fontSize={9}
+            >
+              {formatDeShort(wt)}
+            </text>
+          ))}
         </svg>
       </div>
     </div>

@@ -49,7 +49,7 @@ function resolveRequiredRoads(
 
 /**
  * Bündelt Resolution, Evidence-Anforderungen, Used-Sources aus Tool-Calls, Coverage und Zyklus-Check.
- * `diagnosticsOnly` bleibt true (MVP: keine harte Chat-Blockade hier).
+ * Mit `diagnosticsOnly: false` Kennzeichnung für Answer-Verifier-Enforcement (siehe Feature-Flag).
  */
 export async function buildSemanticMapRunDiagnostics(input: {
   question: string;
@@ -64,8 +64,13 @@ export async function buildSemanticMapRunDiagnostics(input: {
   selectedCurrentCycleId?: string | null;
   answerClaimedCycleIds?: string[];
   useMockResolver?: boolean;
+  /**
+   * true (default): nur Messen / Telemetrie.
+   * false: vom Aufrufer für Answer-Verifier-Enforcement vorgesehen (zusammen mit AI_SEMANTIC_EVIDENCE_GUARD_ENABLED).
+   */
+  diagnosticsOnly?: boolean;
 }): Promise<SemanticMapRunDiagnostics> {
-  const diagnosticsOnly = true as const;
+  const diagnosticsOnlyFlag = input.diagnosticsOnly !== false;
   const useMock = input.useMockResolver !== false;
 
   if (!input.map) {
@@ -76,7 +81,7 @@ export async function buildSemanticMapRunDiagnostics(input: {
       usedSources: buildSemanticUsedSourcesFromToolCalls({ toolCalls: input.toolCalls }),
       evidenceCoverage: emptyCoverage(),
       executionReadiness: "missing_map",
-      diagnosticsOnly,
+      diagnosticsOnly: diagnosticsOnlyFlag,
     };
   }
 
@@ -101,7 +106,7 @@ export async function buildSemanticMapRunDiagnostics(input: {
       usedSources,
       evidenceCoverage: emptyCoverage(),
       executionReadiness: resolutionStatus === "skipped" ? "failed" : "failed",
-      diagnosticsOnly,
+      diagnosticsOnly: diagnosticsOnlyFlag,
     };
   }
 
@@ -150,6 +155,6 @@ export async function buildSemanticMapRunDiagnostics(input: {
     evidenceCoverage,
     cycleConsistency,
     executionReadiness,
-    diagnosticsOnly,
+    diagnosticsOnly: diagnosticsOnlyFlag,
   };
 }

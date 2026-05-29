@@ -3,15 +3,28 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import type { OkrAreaNavTabCounts } from "@/lib/okr/okr-area-nav-counts";
+
+export type { OkrAreaNavTabCounts };
 
 const TABS = [
   { href: "/okr/dashboard", label: "Übersicht" },
-  { href: "/okr/tracking", label: "Tracking" },
-  { href: "/okr/planning", label: "Planung" },
+  { href: "/okr/tracking", label: "Tracking", countKey: "tracking" as const },
+  { href: "/okr/planning", label: "Planung", countKey: "planning" as const },
   { href: "/okr/review", label: "Review" },
 ] as const;
 
-function OkrAreaNavInner() {
+function tabLabel(
+  tab: (typeof TABS)[number],
+  tabCounts: OkrAreaNavTabCounts | undefined
+): string {
+  const key = "countKey" in tab ? tab.countKey : undefined;
+  if (!key || tabCounts === undefined) return tab.label;
+  const n = tabCounts[key];
+  return `${tab.label} (${n})`;
+}
+
+function OkrAreaNavInner({ tabCounts }: { tabCounts?: OkrAreaNavTabCounts }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const okrCycle = searchParams.get("okrCycle")?.trim();
@@ -30,7 +43,7 @@ function OkrAreaNavInner() {
               active ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
             }`}
           >
-            {tab.label}
+            {tabLabel(tab, tabCounts)}
           </Link>
         );
       })}
@@ -38,7 +51,7 @@ function OkrAreaNavInner() {
   );
 }
 
-function OkrAreaNavFallback() {
+function OkrAreaNavFallback({ tabCounts }: { tabCounts?: OkrAreaNavTabCounts }) {
   return (
     <div className="brand-card flex flex-wrap gap-2 p-3" aria-hidden>
       {TABS.map((tab) => (
@@ -46,18 +59,22 @@ function OkrAreaNavFallback() {
           key={tab.href}
           className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-400"
         >
-          {tab.label}
+          {tabLabel(tab, tabCounts)}
         </span>
       ))}
     </div>
   );
 }
 
+type OkrAreaNavProps = {
+  tabCounts?: OkrAreaNavTabCounts;
+};
+
 /** Reiter für Unterseiten unter /okr/* — unterhalb der Seitenüberschrift platzieren (wie Reviewzyklus). */
-export function OkrAreaNav() {
+export function OkrAreaNav({ tabCounts }: OkrAreaNavProps = {}) {
   return (
-    <Suspense fallback={<OkrAreaNavFallback />}>
-      <OkrAreaNavInner />
+    <Suspense fallback={<OkrAreaNavFallback tabCounts={tabCounts} />}>
+      <OkrAreaNavInner tabCounts={tabCounts} />
     </Suspense>
   );
 }

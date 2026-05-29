@@ -4,11 +4,13 @@ import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
 import { getOkrWorkspaceEffectiveCanWrite, getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
-import { OkrAreaNav } from "@/components/ceo/okr/OkrAreaNav";
+import { OkrAreaNavWithCounts } from "@/components/ceo/okr/OkrAreaNavWithCounts";
 import { OkrCycleCarousel } from "@/components/ceo/okr/OkrCycleCarousel";
 import { OkrTrackingView } from "@/components/ceo/okr/OkrTrackingView";
+import type { KeyResultSupervisorFeedbackRow } from "@/lib/okr/okr-cycle-context";
 import {
   buildKeyResultUpdateFlagsForTracking,
+  filterObjectiveViewsForTrackingLifecycle,
   filterObjectiveViewsForTrackingRead,
   loadTrackingBulkContext,
 } from "@/lib/okr/okr-tracking-filter";
@@ -35,7 +37,7 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-semibold text-zinc-900">OKR-Tracking</h1>
           <p className="text-sm text-zinc-600">Kein aktiver Planungszyklus.</p>
         </div>
-        <OkrAreaNav />
+        <OkrAreaNavWithCounts okrCycle={null} />
       </section>
     );
   }
@@ -50,11 +52,17 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
 
   const myMembershipId = context.membershipId;
   const inCycleObjectiveViews = ctx.objectiveViews;
-  const trackingBulk = await loadTrackingBulkContext(myMembershipId, inCycleObjectiveViews);
-  const objectiveViews = filterObjectiveViewsForTrackingRead(inCycleObjectiveViews, trackingBulk);
+  const inCycleTrackingPool = filterObjectiveViewsForTrackingLifecycle(inCycleObjectiveViews);
+  const trackingBulk = await loadTrackingBulkContext(myMembershipId, inCycleTrackingPool);
+  const objectiveViews = filterObjectiveViewsForTrackingRead(inCycleTrackingPool, trackingBulk);
   const keyResultCanUpdateById = buildKeyResultUpdateFlagsForTracking(objectiveViews, trackingBulk);
 
   const updatesByKeyResultId = updatesRecordForObjectiveViews(objectiveViews, ctx.updatesByKeyResultId);
+
+  const supervisorFeedbackRecord: Record<string, KeyResultSupervisorFeedbackRow[]> = {};
+  for (const [krId, rows] of ctx.supervisorFeedbackByKeyResultId) {
+    supervisorFeedbackRecord[krId] = rows;
+  }
 
   return (
     <section className="space-y-4">
@@ -67,7 +75,7 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
         <p className="mt-2 text-xs text-zinc-500">Planungszyklus: {cycle.name}</p>
       </article>
 
-      <OkrAreaNav />
+      <OkrAreaNavWithCounts okrCycle={params.okrCycle?.trim() || null} />
 
       {!pageAccess.canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">Lesemodus: keine Check-ins oder KR-Edits.</p>
@@ -81,8 +89,10 @@ export default async function OkrTrackingPage({ searchParams }: PageProps) {
           canWriteArea={canWriteOkrArea}
           currentMembershipId={context.membershipId}
           inCycleObjectiveCount={inCycleObjectiveViews.length}
+          inCycleTrackingPoolCount={inCycleTrackingPool.length}
           objectiveViews={objectiveViews}
           updatesByKeyResultId={updatesByKeyResultId}
+          supervisorFeedbackByKeyResultId={supervisorFeedbackRecord}
           keyResultCanUpdateById={keyResultCanUpdateById}
         />
       </Suspense>

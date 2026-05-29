@@ -10,8 +10,12 @@ import { OkrRollupSparkline } from "@/components/ceo/okr/OkrRollupSparkline";
 import { createOkrCheckInAction } from "@/app/(ceo)/okr-workspace/actions";
 import { ExpandableTable, type ColumnDef } from "@/components/ceo/ExpandableTable";
 import { OkrProgressBar } from "@/components/ceo/okr/OkrProgressBar";
+import { OkrObjectiveLifecycleBadge } from "@/components/ceo/okr/OkrObjectiveLifecycleBadge";
 import { OkrStatusBadge } from "@/components/ceo/okr/OkrStatusBadge";
 import { OkrWarningBadge } from "@/components/ceo/okr/OkrWarningBadge";
+import { okrCheckInBlockedMessageDe, okrObjectiveAllowsCheckIn } from "@/lib/okr/okr-execution-gate";
+import { verificationStatusLabelDe } from "@/lib/okr/effective-check-in-progress";
+import type { KeyResultSupervisorFeedbackRow } from "@/lib/okr/okr-cycle-context";
 
 function formatDeDate(iso: string | null): string {
   if (!iso) return "—";
@@ -47,8 +51,11 @@ type OkrTrackingViewProps = {
   currentMembershipId: string;
   /** Objectives im gewählten OKR-Zeitraum (vor Zugriffsfilter) — für sinnvolle Leer-Meldung */
   inCycleObjectiveCount: number;
+  /** Nicht-Entwürfe im Zeitraum (vor Zugriffsfilter) */
+  inCycleTrackingPoolCount: number;
   objectiveViews: OkrObjectiveView[];
   updatesByKeyResultId: Record<string, OkrUpdateRow[]>;
+  supervisorFeedbackByKeyResultId: Record<string, KeyResultSupervisorFeedbackRow[]>;
   /** Server-vorberechnet: KR-Update (Check-in) erlaubt */
   keyResultCanUpdateById: Record<string, boolean>;
 };
@@ -60,8 +67,10 @@ export function OkrTrackingView({
   canWriteArea,
   currentMembershipId,
   inCycleObjectiveCount,
+  inCycleTrackingPoolCount,
   objectiveViews,
   updatesByKeyResultId,
+  supervisorFeedbackByKeyResultId,
   keyResultCanUpdateById,
 }: OkrTrackingViewProps) {
   const router = useRouter();
@@ -91,8 +100,14 @@ export function OkrTrackingView({
         ),
       },
       {
+        id: "lifecycle",
+        label: "Status",
+        sortValue: (ov) => ov.objective.status,
+        render: (ov) => <OkrObjectiveLifecycleBadge status={ov.objective.status} />,
+      },
+      {
         id: "status",
-        label: "",
+        label: "Fortschritt",
         sortValue: (ov) => ov.rollupStatus,
         render: (ov) => <OkrStatusBadge status={ov.rollupStatus} />,
       },
@@ -135,7 +150,9 @@ export function OkrTrackingView({
             objectiveViews.length === 0
               ? inCycleObjectiveCount === 0
                 ? "Keine OKR-Objectives in diesem Zeitraum — anderen OKR-Zyklus wählen oder in der Planung anlegen."
-                : "Es gibt Objectives in diesem Zeitraum, aber keines, das Sie mit Ihrer Rolle lesen dürfen (Owner, Deputy oder direkte Team-Linie)."
+                : inCycleTrackingPoolCount === 0
+                  ? "Alle Objectives in diesem Zeitraum sind noch Entwürfe. In der Planung «Zur Freigabe senden» — danach erscheinen sie hier (Freigabe ausstehend oder freigegeben)."
+                  : "Es gibt Objectives in diesem Zeitraum, aber keines, das Sie mit Ihrer Rolle lesen dürfen (Owner, Deputy oder direkte Team-Linie)."
               : "Keine Einträge."
           }
           renderExpandedContent={(ov) => {
@@ -153,7 +170,8 @@ export function OkrTrackingView({
                         : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <OkrObjectiveLifecycleBadge status={ov.objective.status} />
                     <OkrStatusBadge status={ov.rollupStatus} />
                     <span className="text-[11px] text-zinc-400">{formatDeDate(ov.lastActivityAt)}</span>
                   </div>
@@ -175,7 +193,9 @@ export function OkrTrackingView({
                   {ov.keyResults.map((kv) => {
                     const canEditThisKr =
                       canWriteArea && Boolean(keyResultCanUpdateById[kv.keyResult.id]);
+                    const checkInAllowed = okrObjectiveAllowsCheckIn(ov.objective.status);
                     const updates = updatesByKeyResultId[kv.keyResult.id] ?? [];
+                    const feedback = supervisorFeedbackByKeyResultId[kv.keyResult.id] ?? [];
                     const histOpen = historyOpenFor === kv.keyResult.id;
                     const lastIn = updates[0];
 
@@ -186,18 +206,24 @@ export function OkrTrackingView({
                             <p className="truncate text-xs font-medium text-zinc-900">{kv.keyResult.title}</p>
                             <p className="truncate text-[10px] text-zinc-500">
                               {Math.round(kv.progress)}%
+                              {kv.keyResult.status === "completed" ? " · abgeschlossen" : ""}
                               {Math.round(kv.metricProgress) !== Math.round(kv.progress)
                                 ? ` · Metrik ${Math.round(kv.metricProgress)}%`
                                 : ""}{" "}
                               · Zuversicht {confidenceLabel(kv.confidenceLevel)}
                               {lastIn ? ` · zuletzt ${formatDeShort(lastIn.created_at)}` : ""}
                             </p>
+                            {kv.pendingHundredCheckIn ? (
+                              <p className="mt-0.5 text-[10px] font-medium text-amber-800">
+                                100 % — Bestätigung durch Vorgesetzten ausstehend
+                              </p>
+                            ) : null}
                           </div>
                           <OkrStatusBadge status={kv.reviewStatus} />
                           <div className="h-1 w-20 shrink-0 sm:w-24">
                             <OkrProgressBar value={kv.progress} />
                           </div>
-                          {canEditThisKr ? (
+                          {canWriteArea && canEditThisKr && checkInAllowed ? (
                             <button
                               type="button"
                               onClick={() =>
@@ -210,12 +236,30 @@ export function OkrTrackingView({
                             >
                               Check-in
                             </button>
+                          ) : canWriteArea && canEditThisKr && !checkInAllowed ? (
+                            <span
+                              className="max-w-[11rem] shrink-0 text-[10px] leading-snug text-amber-800"
+                              title={okrCheckInBlockedMessageDe(ov.objective.status)}
+                            >
+                              Check-in nach Freigabe
+                            </span>
                           ) : null}
                         </div>
                         {kv.warnings.length > 0 ? (
                           <div className="mt-1 flex flex-wrap gap-0.5">
                             {kv.warnings.map((w) => (
                               <OkrWarningBadge key={w} kind={w} />
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {feedback.length > 0 ? (
+                          <div className="mt-1.5 space-y-1 rounded-md border border-rose-100 bg-rose-50/60 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold text-rose-900">Rückmeldung Vorgesetzter</p>
+                            {feedback.map((fb) => (
+                              <p key={fb.id} className="text-[10px] leading-snug text-rose-950">
+                                „{fb.comment}“ · {formatDeShort(fb.createdAt)}
+                              </p>
                             ))}
                           </div>
                         ) : null}
@@ -233,10 +277,18 @@ export function OkrTrackingView({
                         ) : null}
                         {histOpen ? (
                           <ul className="mt-1 max-h-32 space-y-1 overflow-y-auto border-l-2 border-zinc-100 pl-2 text-[10px] text-zinc-600">
-                            {updates.map((u, idx) => (
+                            {updates.map((u, idx) => {
+                              const statusLabel = verificationStatusLabelDe(
+                                u.verification_status,
+                                u.progress_value
+                              );
+                              return (
                               <li key={`${u.created_at}-${idx}`}>
                                 <span className="font-medium tabular-nums text-zinc-800">
-                                  {u.progress_value != null ? `${Math.round(Number(u.progress_value))}%` : "—"}
+                                  {statusLabel ??
+                                    (u.progress_value != null
+                                      ? `${Math.round(Number(u.progress_value))}%`
+                                      : "—")}
                                 </span>
                                 <span className="text-zinc-400">
                                   {" "}
@@ -246,7 +298,8 @@ export function OkrTrackingView({
                                   <span className="mt-0.5 block text-zinc-500">„{u.comment.trim()}“</span>
                                 ) : null}
                               </li>
-                            ))}
+                            );
+                            })}
                           </ul>
                         ) : null}
                       </li>

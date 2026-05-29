@@ -6,6 +6,22 @@
   --brand-primary: #1d4ed8;
   --brand-secondary: #0f172a;
   --brand-accent: #14b8a6;
+  /* Hellgraustufen ~15 % dunkler für etwas mehr Kontrast zu Weiß */
+  --surface-gray-tint: #e4e4e7;
+  --surface-gray-tint-100: #d4d4d8;
+  --surface-gray-tint-200: #a1a1aa;
+  --zinc-50: color-mix(in srgb, #fafafa 85%, var(--surface-gray-tint) 15%);
+  --zinc-100: color-mix(in srgb, #f4f4f5 85%, var(--surface-gray-tint-100) 15%);
+  --zinc-200: color-mix(in srgb, #e4e4e7 85%, var(--surface-gray-tint-200) 15%);
+  --zinc-300: color-mix(in srgb, #d4d4d8 85%, #71717a 15%);
+  --zinc-400: color-mix(in srgb, #a1a1aa 85%, #52525b 15%);
+  --zinc-500: color-mix(in srgb, #71717a 85%, #3f3f46 15%);
+  --zinc-600: color-mix(in srgb, #52525b 85%, #27272a 15%);
+  --zinc-700: color-mix(in srgb, #3f3f46 85%, #18181b 15%);
+  --zinc-800: color-mix(in srgb, #27272a 85%, #09090b 15%);
+  --slate-50: color-mix(in srgb, #f8fafc 85%, #e2e8f0 15%);
+  --slate-100: color-mix(in srgb, #f1f5f9 85%, #cbd5e1 15%);
+  --slate-200: color-mix(in srgb, #e2e8f0 85%, #94a3b8 15%);
 }
 
 @theme inline {
@@ -13,6 +29,18 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-zinc-50: var(--zinc-50);
+  --color-zinc-100: var(--zinc-100);
+  --color-zinc-200: var(--zinc-200);
+  --color-zinc-300: var(--zinc-300);
+  --color-zinc-400: var(--zinc-400);
+  --color-zinc-500: var(--zinc-500);
+  --color-zinc-600: var(--zinc-600);
+  --color-zinc-700: var(--zinc-700);
+  --color-zinc-800: var(--zinc-800);
+  --color-slate-50: var(--slate-50);
+  --color-slate-100: var(--slate-100);
+  --color-slate-200: var(--slate-200);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -28,6 +56,21 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+select,
+select option {
+  color: var(--zinc-800);
+}
+
+select option:disabled {
+  color: var(--zinc-600);
+}
+
+[role="menu"] [role="menuitem"],
+[role="menu"] a[role="menuitem"],
+[role="menu"] button[role="menuitem"] {
+  color: var(--zinc-800);
+}
+
 .brand-shell .bg-zinc-900 {
   background-color: var(--brand-primary);
 }
@@ -41,23 +84,35 @@ body {
 }
 
 .brand-shell .border-zinc-200 {
-  border-color: color-mix(in srgb, var(--brand-primary) 16%, #e4e4e7);
+  border-color: color-mix(in srgb, var(--brand-primary) 16%, var(--zinc-200));
 }
 
 .brand-shell .bg-zinc-50 {
-  background-color: color-mix(in srgb, var(--brand-secondary) 4%, white);
+  background-color: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--brand-secondary) 4%, white) 85%,
+    var(--surface-gray-tint) 15%
+  );
 }
 
 .brand-shell .text-zinc-500 {
-  color: color-mix(in srgb, var(--brand-secondary) 45%, #71717a);
+  color: color-mix(in srgb, var(--brand-secondary) 45%, var(--zinc-500));
 }
 
 .brand-shell .text-zinc-600 {
-  color: color-mix(in srgb, var(--brand-secondary) 58%, #52525b);
+  color: color-mix(in srgb, var(--brand-secondary) 58%, var(--zinc-600));
+}
+
+.brand-shell .text-zinc-700 {
+  color: color-mix(in srgb, var(--brand-secondary) 68%, var(--zinc-700));
+}
+
+.brand-shell .text-zinc-800 {
+  color: color-mix(in srgb, var(--brand-secondary) 78%, var(--zinc-800));
 }
 
 .brand-shell .brand-card {
-  border: 1px solid color-mix(in srgb, var(--brand-primary) 16%, #e4e4e7);
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 16%, var(--zinc-200));
   background: #ffffff;
   border-radius: 0.75rem;
   box-shadow:
@@ -66,8 +121,12 @@ body {
 }
 
 .brand-shell .brand-surface {
-  border: 1px solid color-mix(in srgb, var(--brand-primary) 12%, #e4e4e7);
-  background: color-mix(in srgb, var(--brand-secondary) 4%, white);
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 12%, var(--zinc-200));
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--brand-secondary) 4%, white) 85%,
+    var(--surface-gray-tint) 15%
+  );
   border-radius: 0.5rem;
 }
 
@@ -89,7 +148,7 @@ body {
 }
 
 .brand-shell .brand-btn-secondary {
-  border: 1px solid color-mix(in srgb, var(--brand-secondary) 28%, #d4d4d8);
+  border: 1px solid color-mix(in srgb, var(--brand-secondary) 28%, var(--zinc-300));
   color: color-mix(in srgb, var(--brand-secondary) 72%, #3f3f46);
   border-radius: 0.375rem;
   font-weight: 500;
@@ -97,7 +156,11 @@ body {
 }
 
 .brand-shell .brand-btn-secondary:hover {
-  background: color-mix(in srgb, var(--brand-secondary) 6%, white);
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--brand-secondary) 6%, white) 85%,
+    var(--surface-gray-tint) 15%
+  );
 }
 
 .brand-shell .brand-btn-secondary:disabled {
@@ -161,7 +224,7 @@ body {
   position: absolute;
   top: 0;
   right: 50%;
-  border-top: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  border-top: 1px solid color-mix(in srgb, var(--brand-primary) 26%, var(--zinc-300));
   width: 50%;
   height: 1rem;
 }
@@ -169,7 +232,7 @@ body {
 .brand-shell .org-graph-tree li::after {
   right: auto;
   left: 50%;
-  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, var(--zinc-300));
 }
 
 .brand-shell .org-graph-tree li:only-child::before,
@@ -187,7 +250,7 @@ body {
 }
 
 .brand-shell .org-graph-tree li:last-child::before {
-  border-right: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  border-right: 1px solid color-mix(in srgb, var(--brand-primary) 26%, var(--zinc-300));
   border-radius: 0 4px 0 0;
 }
 
@@ -201,7 +264,7 @@ body {
   position: absolute;
   top: 0;
   left: 50%;
-  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, #d4d4d8);
+  border-left: 1px solid color-mix(in srgb, var(--brand-primary) 26%, var(--zinc-300));
   width: 0;
   height: 1rem;
 }
@@ -209,7 +272,7 @@ body {
 .brand-shell .org-graph-node {
   min-width: 12rem;
   max-width: 16rem;
-  border: 1px solid color-mix(in srgb, var(--brand-primary) 18%, #d4d4d8);
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 18%, var(--zinc-300));
   border-radius: 0.5rem;
   background: white;
   padding: 0.5rem 0.75rem;

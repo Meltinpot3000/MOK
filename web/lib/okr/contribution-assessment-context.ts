@@ -1,14 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchLeadingStrategicDirectionIdForOkr } from "@/lib/okr/contribution-assessment-triggers";
 import { getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
 
 type Supabase = SupabaseClient;
+
+export const STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT = 20;
 
 export type OkrContributionAssessmentContext = {
   okrObjectiveId: string;
   okrTitle: string;
   okrDescription: string | null;
-  strategicDirection: { id: string; title: string; description: string | null } | null;
-  strategyObjectives: Array<{ id: string; title: string; description: string | null }>;
+  okrCycle: { name: string; startDate: string; endDate: string } | null;
+  strategicDirection: { id: string; title: string; description: string | null };
+  strategyObjectivesUnderDirection: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+  }>;
+  strategyObjectivesUnderDirectionTruncated: boolean;
   keyResults: Array<{
     id: string;
     title: string;
@@ -32,69 +41,95 @@ export async function buildOkrContributionAssessmentContext(params: {
   const { data: okr } = await supabase
     .schema("app")
     .from("okr_objectives")
-    .select("id, title, description")
+    .select("id, title, description, okr_cycle_id")
     .eq("id", okrObjectiveId)
     .eq("organization_id", organizationId)
     .maybeSingle();
 
   if (!okr?.id) return null;
 
-  const { data: junctionRows } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", okrObjectiveId);
-  const strategyObjectiveIds = [...new Set((junctionRows ?? []).map((j) => j.strategy_objective_id))];
+  let okrCycle: OkrContributionAssessmentContext["okrCycle"] = null;
+  const okrCycleId = okr.okr_cycle_id as string | null;
+  if (okrCycleId) {
+    const { data: cycleRow } = await supabase
+      .schema("app")
+      .from("okr_cycles")
+      .select("name, start_date, end_date")
+      .eq("id", okrCycleId)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (cycleRow?.start_date && cycleRow?.end_date) {
+      okrCycle = {
+        name: String(cycleRow.name ?? "OKR-Zyklus"),
+        startDate: String(cycleRow.start_date),
+        endDate: String(cycleRow.end_date),
+      };
+    }
+  }
 
-  let strategyObjectives: OkrContributionAssessmentContext["strategyObjectives"] = [];
-  if (strategyObjectiveIds.length > 0) {
+  const directionId = await fetchLeadingStrategicDirectionIdForOkr(
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    okrObjectiveId
+  );
+  if (!directionId) return null;
+
+  const { data: drow } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .select("id, title, description")
+    .eq("id", directionId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (!drow?.id) return null;
+
+  const strategicDirection = {
+    id: drow.id,
+    title: drow.title,
+    description: drow.description ?? null,
+  };
+
+  const scopeIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
+  const { data: dirLinks } = await supabase
+    .schema("app")
+    .from("strategic_direction_objective_links")
+    .select("strategy_objective_id")
+    .eq("organization_id", organizationId)
+    .eq("strategic_direction_id", directionId)
+    .in("cycle_instance_id", scopeIds);
+
+  const soIdsOrdered = [...new Set((dirLinks ?? []).map((l) => l.strategy_objective_id as string))].sort(
+    (a, b) => a.localeCompare(b)
+  );
+  const truncated = soIdsOrdered.length > STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT;
+  const soIds = soIdsOrdered.slice(0, STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT);
+
+  let strategyObjectivesUnderDirection: OkrContributionAssessmentContext["strategyObjectivesUnderDirection"] =
+    [];
+  if (soIds.length > 0) {
     const { data: soRows } = await supabase
       .schema("app")
       .from("strategy_objectives")
       .select("id, title, description")
       .eq("organization_id", organizationId)
-      .in("id", strategyObjectiveIds);
-    strategyObjectives = (soRows ?? []) as OkrContributionAssessmentContext["strategyObjectives"];
-  }
-
-  let strategicDirection: OkrContributionAssessmentContext["strategicDirection"] = null;
-  const scopeIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
-  const primaryStrategyId = strategyObjectiveIds[0];
-  if (primaryStrategyId) {
-    const { data: dirLink } = await supabase
-      .schema("app")
-      .from("strategic_direction_objective_links")
-      .select("strategic_direction_id")
-      .eq("organization_id", organizationId)
-      .eq("strategy_objective_id", primaryStrategyId)
-      .in("cycle_instance_id", scopeIds)
-      .limit(1)
-      .maybeSingle();
-    const dirId = dirLink?.strategic_direction_id;
-    if (dirId) {
-      const { data: drow } = await supabase
-        .schema("app")
-        .from("strategic_directions")
-        .select("id, title, description")
-        .eq("id", dirId)
-        .eq("organization_id", organizationId)
-        .maybeSingle();
-      if (drow?.id) {
-        strategicDirection = {
-          id: drow.id,
-          title: drow.title,
-          description: drow.description ?? null,
-        };
-      }
-    }
+      .in("id", soIds);
+    const byId = new Map((soRows ?? []).map((r) => [r.id as string, r]));
+    strategyObjectivesUnderDirection = soIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((r) => ({
+        id: r!.id as string,
+        title: r!.title as string,
+        description: (r!.description as string | null) ?? null,
+      }));
   }
 
   const { data: krRows } = await supabase
     .schema("app")
     .from("key_results")
-    .select(
-      "id, title, status, metric_type, start_value, target_value, measurement_unit"
-    )
+    .select("id, title, status, metric_type, start_value, target_value, measurement_unit")
     .eq("organization_id", organizationId)
     .eq("okr_objective_id", okrObjectiveId)
     .order("created_at", { ascending: true });
@@ -175,8 +210,10 @@ export async function buildOkrContributionAssessmentContext(params: {
     okrObjectiveId: okr.id,
     okrTitle: okr.title,
     okrDescription: okr.description ?? null,
+    okrCycle,
     strategicDirection,
-    strategyObjectives,
+    strategyObjectivesUnderDirection,
+    strategyObjectivesUnderDirectionTruncated: truncated,
     keyResults,
   };
 }
@@ -184,13 +221,26 @@ export async function buildOkrContributionAssessmentContext(params: {
 export function contextToPromptJson(ctx: OkrContributionAssessmentContext): string {
   return JSON.stringify(
     {
+      evaluation_priorities: [
+        "strategic_direction",
+        "strategy_objectives_under_direction",
+        "initiatives_via_key_results",
+      ],
+      leading_strategic_direction: ctx.strategicDirection,
+      strategy_objectives_under_direction: ctx.strategyObjectivesUnderDirection,
+      strategy_objectives_under_direction_truncated: ctx.strategyObjectivesUnderDirectionTruncated,
       okr: {
         id: ctx.okrObjectiveId,
         title: ctx.okrTitle,
         description: ctx.okrDescription,
       },
-      strategic_direction: ctx.strategicDirection,
-      strategy_objectives: ctx.strategyObjectives,
+      okr_cycle: ctx.okrCycle
+        ? {
+            name: ctx.okrCycle.name,
+            start_date: ctx.okrCycle.startDate,
+            end_date: ctx.okrCycle.endDate,
+          }
+        : null,
       key_results: ctx.keyResults.map((kr) => ({
         id: kr.id,
         title: kr.title,

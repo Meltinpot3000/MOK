@@ -13,11 +13,15 @@ export type KeyResultRow = {
   due_date?: string | null;
 };
 
+export type OkrUpdateVerificationStatus = "pending" | "confirmed" | "rejected" | "superseded";
+
 export type OkrUpdateRow = {
+  id?: string;
   progress_value: number | null;
   created_at: string;
   confidence_level?: number | null;
   comment?: string | null;
+  verification_status?: OkrUpdateVerificationStatus | null;
 };
 
 export type ReviewStatus = "on_track" | "at_risk" | "off_track";

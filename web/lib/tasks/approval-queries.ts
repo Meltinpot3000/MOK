@@ -22,6 +22,7 @@ export type TaskRow = {
   decision_comment: string | null;
   created_at: string;
   updated_at: string;
+  task_payload?: Record<string, unknown> | null;
 };
 
 /** OKR-Objective im Status Entwurf — Erinnerung in «Meine Aufgaben» (Owner). */
@@ -137,7 +138,7 @@ async function fetchTasksForMembershipInternal(
     .schema("app")
     .from("tasks")
     .select(
-      "id, organization_id, task_type, title, description, status, priority, assigned_membership_id, created_by_membership_id, source_object_type, source_object_id, routing_mode, routing_reason, due_at, completed_at, completed_by_membership_id, decision_comment, created_at, updated_at"
+      "id, organization_id, task_type, title, description, status, priority, assigned_membership_id, created_by_membership_id, source_object_type, source_object_id, routing_mode, routing_reason, due_at, completed_at, completed_by_membership_id, decision_comment, created_at, updated_at, task_payload"
     )
     .eq("organization_id", organizationId)
     .eq("assigned_membership_id", membershipId)
@@ -277,6 +278,7 @@ const TITLE_TABLES: Record<string, string> = {
   strategy_program: "strategy_programs",
   strategy_objective: "strategy_objectives",
   okr_objective: "okr_objectives",
+  key_result: "key_results",
 };
 
 export async function resolveSourceObjectTitles(
@@ -337,7 +339,7 @@ export async function fetchTaskById(
     .schema("app")
     .from("tasks")
     .select(
-      "id, organization_id, task_type, title, description, status, priority, assigned_membership_id, created_by_membership_id, source_object_type, source_object_id, routing_mode, routing_reason, due_at, completed_at, completed_by_membership_id, decision_comment, created_at, updated_at"
+      "id, organization_id, task_type, title, description, status, priority, assigned_membership_id, created_by_membership_id, source_object_type, source_object_id, routing_mode, routing_reason, due_at, completed_at, completed_by_membership_id, decision_comment, created_at, updated_at, task_payload"
     )
     .eq("organization_id", organizationId)
     .eq("assigned_membership_id", membershipId)

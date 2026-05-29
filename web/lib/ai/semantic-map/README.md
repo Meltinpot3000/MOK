@@ -55,8 +55,15 @@ Siehe `index.ts`:
 - `planRouteFromMap` (Option `allowInferredRoads`)
 - `resolveQuestionAgainstSemanticMap`
 - `deriveEvidenceRequirementsFromResolution`
-- `buildSemanticUsedSourcesFromToolCalls` / `buildSemanticMapRunDiagnostics` (Backend-Run-Diagnose, `diagnosticsOnly`)
+- `buildSemanticUsedSourcesFromToolCalls` / `buildSemanticMapRunDiagnostics` (Backend-Run-Diagnose; `diagnosticsOnly` steuert Verifier-Anbindung)
 - `inspectSemanticMap` / `buildSemanticMapRuntimeDiagnostics`
+
+### Answer-Verifier (Semantic Evidence Guard, Phase 15)
+
+- Wenn `AI_SEMANTIC_EVIDENCE_GUARD_ENABLED=true` **oder** `SemanticMapRunDiagnostics.diagnosticsOnly === false`: der Orchestrator lädt Diagnostik und `verifyAnswer` kann bei **High-Risk**-Lücken (fehlende Challenge-/Initiative-Evidence, Top-Challenge ohne Evidence, Zyklus-Mismatch) die **freie LLM-Antwort** durch eine **deterministische** Erklärung ersetzen (keine UI, keine Toolplan-Änderung).
+- Default: Flag **aus** — produktiv erst nach bewusster Aktivierung.
+
+**Stand (Kurz):** Semantic Map Discovery implementiert · Backend-Diagnostics implementiert · Evidence-Smoke implementiert · **Verifier Enforcement (opt-in)** implementiert · Toolplanung über Semantic Map später · Frontend später.
 
 ## 8. Build / Validate / Publish
 
@@ -118,5 +125,6 @@ Details: [semantic-map-discovery.md](../../scripts/doc/semantic-map-discovery.md
 | `semantic-map.runtime.test.ts` | Routen (verified vs inferred), Compact Map, Diagnostics |
 | `semantic-map.evidence.test.ts` | `evaluateSemanticEvidenceCoverage`, `evaluateCycleClaimConsistency` |
 | `semantic-map.question-resolution.test.ts` | Mock-Resolution, `deriveEvidenceRequirementsFromResolution`, Gate |
+| `answer-verifier-semantic-guard.test.ts` | Verifier + `SemanticMapRunDiagnostics` (Flag / `diagnosticsOnly`) |
 | `semantic-map.backend-diagnostics.test.ts` | `buildSemanticMapRunDiagnostics`, Tool→`SemanticUsedSource`, Zyklus-Mismatch |
 | `semantic-map.live.test.ts` | nur bei `AI_SEMANTIC_MAP_LIVE_TEST=true`: echtes `resolveQuestionAgainstSemanticMap` |

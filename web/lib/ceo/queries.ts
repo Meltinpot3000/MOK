@@ -1,6 +1,13 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  computeContentVsTimeDeltaPp,
+  computeOkrCycleContentProgress,
+  computeReviewCycleContentProgress,
+} from "@/lib/ceo/cycle-content-progress";
 import { buildCeoKpis, type KpiCard } from "@/lib/ceo/kpis";
+import { pickPlanningCycleAtLevel } from "@/lib/ceo/pick-planning-cycle";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
+import { getReviewCycleData } from "@/lib/review/review-cycle-data";
 
 export type PlanningCycle = {
   id: string;
@@ -38,6 +45,18 @@ export type CeoAccessContext = {
   roleCodes: string[];
 };
 
+export type CyclePulseLevelSnapshot = {
+  timeProgressPercent: number;
+  contentProgressPercent: number | null;
+  deltaPp: number | null;
+  contentHint: string;
+};
+
+export type CyclePulseSnapshots = {
+  review: CyclePulseLevelSnapshot | null;
+  okr: CyclePulseLevelSnapshot | null;
+};
+
 export type CeoDashboardData = {
   cycles: PlanningCycle[];
   selectedCycle: PlanningCycle | null;
@@ -45,6 +64,7 @@ export type CeoDashboardData = {
   objectives: OkrObjectiveKpiRow[];
   keyResults: KeyResult[];
   kpis: KpiCard[];
+  cyclePulse: CyclePulseSnapshots;
 };
 
 export type TenantBranding = {
@@ -346,10 +366,12 @@ export async function getCeoDashboardData(
         atRiskObjectiveCount: 0,
         atRiskKeyResultCount: 0,
         okrObjectiveCount: 0,
+        keyResultCount: 0,
         trendDeltaPercent: null,
         okrAssigneeCount: 0,
         activeMemberCount: 0,
       }),
+      cyclePulse: { review: null, okr: null },
     };
   }
 
@@ -393,6 +415,7 @@ export async function getCeoDashboardData(
   ).length;
 
   const okrObjectiveCount = objectiveViews.length;
+  const keyResultCount = keyResults.length;
   const okrAssigneeCount = new Set(
     ctx.workspace.okrObjectives.flatMap((o) =>
       [o.ownerMembershipId, o.deputyMembershipId].filter((id): id is string => Boolean(id))
@@ -428,10 +451,67 @@ export async function getCeoDashboardData(
     atRiskObjectiveCount,
     atRiskKeyResultCount,
     okrObjectiveCount,
+    keyResultCount,
     trendDeltaPercent,
     okrAssigneeCount,
     activeMemberCount,
   });
+
+  const nowMs = Date.now();
+  const reviewPick = pickPlanningCycleAtLevel(cycles, 2, nowMs);
+  const okrPick = pickPlanningCycleAtLevel(cycles, 3, nowMs);
+
+  const reviewCycleData =
+    reviewPick.cycle != null
+      ? await getReviewCycleData(organizationId, reviewPick.cycle.id)
+      : null;
+
+  const okrPulseCtx =
+    okrPick.cycle != null
+      ? okrPick.cycle.id === selectedCycle.id
+        ? ctx
+        : await getOkrCycleContext(organizationId, okrPick.cycle.id, null)
+      : null;
+
+  const okrPulseObjectives =
+    okrPulseCtx?.objectiveViews.map((ov) => ({
+      progress_percent: ov.rollupProgressPercent,
+    })) ?? [];
+  const okrContent = computeOkrCycleContentProgress(okrPulseObjectives);
+  const reviewContent = computeReviewCycleContentProgress(
+    (reviewCycleData?.initiativeRows ?? []).map((row) => ({
+      progress_percent: row.progress_percent,
+      weight: row.weight,
+      status: row.status,
+    }))
+  );
+
+  const cyclePulse: CyclePulseSnapshots = {
+    review:
+      reviewPick.cycle != null
+        ? {
+            timeProgressPercent: reviewPick.timeProgressPercent,
+            contentProgressPercent: reviewContent.contentProgressPercent,
+            deltaPp: computeContentVsTimeDeltaPp(
+              reviewContent.contentProgressPercent,
+              reviewPick.timeProgressPercent
+            ),
+            contentHint: reviewContent.detailHint,
+          }
+        : null,
+    okr:
+      okrPick.cycle != null
+        ? {
+            timeProgressPercent: okrPick.timeProgressPercent,
+            contentProgressPercent: okrContent.contentProgressPercent,
+            deltaPp: computeContentVsTimeDeltaPp(
+              okrContent.contentProgressPercent,
+              okrPick.timeProgressPercent
+            ),
+            contentHint: okrContent.detailHint,
+          }
+        : null,
+  };
 
   return {
     cycles,
@@ -440,5 +520,6 @@ export async function getCeoDashboardData(
     objectives,
     keyResults,
     kpis,
+    cyclePulse,
   };
 }

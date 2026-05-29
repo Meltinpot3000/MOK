@@ -357,3 +357,49 @@ export async function canCreateOkrKeyResult(params: {
   }
   return false;
 }
+
+function isEmptyMembershipField(value: string | null | undefined): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+/**
+ * Formular «— (wie Objective-Owner)» / leer: kein expliziter KR-Owner in der DB (null).
+ * Nur wenn zuvor ein Owner gesetzt war, zählt leer als Entfernen (Patch null).
+ */
+export function resolveKeyResultOwnerMembershipPatch(
+  currentOwnerMembershipId: string | null,
+  inputOwnerMembershipId: string | null | undefined
+): string | null | undefined {
+  if (inputOwnerMembershipId === undefined) return undefined;
+  if (!isEmptyMembershipField(inputOwnerMembershipId)) {
+    return inputOwnerMembershipId;
+  }
+  if (currentOwnerMembershipId != null) return null;
+  return undefined;
+}
+
+export function isExplicitKeyResultOwnerRemoval(
+  currentOwnerMembershipId: string | null,
+  ownerPatch: string | null | undefined
+): boolean {
+  return ownerPatch === null && currentOwnerMembershipId != null;
+}
+
+export function resolveKeyResultDeputyMembershipPatch(
+  currentDeputyMembershipId: string | null,
+  inputDeputyMembershipId: string | null | undefined
+): string | null | undefined {
+  if (inputDeputyMembershipId === undefined) return undefined;
+  if (!isEmptyMembershipField(inputDeputyMembershipId)) {
+    return inputDeputyMembershipId;
+  }
+  if (currentDeputyMembershipId != null) return null;
+  return undefined;
+}
+
+export function isExplicitKeyResultDeputyRemoval(
+  currentDeputyMembershipId: string | null,
+  deputyPatch: string | null | undefined
+): boolean {
+  return deputyPatch === null && currentDeputyMembershipId != null;
+}

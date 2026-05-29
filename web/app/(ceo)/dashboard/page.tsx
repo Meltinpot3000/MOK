@@ -122,6 +122,7 @@ export default async function CeoDashboardPage() {
             <CyclePulseOverview
               cycles={data.cycles}
               nowIso={new Date().toISOString()}
+              cyclePulse={data.cyclePulse}
               fillHeight
             />
           </div>

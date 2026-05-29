@@ -1,9 +1,12 @@
+import type { SemanticMapRunDiagnostics } from "@/lib/ai/semantic-map/types";
+
 import { renderDeterministicNarration } from "./deterministic-narrator";
 import {
   rankingContractSchema,
   structuredAnswerContractSchema,
   type StructuredAnswerContract,
 } from "./answer-contracts";
+import { evaluateSemanticEvidenceGuard } from "./semantic-evidence-guard";
 
 const NO_DATA_PATTERNS = [
   /keine daten/i,
@@ -73,10 +76,27 @@ function validateEvidenceConsistency(contract: StructuredAnswerContract): boolea
 }
 
 export function verifyAnswer(args: {
-  contract: StructuredAnswerContract;
+  contract: StructuredAnswerContract | null;
   llmText: string;
   baselineText?: string;
+  /** Optional: Semantic-Map-Lauf-Diagnose (Answer-Verifier Phase 15). */
+  semanticMapRunDiagnostics?: SemanticMapRunDiagnostics | null;
 }): AnswerVerificationResult {
+  const semanticGuard = evaluateSemanticEvidenceGuard({
+    diagnostics: args.semanticMapRunDiagnostics,
+  });
+  if (semanticGuard) {
+    return {
+      status: "blocked",
+      reason: semanticGuard.reason,
+      replacementText: semanticGuard.replacementText,
+    };
+  }
+
+  if (!args.contract) {
+    return { status: "ok" };
+  }
+
   const parsed = structuredAnswerContractSchema.safeParse(args.contract);
   if (!parsed.success) {
     return {

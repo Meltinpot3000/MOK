@@ -63,11 +63,14 @@ async function main() {
   const runId = arg("--run");
 
   if (cmd === "build") {
+    const scopeArg = arg("--scope");
     const r = await buildSemanticMapDraft({
       organizationId: orgId,
       webRoot: resolve(process.cwd()),
+      scope: scopeArg,
     });
     printSummary("Semantic Map Build", {
+      scope: scopeArg ?? process.env.AI_SEMANTIC_MAP_BUILD_SCOPE ?? "full",
       "inventory tables": r.inventorySummary.tables,
       tools: r.inventorySummary.tools,
       "draft places": r.draft.places.length,

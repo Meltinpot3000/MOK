@@ -1,4 +1,5 @@
 import type { OkrPlanningWorkspaceData } from "@/lib/okr/planning-data";
+import { okrObjectiveEditableInPlanning } from "@/lib/okr/okr-objective-lifecycle";
 import {
   canCreateKeyResultOnObjectiveFromBulk,
   canUpdateKeyResultFromBulk,
@@ -46,17 +47,22 @@ export async function buildOkrPlanningEditFlags(
       owner_membership_id: o.ownerMembershipId,
       deputy_membership_id: o.deputyMembershipId ?? null,
     };
-    objectiveEditById[o.id] = canUpdateObjectiveFromBulk(bulk, row);
-    canCreateKeyResultByObjectiveId[o.id] = canCreateKeyResultOnObjectiveFromBulk(bulk, row);
+    const lifecycleEditable = okrObjectiveEditableInPlanning(o.status);
+    objectiveEditById[o.id] =
+      lifecycleEditable && canUpdateObjectiveFromBulk(bulk, row);
+    canCreateKeyResultByObjectiveId[o.id] =
+      lifecycleEditable && canCreateKeyResultOnObjectiveFromBulk(bulk, row);
     for (const kr of o.keyResults) {
-      keyResultEditById[kr.id] = canUpdateKeyResultFromBulk(
-        bulk,
-        {
-          owner_membership_id: kr.ownerMembershipId,
-          deputy_membership_id: kr.deputyMembershipId ?? null,
-        },
-        row
-      );
+      keyResultEditById[kr.id] =
+        lifecycleEditable &&
+        canUpdateKeyResultFromBulk(
+          bulk,
+          {
+            owner_membership_id: kr.ownerMembershipId,
+            deputy_membership_id: kr.deputyMembershipId ?? null,
+          },
+          row
+        );
     }
   }
 
