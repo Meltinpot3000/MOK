@@ -10,6 +10,7 @@ export type SidebarItemId =
   | "my-tasks"
   | "ai-assistant"
   | "organization"
+  | "strategy-network"
   | "planning-cycles"
   | "invitations"
   | "directory-sync"
@@ -18,6 +19,14 @@ export type SidebarItemId =
   | "llm-usage";
 
 export type SidebarSection = "top" | "phase1" | "phase0" | "cycles" | "admin";
+
+export type PipNavItemId = "programs" | "pip-initiatives";
+
+export type PipNavItem = {
+  id: PipNavItemId;
+  href: string;
+  label: string;
+};
 
 export type SidebarItem = {
   id: SidebarItemId;
@@ -40,14 +49,14 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: "key-figures", href: "/key-figures", label: "Kennzahlen", section: "phase1" },
   { id: "strategy-cycle", href: "/strategy-cycle", label: "Strategiezyklus", section: "phase1" },
   { id: "reviews", href: "/reviews", label: "Reviewzyklus", section: "phase1" },
-  { id: "okr-workspace", href: "/okr/dashboard", label: "OKR Zyklus", section: "phase1" },
+  { id: "annual-targets", href: "/annual-targets", label: "Jahresziele", section: "phase1" },
+  { id: "okr-workspace", href: "/okr/dashboard", label: "OKR-Zyklus", section: "phase1" },
   {
     id: "strategic-directions",
     href: "/strategic-directions",
     label: "Strategische Sto\u00DFrichtungen",
     section: "phase1",
   },
-  { id: "annual-targets", href: "/annual-targets", label: "Jahresziele", section: "phase1" },
   {
     id: "initiatives",
     href: "/initiatives",
@@ -55,6 +64,12 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
     section: "phase1",
   },
   { id: "organization", href: "/organization", label: "Organisationsstruktur", section: "phase0" },
+  {
+    id: "strategy-network",
+    href: "/strategienetzwerk",
+    label: "Strategienetzwerk",
+    section: "phase1",
+  },
   { id: "access-control", href: "/access-control", label: "Rollenrechte", section: "admin" },
   { id: "llm-usage", href: "/llm-usage", label: "Systemkonfiguration und -information", section: "admin" },
   { id: "branding", href: "/branding", label: "Markenauftritt", section: "admin" },
@@ -70,6 +85,45 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
 
 export const SIDEBAR_ITEM_IDS = SIDEBAR_ITEMS.map((item) => item.id);
 
+/** Programme & Initiativen (Strategiezyklus PIPs) — Rechte wie Strategiezyklus. */
+export const PIPS_NAV_ITEMS: readonly PipNavItem[] = [
+  {
+    id: "programs",
+    href: "/strategy-cycle?l1=pips&l2=programme",
+    label: "Programme",
+  },
+  {
+    id: "pip-initiatives",
+    href: "/strategy-cycle?l1=pips&l2=initiativen",
+    label: "Initiativen",
+  },
+] as const;
+
+const STRATEGIC_PLANNING_NAV_IDS: SidebarItemId[] = [
+  "dashboard",
+  "strategy-cycle",
+  "reviews",
+  "strategy-network",
+];
+
+const ANNUAL_PLANNING_NAV_IDS: SidebarItemId[] = ["annual-targets", "okr-workspace"];
+
+function canReadAnnualTargetsNav(permissions: SidebarPermissionMap): boolean {
+  return Boolean(
+    permissions["annual-targets"]?.read || permissions["strategy-cycle"]?.read
+  );
+}
+
+export function parseStrategyCycleNavQuery(searchParams: URLSearchParams): {
+  l1: string | null;
+  l2: string | null;
+} {
+  return {
+    l1: searchParams.get("l1"),
+    l2: searchParams.get("l2"),
+  };
+}
+
 /** Oberer Nav-Block (z. B. «Meine Aufgaben»), vor «Strategische Planung». */
 export function getVisibleTopNavItems(permissions: SidebarPermissionMap): SidebarItem[] {
   return SIDEBAR_ITEMS.filter(
@@ -77,22 +131,50 @@ export function getVisibleTopNavItems(permissions: SidebarPermissionMap): Sideba
   );
 }
 
-/** Sichtbare Phase-1-Links (Sidebar); serverseitig berechnen und als Prop serialisieren, um Hydration-Mismatches zu vermeiden. */
+/** @deprecated Nutze getVisibleStrategicPlanningNavItems / Annual / Pips. */
 export function getVisiblePhase1NavItems(permissions: SidebarPermissionMap): SidebarItem[] {
-  return SIDEBAR_ITEMS.filter(
-    (item) =>
-      item.section === "phase1" &&
-      Boolean(permissions[item.id]?.read) &&
-      item.id !== "my-tasks" &&
-      item.id !== "key-figures" &&
-      item.id !== "strategic-directions" &&
-      item.id !== "initiatives" &&
-      item.id !== "annual-targets"
-  );
+  return getVisibleStrategicPlanningNavItems(permissions);
+}
+
+export function getVisibleStrategicPlanningNavItems(
+  permissions: SidebarPermissionMap
+): SidebarItem[] {
+  return SIDEBAR_ITEMS.filter((item) => {
+    if (!STRATEGIC_PLANNING_NAV_IDS.includes(item.id)) return false;
+    if (item.id === "strategy-network") {
+      return Boolean(permissions["strategy-network"]?.read);
+    }
+    return Boolean(permissions[item.id]?.read);
+  });
+}
+
+export function getVisibleAnnualPlanningNavItems(
+  permissions: SidebarPermissionMap
+): SidebarItem[] {
+  return ANNUAL_PLANNING_NAV_IDS.flatMap((id) => {
+    const item = SIDEBAR_ITEMS.find((i) => i.id === id);
+    if (!item) return [];
+    if (id === "annual-targets") {
+      return canReadAnnualTargetsNav(permissions) ? [item] : [];
+    }
+    return permissions[id]?.read ? [item] : [];
+  });
+}
+
+export function getVisiblePipsNavItems(permissions: SidebarPermissionMap): PipNavItem[] {
+  if (!permissions["strategy-cycle"]?.read) {
+    return [];
+  }
+  return [...PIPS_NAV_ITEMS];
 }
 
 export function getVisiblePhase0NavItems(permissions: SidebarPermissionMap): SidebarItem[] {
-  return SIDEBAR_ITEMS.filter((item) => item.section === "phase0" && Boolean(permissions[item.id]?.read));
+  return SIDEBAR_ITEMS.filter(
+    (item) =>
+      item.section === "phase0" &&
+      Boolean(permissions[item.id]?.read) &&
+      item.id !== "strategy-network"
+  );
 }
 
 export function getVisibleCyclesNavItems(permissions: SidebarPermissionMap): SidebarItem[] {
@@ -131,8 +213,12 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
     return "dashboard";
   }
 
-  if (pathname === "/strategy-matrix") {
-    return "strategy-cycle";
+  if (pathname === "/strategy-matrix" || pathname.startsWith("/strategy-matrix/")) {
+    return "annual-targets";
+  }
+
+  if (pathname === "/annual-targets" || pathname.startsWith("/annual-targets/")) {
+    return "annual-targets";
   }
 
   if (pathname.startsWith("/okr")) {
@@ -156,6 +242,10 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
     return "organization";
   }
 
+  if (pathname === "/strategienetzwerk" || pathname.startsWith("/strategienetzwerk/")) {
+    return "strategy-network";
+  }
+
   return null;
 }
 
@@ -163,20 +253,62 @@ export function getItemIdForPath(pathname: string): SidebarItemId | null {
  * Aktiver Sidebar-Link inkl. Unterpfaden (z. B. alle /okr/* fuer «OKR Zyklus»).
  * Ausnahme: «Dashboard» nur exakt /dashboard — Zyklen nutzen den eigenen Eintrag unter «Zyklen».
  */
-export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boolean {
+export function isPipNavItemActive(
+  pathname: string,
+  searchParams: URLSearchParams,
+  item: PipNavItem
+): boolean {
+  if (pathname !== "/strategy-cycle" && !pathname.startsWith("/strategy-cycle/")) {
+    return false;
+  }
+  const { l1, l2 } = parseStrategyCycleNavQuery(searchParams);
+  if (item.id === "programs") {
+    return l1 === "pips" && l2 === "programme";
+  }
+  return l1 === "pips" && l2 === "initiativen";
+}
+
+export function isSidebarNavItemActive(
+  pathname: string,
+  item: SidebarItem,
+  searchParams?: URLSearchParams | null
+): boolean {
   if (item.id === "dashboard") {
     return pathname === "/dashboard";
+  }
+
+  if (item.id === "annual-targets") {
+    if (
+      pathname === "/annual-targets" ||
+      pathname.startsWith("/annual-targets/") ||
+      pathname === "/strategy-matrix" ||
+      pathname.startsWith("/strategy-matrix/")
+    ) {
+      return true;
+    }
+    if (searchParams && (pathname === "/strategy-cycle" || pathname.startsWith("/strategy-cycle/"))) {
+      const { l1, l2 } = parseStrategyCycleNavQuery(searchParams);
+      return l1 === "corporate-strategy" && l2 === "strategy-matrix";
+    }
+    return false;
   }
 
   if (item.id === "strategy-cycle") {
     if (pathname === "/unternehmensinfo" || pathname.startsWith("/unternehmensinfo/")) {
       return false;
     }
-    return (
-      pathname === item.href ||
-      pathname === "/strategy-matrix" ||
-      pathname.startsWith(`${item.href}/`)
-    );
+    if (pathname === "/strategy-matrix" || pathname.startsWith("/strategy-matrix/")) {
+      return false;
+    }
+    if (pathname === "/strategy-cycle" || pathname.startsWith("/strategy-cycle/")) {
+      if (searchParams) {
+        const { l1, l2 } = parseStrategyCycleNavQuery(searchParams);
+        if (l1 === "pips") return false;
+        if (l1 === "corporate-strategy" && l2 === "strategy-matrix") return false;
+      }
+      return true;
+    }
+    return pathname === item.href || pathname.startsWith(`${item.href}/`);
   }
 
   if (item.id === "okr-workspace") {
@@ -200,6 +332,10 @@ export function isSidebarNavItemActive(pathname: string, item: SidebarItem): boo
       pathname === "/business-models" ||
       pathname === "/operating-models"
     );
+  }
+
+  if (item.id === "strategy-network") {
+    return pathname === "/strategienetzwerk" || pathname.startsWith("/strategienetzwerk/");
   }
 
   if (item.id === "planning-cycles") {

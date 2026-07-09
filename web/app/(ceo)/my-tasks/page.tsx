@@ -1,3 +1,4 @@
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
@@ -65,8 +66,9 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
         </nav>
       </div>
 
-      <div className="brand-card overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
+      <div className="brand-card">
+        <TableHorizontalScroll bordered={false}>
+          <table className="w-max min-w-full text-left text-sm">
           <thead>
             <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500">
               <th className="px-4 py-3 font-medium">Titel</th>
@@ -146,6 +148,7 @@ export default async function MyTasksPage({ searchParams }: PageProps) {
             )}
           </tbody>
         </table>
+        </TableHorizontalScroll>
       </div>
     </section>
   );

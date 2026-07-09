@@ -83,6 +83,13 @@ export async function getSidebarPermissionsForMembership(
     };
   }
 
+  if (permissions.organization.read || permissions.organization.write) {
+    permissions["strategy-network"] = {
+      read: permissions["strategy-network"].read || permissions.organization.read,
+      write: permissions["strategy-network"].write || permissions.organization.write,
+    };
+  }
+
   const hasAnySidebarPermission = SIDEBAR_ITEM_IDS.some(
     (itemId) => permissions[itemId].read || permissions[itemId].write
   );

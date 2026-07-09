@@ -2,36 +2,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   STRATEGY_OBJECTIVES_UNDER_DIRECTION_LIMIT,
 } from "@/lib/okr/contribution-assessment-context";
+import { fetchLeadingStrategicDirectionIdForOkr } from "@/lib/okr/leading-strategic-direction";
 import { getOkrCycleInstanceScopeIds } from "@/lib/okr/queries";
 
 type Supabase = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
-export async function fetchLeadingStrategicDirectionIdForOkr(
-  supabase: Supabase,
-  organizationId: string,
-  cycleInstanceId: string,
-  okrObjectiveId: string
-): Promise<string | null> {
-  const { data: junctionRows } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", okrObjectiveId)
-    .limit(1);
-  const strategyObjectiveId = junctionRows?.[0]?.strategy_objective_id;
-  if (!strategyObjectiveId) return null;
-  const scopeIds = await getOkrCycleInstanceScopeIds(organizationId, cycleInstanceId);
-  const { data: link } = await supabase
-    .schema("app")
-    .from("strategic_direction_objective_links")
-    .select("strategic_direction_id")
-    .eq("organization_id", organizationId)
-    .eq("strategy_objective_id", strategyObjectiveId)
-    .in("cycle_instance_id", scopeIds)
-    .limit(1)
-    .maybeSingle();
-  return link?.strategic_direction_id ?? null;
-}
+export { fetchLeadingStrategicDirectionIdForOkr };
 
 export async function fetchStrategyObjectiveIdsUnderDirection(
   supabase: Supabase,

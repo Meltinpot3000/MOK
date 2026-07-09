@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchLeadingStrategicDirectionIdForOkr } from "@/lib/okr/leading-strategic-direction";
 
 export async function fetchOkrObjectiveLeadingDirectionId(
   supabase: SupabaseClient,
@@ -6,23 +7,12 @@ export async function fetchOkrObjectiveLeadingDirectionId(
   cycleInstanceId: string,
   okrObjectiveId: string
 ): Promise<string | null> {
-  const { data: j } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", okrObjectiveId)
-    .maybeSingle();
-  const sid = j?.strategy_objective_id as string | undefined;
-  if (!sid) return null;
-  const { data: l } = await supabase
-    .schema("app")
-    .from("strategic_direction_objective_links")
-    .select("strategic_direction_id")
-    .eq("organization_id", organizationId)
-    .eq("cycle_instance_id", cycleInstanceId)
-    .eq("strategy_objective_id", sid)
-    .maybeSingle();
-  return (l?.strategic_direction_id as string | undefined) ?? null;
+  return fetchLeadingStrategicDirectionIdForOkr(
+    supabase,
+    organizationId,
+    cycleInstanceId,
+    okrObjectiveId
+  );
 }
 
 export type OkrObjectiveHeadSnapshot = {

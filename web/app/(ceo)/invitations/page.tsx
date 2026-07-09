@@ -599,7 +599,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
           Mehrere Organisations-Rollen pro Benutzer sind möglich; Navigationsrechte aus allen Rollen werden vereinigt
           (effektives Recht ist die Summe).
         </p>
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4">
           <InvitationsMembershipTable
             memberships={memberships}
             identityByUserId={identityByUserIdRecord}
@@ -735,7 +735,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
             <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">SUPABASE_SERVICE_ROLE_KEY</code> setzen.
           </p>
         )}
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4">
           <InvitationsPendingTable
             invitationViews={pendingInvitationViews}
             canWrite={canWrite}
@@ -758,7 +758,7 @@ export default async function InvitationsPage({ searchParams }: InvitationsPageP
           <p className="mt-1 text-sm text-zinc-600">
             Einladungen, die abgeschlossen, abgelaufen oder widerrufen wurden — ohne Anmeldelink und Aktionen.
           </p>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4">
             <InvitationsClosedTable invitationViews={closedInvitationViews} />
           </div>
         </section>

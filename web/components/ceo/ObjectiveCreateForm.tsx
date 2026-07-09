@@ -43,7 +43,7 @@ export function ObjectiveCreateForm({ canWrite, action }: ObjectiveCreateFormPro
         <textarea
           name="description"
           required
-          rows={3}
+          rows={8}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="Zielzustand (kein Aktionsplan)"
@@ -73,20 +73,6 @@ export function ObjectiveCreateForm({ canWrite, action }: ObjectiveCreateFormPro
           onChange={(event) => setImportance(clampImportance(Number(event.target.value)))}
           className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
         />
-      </label>
-      <label className="text-xs text-zinc-600">
-        Status
-        <select
-          name="status"
-          defaultValue="draft"
-          className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-        >
-          <option value="draft">draft</option>
-          <option value="active">active</option>
-          <option value="at_risk">at_risk</option>
-          <option value="completed">completed</option>
-          <option value="archived">archived</option>
-        </select>
       </label>
       <div className="md:col-span-2">
         <button

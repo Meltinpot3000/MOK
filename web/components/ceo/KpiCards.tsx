@@ -1,4 +1,7 @@
+"use client";
+
 import type { KpiCard } from "@/lib/ceo/kpis";
+import { KpiCardTile } from "@/components/ceo/KpiCardTile";
 
 type KpiCardsProps = {
   items: KpiCard[];
@@ -31,21 +34,19 @@ export function KpiCards({ items, layout = "default" }: KpiCardsProps) {
       <div className={gridClass}>
         {items.map((item, index) => {
           const accent = KPI_ACCENTS[index % KPI_ACCENTS.length];
+          const paddingClass = layout === "aside" ? "p-3 sm:p-4 xl:p-3" : "p-4";
           return (
-            <div
+            <KpiCardTile
               key={item.label}
-              className={`relative overflow-hidden rounded-2xl bg-gradient-to-br text-left shadow-md ring-1 ${layout === "aside" ? "p-3 sm:p-4 xl:p-3" : "p-4"} ${accent}`}
-            >
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">{item.label}</p>
-              <p
-                className={`mt-2 font-semibold tabular-nums tracking-tight text-zinc-900 ${layout === "aside" ? "text-xl sm:text-2xl xl:text-xl" : "text-2xl sm:text-3xl"}`}
-              >
-                {item.value}
-              </p>
-              {item.hint ? (
-                <p className="mt-2 line-clamp-2 text-[10px] leading-snug text-zinc-600">{item.hint}</p>
-              ) : null}
-            </div>
+              accent={accent}
+              paddingClass={paddingClass}
+              valueSizeClass={
+                layout === "aside" ? "text-xl sm:text-2xl xl:text-xl" : "text-2xl sm:text-3xl"
+              }
+              label={item.label}
+              value={item.value}
+              hint={item.hint}
+            />
           );
         })}
       </div>

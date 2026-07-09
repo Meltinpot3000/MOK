@@ -159,6 +159,17 @@ export default function UserManualPage() {
             Themenfelder oder Problemdimensionen, die im Strategiezyklus bewertet und priorisiert werden.
           </li>
           <li>
+            <span className="font-medium text-zinc-900">Herausforderungs-Profil (Systemvorschlag):</span>{" "}
+            Pro Herausforderung leitet CITADEL drei Dimensionen ab — ohne manuelle «Erfüllungs-%»:{" "}
+            <em>Adressierung</em> (Verknüpfung zu Stoßrichtungen inkl. Beitragsstufe),{" "}
+            <em>Kohärenz</em> (Korrelation zu strategischen Zielen über gemeinsame Stoßrichtungen) und{" "}
+            <em>Umsetzung</em> (gewichteter Fortschritt über Jahresziele, Initiativen und verknüpfte OKR-Key-Results).
+            Der <em>Erfüllungsgrad</em> ist dieser Umsetzungsprozentsatz (0–100 %), sobald die Herausforderung
+            verankert ist; fehlen Anker, nennt das System Schritte zum Pflegen (Jahresziele, PIP, OKR-Tracking).
+            Anzeige im Dashboard-Pop-up und Erläuterung im{" "}
+            <NavLink href="/strategienetzwerk">Strategienetzwerk</NavLink>.
+          </li>
+          <li>
             <span className="font-medium text-zinc-900">Strategische Stoßrichtungen:</span> Gewünschte
             Handlungsfelder oder Prioritäten, die aus der Analyse abgeleitet werden und mit Challenges verknüpft
             werden können.
@@ -205,8 +216,10 @@ export default function UserManualPage() {
             </h3>
             <p className="mt-1.5 text-sm text-zinc-700">
               Zentrale Steuerungsansicht zum aktiven Zyklus: Status, Kennzahlenkarten, priorisierte Challenges und
-              Stoßrichtungen sowie Hinweise auf „unadressierte“ Challenges. Nutze das Dashboard als wöchentliche oder
-              monatliche Management-Übersicht, nicht nur am Quartalsende.
+              Stoßrichtungen sowie Hinweise auf „unadressierte“ Challenges. In den Top-5-Pop-ups zu Herausforderungen
+              zeigt das System das <strong>Herausforderungs-Profil</strong> (Adressierung, Kohärenz, Umsetzung) inkl.
+              Kurzbegründung — abgeleitet aus Verknüpfungen und Fortschrittsdaten, nicht als freie Bewertung. Nutze das
+              Dashboard als wöchentliche oder monatliche Management-Übersicht, nicht nur am Quartalsende.
             </p>
           </div>
           <div>
@@ -292,8 +305,10 @@ export default function UserManualPage() {
               <NavLink href="/responsibles">Verantwortliche</NavLink>,{" "}
               <NavLink href="/industries">Branchen</NavLink>,{" "}
               <NavLink href="/business-models">Geschäftsmodelle</NavLink> und{" "}
-              <NavLink href="/operating-models">Operating Modelle</NavLink>. Je sauberer diese Basis, desto
-              einfacher werden Auswertungen, Zielzuordnungen und Akzeptanz im Unternehmen.
+              <NavLink href="/operating-models">Operating Modelle</NavLink> sowie das{" "}
+              <NavLink href="/strategienetzwerk">Strategienetzwerk</NavLink> (Referenzmodell der Verknüpfungen und
+              Erläuterung des Herausforderungs-Profils). Je sauberer diese Basis, desto einfacher werden Auswertungen,
+              Zielzuordnungen und Akzeptanz im Unternehmen.
             </p>
           </div>
           <div>
@@ -578,6 +593,15 @@ export default function UserManualPage() {
                 sollen Owner nach dem Planen einer Session informiert werden –{" "}
                 <span className="font-medium">tatsächlicher E-Mail-Versand</span> setzt einen angebundenen E-Mail-Provider in
                 Supabase voraus (wie im UI-Hinweis beschrieben).
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">„Jahresziele vor OKRs erzwingen“</span>{" "}
+                (<code className="text-xs">require_annual_targets_before_okrs</code> plus{" "}
+                <code className="text-xs">annual_target_gate_enforcement_mode</code>): Bei aktiviertem Gate sind OKR-Entwürfe
+                weiter möglich, aber Aktivierung/Publish wird je Modus blockiert, bis für den Objective-Owner aktive
+                Jahresziele im Zieljahr vorhanden sind. Scope und Ausnahmen werden über{" "}
+                <code className="text-xs">annual_target_gate_scope</code> und{" "}
+                <code className="text-xs">annual_target_gate_allow_exceptions</code> gesteuert.
               </li>
               <li>
                 <span className="font-medium text-zinc-900">Button „Mandantenregeln speichern“:</span> Aktualisiert den

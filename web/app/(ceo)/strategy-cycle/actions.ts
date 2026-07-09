@@ -30,7 +30,12 @@ import {
 } from "@/lib/analysis-network/embeddings";
 import { recordLlmUsageEvents } from "@/lib/analysis-network/usage";
 import { writeAiStorageActionLog, type AiStorageProviderModel } from "@/lib/analysis-network/storage-log";
-import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { getPhase0Context } from "@/lib/phase0/queries";
+import {
+  resolveAnnualPlanningCycle,
+  resolveOkrPlanningCycle,
+  resolveStrategyPlanningCycle,
+} from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   calculateQualityScoreWithFallback,
@@ -47,10 +52,9 @@ import {
 } from "@/lib/strategy-cycle/scoring";
 import { normalizeContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
-import {
-  isStrategicDirectionActiveForPrograms,
-  normalizeStrategicDirectionStatus,
-} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
+import { isStrategicDirectionEligibleForPrograms } from "@/lib/strategy-objects/direction-program-eligibility";
+import { bootstrapStrategyObjectRevision } from "@/lib/strategy-objects/bootstrap-revision";
+import { fetchVersioningMetaForRevisionId } from "@/lib/strategy-objects/queries";
 import {
   proposeMatrixProgramWithGemini,
   type MatrixProgramProposalResult,
@@ -73,11 +77,17 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { executeOkrContributionAssessmentJob } from "@/lib/okr/execute-okr-contribution-assessment";
 import { executeKrInitiativeMatchingJob } from "@/lib/okr/execute-kr-initiative-matching";
+import { assertStrategyObjectDefinitionEditable } from "@/lib/strategy-objects/governance-server";
 
 type WorkspaceContext = {
   organizationId: string;
   membershipId: string;
+  /** L1 — Strategiezyklus */
   cycleId: string;
+  /** L2 — Jahresplanung (Programme, Initiativen, Jahresziele) */
+  annualCycleId: string;
+  /** L3 — OKR-Quartal (Key-Result-Verknüpfungen) */
+  okrCycleId: string;
 };
 
 type PersistedQualityResult = {
@@ -799,13 +809,19 @@ async function getWorkspaceContextOrRedirect(): Promise<WorkspaceContext> {
   const access = await getSidebarAccessContext("strategy-cycle");
   if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
 
-  const cycle = await getActivePlanningCycle(context.organizationId);
+  const [cycle, annualCycle, okrCycle] = await Promise.all([
+    resolveStrategyPlanningCycle(context.organizationId),
+    resolveAnnualPlanningCycle(context.organizationId),
+    resolveOkrPlanningCycle(context.organizationId),
+  ]);
   if (!cycle) redirect("/strategy-cycle");
 
   return {
     organizationId: context.organizationId,
     membershipId: context.membershipId,
     cycleId: cycle.id,
+    annualCycleId: annualCycle?.id ?? cycle.id,
+    okrCycleId: okrCycle?.id ?? annualCycle?.id ?? cycle.id,
   };
 }
 
@@ -838,6 +854,28 @@ async function syncChallengePrimaryAnalysisEntry(
     .eq("organization_id", organizationId)
     .eq("cycle_instance_id", cycleId)
     .eq("id", challengeId);
+}
+
+/**
+ * Nur ein Entwurf (Portfolio-Lifecycle = draft) darf hart gelöscht werden. Aktive/inaktive/
+ * stillgelegte Objekte werden stattdessen inaktiviert/stillgelegt. Fehlt der View-Eintrag
+ * (reine Legacy-Objekte), bleibt Löschen erlaubt.
+ */
+async function isStrategyObjectDeletableDraft(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  context: { organizationId: string; cycleId: string },
+  legacyObjectId: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .schema("app")
+    .from("v_current_strategy_objects")
+    .select("identity_lifecycle_state")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("revision_id", legacyObjectId)
+    .maybeSingle();
+  if (!data) return true;
+  return data.identity_lifecycle_state === "draft";
 }
 
 /** Wenn _noRedirect=1 im FormData: nur revalidieren, kein Redirect. Fuer sanfte UX (z.B. Pill-Klicks). */
@@ -3385,22 +3423,47 @@ export async function createStrategicDirectionInCycle(formData: FormData) {
     feasibilityScore,
     riskScore: riskLevel,
   });
-  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
   const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
-  await supabase.schema("app").from("strategic_directions").insert({
-    organization_id: context.organizationId,
-    cycle_instance_id: context.cycleId,
+  const { data: inserted, error: insertError } = await supabase
+    .schema("app")
+    .from("strategic_directions")
+    .insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: context.cycleId,
+      title,
+      description,
+      priority,
+      relevance_level: relevanceLevel,
+      risk_level: riskLevel,
+      strategic_value_score: strategicValueScore,
+      capability_fit_score: capabilityFitScore,
+      feasibility_score: feasibilityScore,
+      status: "draft",
+      created_by_membership_id: context.membershipId,
+    })
+    .select("id")
+    .single();
+  if (insertError || !inserted?.id) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=direction-create-failed");
+  }
+  await bootstrapStrategyObjectRevision(supabase, {
+    objectType: "strategic_direction",
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    revisionId: inserted.id,
     title,
     description,
-    priority,
-    relevance_level: relevanceLevel,
-    risk_level: riskLevel,
-    strategic_value_score: strategicValueScore,
-    capability_fit_score: capabilityFitScore,
-    feasibility_score: feasibilityScore,
-    status,
-    created_by_membership_id: context.membershipId,
+    definitionPayload: {
+      priority,
+      grouping: null,
+      relevance_level: relevanceLevel,
+      risk_level: riskLevel,
+      strategic_value_score: strategicValueScore,
+      capability_fit_score: capabilityFitScore,
+      feasibility_score: feasibilityScore,
+    },
+    createdByMembershipId: context.membershipId,
   });
 
   done("/strategy-cycle?l1=strategic-directions&l2=design&success=direction-created");
@@ -3518,7 +3581,6 @@ export async function createObjectiveInCycle(formData: FormData) {
   const description = String(formData.get("description") ?? "").trim() || null;
   const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
   const importanceScore = readSmallIntField(formData, "importance_score", 3);
-  const status = String(formData.get("status") ?? "draft");
   const supabase = await createSupabaseServerClient();
   const { data: inserted, error } = await supabase
     .schema("app")
@@ -3530,7 +3592,7 @@ export async function createObjectiveInCycle(formData: FormData) {
       description,
       time_horizon: timeHorizon,
       importance_score: importanceScore,
-      status,
+      status: "draft",
       created_by_membership_id: context.membershipId,
       created_by_source: "user",
     })
@@ -3539,6 +3601,21 @@ export async function createObjectiveInCycle(formData: FormData) {
   if (error || !inserted?.id) {
     done("/strategy-cycle?l1=objectives&error=objective-insert-failed");
   }
+  await bootstrapStrategyObjectRevision(supabase, {
+    objectType: "strategic_objective",
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    revisionId: inserted.id,
+    title,
+    description,
+    definitionPayload: {
+      importance_score: importanceScore,
+      time_horizon: timeHorizon,
+      created_by_membership_id: context.membershipId,
+      created_by_source: "user",
+    },
+    createdByMembershipId: context.membershipId,
+  });
   await evaluateSingleObjectiveIfEnabled({
     supabase,
     organizationId: context.organizationId,
@@ -3563,8 +3640,11 @@ export async function updateObjectiveInCycle(formData: FormData) {
   const description = String(formData.get("description") ?? "").trim() || null;
   const timeHorizon = String(formData.get("time_horizon") ?? "").trim() || null;
   const importanceScore = readSmallIntField(formData, "importance_score", 3);
-  const status = String(formData.get("status") ?? "draft");
   const supabase = await createSupabaseServerClient();
+  const lockCheck = await assertStrategyObjectDefinitionEditable(supabase, objectiveId);
+  if (!lockCheck.ok) {
+    done("/strategy-cycle?l1=objectives&error=definition-locked");
+  }
   await supabase
     .schema("app")
     .from("strategy_objectives")
@@ -3573,7 +3653,6 @@ export async function updateObjectiveInCycle(formData: FormData) {
       description,
       time_horizon: timeHorizon,
       importance_score: importanceScore,
-      status,
       ai_evaluation_status: "outdated",
     })
     .eq("organization_id", context.organizationId)
@@ -3588,6 +3667,58 @@ export async function updateObjectiveInCycle(formData: FormData) {
     description,
   });
   done("/strategy-cycle?l1=objectives&success=objective-updated");
+}
+
+/**
+ * Gezielte, synchrone Sentinel-Neubewertung genau eines Ziels (z. B. nach «Revision übernehmen»,
+ * wenn der Nutzer im Dialog bestätigt). Bewertet die aktuell aktive Definition des Ziels.
+ */
+export async function runSingleObjectiveEvaluation(formData: FormData) {
+  const context = await getWorkspaceContextOrRedirect();
+  const objectiveId = String(formData.get("objective_id") ?? "").trim();
+  const rawReturnPath = String(formData.get("return_path") ?? "").trim();
+  const returnPath = rawReturnPath || "/strategy-cycle?l1=objectives";
+  const withParam = (key: string, value: string) =>
+    `${returnPath}${returnPath.includes("?") ? "&" : "?"}${key}=${value}`;
+
+  if (!objectiveId) {
+    done(returnPath);
+  }
+  const supabase = await createSupabaseServerClient();
+
+  const { data: branding } = await supabase
+    .schema("app")
+    .from("tenant_branding")
+    .select("branding_config")
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+  const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
+  if (!policy.llmEnabled || !isLlmFeatureEnabled(policy, "objective_evaluation")) {
+    done(withParam("error", "ai-evaluation-disabled"));
+  }
+
+  const { data: objective } = await supabase
+    .schema("app")
+    .from("strategy_objectives")
+    .select("title, description")
+    .eq("organization_id", context.organizationId)
+    .eq("cycle_instance_id", context.cycleId)
+    .eq("id", objectiveId)
+    .maybeSingle();
+  if (!objective) {
+    done(withParam("error", "objective-not-found"));
+  }
+
+  await evaluateSingleObjectiveIfEnabled({
+    supabase,
+    organizationId: context.organizationId,
+    cycleId: context.cycleId,
+    objectiveId,
+    title: objective.title,
+    description: objective.description ?? null,
+  });
+
+  done(withParam("success", "objective-evaluated"));
 }
 
 export async function runObjectiveEvaluation(formData: FormData) {
@@ -3828,6 +3959,30 @@ export async function createStrategicChallengeInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=challenge-create-failed");
   }
   const challengeId = created.id as string;
+  await bootstrapStrategyObjectRevision(supabase, {
+    objectType: "strategic_challenge",
+    organizationId: context.organizationId,
+    cycleInstanceId: context.cycleId,
+    revisionId: challengeId,
+    title,
+    description,
+    definitionPayload: {
+      priority: 3,
+      visibility: "internal",
+      impact_score: impactScore,
+      urgency_score: urgencyScore,
+      scope_score: scopeScore,
+      root_cause_score: rootCauseScore,
+      challenge_score: challengeScore,
+      relevance_level: relevanceLevel,
+      risk_level: riskLevel,
+      source_cluster_id: null,
+      source_analysis_entry_id: null,
+      created_by_membership_id: context.membershipId,
+      created_by_source: null,
+    },
+    createdByMembershipId: context.membershipId,
+  });
   for (const entryId of analysisEntryIds) {
     const { data: entryOk } = await supabase
       .schema("app")
@@ -3897,6 +4052,10 @@ export async function updateStrategicChallengeAssessment(formData: FormData) {
   });
   const description = String(formData.get("description") ?? "").trim() || null;
   const supabase = await createSupabaseServerClient();
+  const lockCheck = await assertStrategyObjectDefinitionEditable(supabase, strategicChallengeId);
+  if (!lockCheck.ok) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=definition-locked");
+  }
   await supabase
     .schema("app")
     .from("strategic_challenges")
@@ -3935,8 +4094,11 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     riskScore: riskLevel,
   });
   const description = String(formData.get("description") ?? "").trim() || null;
-  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
   const supabase = await createSupabaseServerClient();
+  const lockCheck = await assertStrategyObjectDefinitionEditable(supabase, strategicDirectionId);
+  if (!lockCheck.ok) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=definition-locked");
+  }
   const { data: updatedRows, error } = await supabase
     .schema("app")
     .from("strategic_directions")
@@ -3949,7 +4111,6 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
       feasibility_score: feasibilityScore,
       relevance_level: strategicValueScore,
       risk_level: riskLevel,
-      status,
     })
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
@@ -3974,25 +4135,6 @@ export async function updateStrategicDirectionAssessment(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&l2=design&error=direction-not-found");
   }
   done("/strategy-cycle?l1=strategic-directions&l2=design&success=assessment-updated");
-}
-
-/** Nur Lifecycle-Status; ohne Neuschreiben der Bewertungsfelder (fuer Tabellen-Dropdown). */
-export async function updateStrategicDirectionStatusInCycle(formData: FormData) {
-  const context = await getWorkspaceContextOrRedirect();
-  const strategicDirectionId = String(formData.get("strategic_direction_id") ?? "").trim();
-  if (!strategicDirectionId) {
-    done("/strategy-cycle?l1=strategic-directions&l2=design");
-  }
-  const status = normalizeStrategicDirectionStatus(String(formData.get("status") ?? "draft"));
-  const supabase = await createSupabaseServerClient();
-  await supabase
-    .schema("app")
-    .from("strategic_directions")
-    .update({ status })
-    .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
-    .eq("id", strategicDirectionId);
-  finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&success=direction-status");
 }
 
 export async function linkDirectionToChallengePredecessor(formData: FormData) {
@@ -4048,7 +4190,7 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
   const { data: objective } = await supabase
     .schema("app")
     .from("strategy_objectives")
-    .select("id, status")
+    .select("id")
     .eq("id", objectiveId)
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
@@ -4066,7 +4208,13 @@ export async function linkDirectionToObjectiveInCycle(formData: FormData) {
     .eq("strategic_direction_id", directionId)
     .eq("strategy_objective_id", objectiveId)
     .maybeSingle();
-  if (!isObjectiveEligibleForDirectionLink(objective.status) && !existingLink) {
+  const objectiveVersioning = await fetchVersioningMetaForRevisionId(
+    context.organizationId,
+    context.cycleId,
+    objectiveId,
+    { supabase }
+  );
+  if (!isObjectiveEligibleForDirectionLink(objectiveVersioning) && !existingLink) {
     finishOrRedirect(formData, "/strategy-cycle?l1=strategic-directions&l2=design&error=objective-not-linkable");
     return;
   }
@@ -4184,7 +4332,7 @@ export async function generateMatrixProgramProposalAction(input: {
     supabase
       .schema("app")
       .from("strategic_directions")
-      .select("id,title,description,status")
+      .select("id,title,description")
       .eq("organization_id", context.organizationId)
       .eq("cycle_instance_id", context.cycleId)
       .eq("id", input.directionId)
@@ -4192,7 +4340,13 @@ export async function generateMatrixProgramProposalAction(input: {
   ]);
   if (chErr || !chRow) return { ok: false, error: "Herausforderung nicht gefunden." };
   if (dirErr || !dirRow) return { ok: false, error: "Sto\u00DFrichtung nicht gefunden." };
-  if (!isStrategicDirectionActiveForPrograms(dirRow.status)) {
+  const directionVersioning = await fetchVersioningMetaForRevisionId(
+    context.organizationId,
+    context.cycleId,
+    input.directionId,
+    { supabase }
+  );
+  if (!isStrategicDirectionEligibleForPrograms(directionVersioning)) {
     return {
       ok: false,
       error: "KI-Programmvorschlag nur f\u00FCr Sto\u00DFrichtungen mit Status \u00ABAktiv\u00BB.",
@@ -4331,7 +4485,7 @@ export async function createStrategyProgramInCycle(formData: FormData) {
   const { data: directionRow, error: directionReadError } = await supabase
     .schema("app")
     .from("strategic_directions")
-    .select("id, status")
+    .select("id")
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", directionId)
@@ -4342,13 +4496,19 @@ export async function createStrategyProgramInCycle(formData: FormData) {
     done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-direction");
   }
 
-  if (!isStrategicDirectionActiveForPrograms(directionRow.status)) {
+  const directionVersioning = await fetchVersioningMetaForRevisionId(
+    context.organizationId,
+    context.cycleId,
+    directionId,
+    { supabase }
+  );
+  if (!isStrategicDirectionEligibleForPrograms(directionVersioning)) {
     done("/strategy-cycle?l1=pips&l2=programme&error=program-direction-not-active");
   }
 
   const { error } = await supabase.schema("app").from("strategy_programs").insert({
     organization_id: context.organizationId,
-    cycle_instance_id: context.cycleId,
+    cycle_instance_id: context.annualCycleId,
     strategic_direction_id: directionId,
     strategic_challenge_id: strategicChallengeId || null,
     program_origin: programOrigin,
@@ -4433,7 +4593,7 @@ export async function updateStrategyProgramInCycle(formData: FormData) {
   const { data: directionRow, error: directionReadError } = await supabase
     .schema("app")
     .from("strategic_directions")
-    .select("id, status")
+    .select("id")
     .eq("organization_id", context.organizationId)
     .eq("cycle_instance_id", context.cycleId)
     .eq("id", directionId)
@@ -4444,7 +4604,13 @@ export async function updateStrategyProgramInCycle(formData: FormData) {
     done("/strategy-cycle?l1=pips&l2=programme&error=program-invalid-direction");
   }
 
-  if (!isStrategicDirectionActiveForPrograms(directionRow.status)) {
+  const directionVersioning = await fetchVersioningMetaForRevisionId(
+    context.organizationId,
+    context.cycleId,
+    directionId,
+    { supabase }
+  );
+  if (!isStrategicDirectionEligibleForPrograms(directionVersioning)) {
     done("/strategy-cycle?l1=pips&l2=programme&error=program-direction-not-active");
   }
 
@@ -4463,7 +4629,7 @@ export async function updateStrategyProgramInCycle(formData: FormData) {
     })
     .eq("id", programId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId);
+    .eq("cycle_instance_id", context.annualCycleId);
 
   if (error) {
     const msg = `${error.message ?? ""} ${(error as { details?: string }).details ?? ""}`;
@@ -4806,7 +4972,7 @@ export async function createPipInitiativeInCycle(formData: FormData) {
     .select("id, status")
     .eq("id", programId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .maybeSingle();
   if (progErr || !prog) {
     done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-program");
@@ -4833,7 +4999,7 @@ export async function createPipInitiativeInCycle(formData: FormData) {
     .from("initiatives")
     .insert({
       organization_id: context.organizationId,
-      cycle_instance_id: context.cycleId,
+      cycle_instance_id: context.annualCycleId,
       program_id: programId,
       title,
       description,
@@ -4861,7 +5027,7 @@ export async function createPipInitiativeInCycle(formData: FormData) {
     await supabase.schema("app").from("initiative_target_links").upsert(
       {
         organization_id: context.organizationId,
-        cycle_instance_id: context.cycleId,
+        cycle_instance_id: context.annualCycleId,
         initiative_id: initiativeId,
         annual_target_id: annualTargetId,
         contribution_level: String(formData.get("contribution_level") ?? "medium"),
@@ -4876,14 +5042,14 @@ export async function createPipInitiativeInCycle(formData: FormData) {
     const validKr = await filterKeyResultIdsForCycleInstance(
       supabase,
       context.organizationId,
-      context.cycleId,
+      context.okrCycleId,
       krIds
     );
     const rows = krIds
       .filter((id) => validKr.has(id))
       .map((key_result_id) => ({
         organization_id: context.organizationId,
-        cycle_instance_id: context.cycleId,
+        cycle_instance_id: context.annualCycleId,
         initiative_id: initiativeId,
         key_result_id,
         created_by_membership_id: context.membershipId,
@@ -4937,7 +5103,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     .select("id")
     .eq("id", initiativeId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .maybeSingle();
   if (!existing) {
     done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-not-found");
@@ -4949,7 +5115,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     .select("id, status")
     .eq("id", programId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .maybeSingle();
   if (progErr || !prog) {
     done("/strategy-cycle?l1=pips&l2=initiativen&error=initiative-invalid-program");
@@ -4987,7 +5153,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     })
     .eq("id", initiativeId)
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId);
+    .eq("cycle_instance_id", context.annualCycleId);
 
   if (upErr) {
     console.error("[updatePipInitiativeInCycle]", upErr.code, upErr.message);
@@ -4999,7 +5165,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     .from("initiative_target_links")
     .delete()
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .eq("initiative_id", initiativeId);
 
   const targetIds = [...new Set(formData.getAll("annual_target_id").map((v) => String(v).trim()).filter(Boolean))];
@@ -5007,7 +5173,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     await supabase.schema("app").from("initiative_target_links").upsert(
       {
         organization_id: context.organizationId,
-        cycle_instance_id: context.cycleId,
+        cycle_instance_id: context.annualCycleId,
         initiative_id: initiativeId,
         annual_target_id: annualTargetId,
         contribution_level: String(formData.get("contribution_level") ?? "medium"),
@@ -5022,7 +5188,7 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     .from("initiative_key_result_links")
     .delete()
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .eq("initiative_id", initiativeId);
 
   const krIds = [...new Set(formData.getAll("key_result_id").map((v) => String(v).trim()).filter(Boolean))];
@@ -5030,14 +5196,14 @@ export async function updatePipInitiativeInCycle(formData: FormData) {
     const validKr = await filterKeyResultIdsForCycleInstance(
       supabase,
       context.organizationId,
-      context.cycleId,
+      context.okrCycleId,
       krIds
     );
     const rows = krIds
       .filter((id) => validKr.has(id))
       .map((key_result_id) => ({
         organization_id: context.organizationId,
-        cycle_instance_id: context.cycleId,
+        cycle_instance_id: context.annualCycleId,
         initiative_id: initiativeId,
         key_result_id,
         created_by_membership_id: context.membershipId,
@@ -5065,7 +5231,7 @@ export async function linkInitiativeToTargetPredecessor(formData: FormData) {
   await supabase.schema("app").from("initiative_target_links").upsert(
     {
       organization_id: context.organizationId,
-      cycle_instance_id: context.cycleId,
+      cycle_instance_id: context.annualCycleId,
       initiative_id: initiativeId,
       annual_target_id: annualTargetId,
       contribution_level: String(formData.get("contribution_level") ?? "medium"),
@@ -5089,7 +5255,7 @@ export async function unlinkInitiativeTargetPredecessor(formData: FormData) {
     .from("initiative_target_links")
     .delete()
     .eq("organization_id", context.organizationId)
-    .eq("cycle_instance_id", context.cycleId)
+    .eq("cycle_instance_id", context.annualCycleId)
     .eq("initiative_id", initiativeId)
     .eq("annual_target_id", annualTargetId);
   finishOrRedirect(formData, "/strategy-cycle?l1=pips&l2=initiativen&success=unlinked");
@@ -5180,6 +5346,9 @@ export async function deleteObjectiveInCycle(formData: FormData) {
     done("/strategy-cycle?l1=objectives");
   }
   const supabase = await createSupabaseServerClient();
+  if (!(await isStrategyObjectDeletableDraft(supabase, context, objectiveId))) {
+    done("/strategy-cycle?l1=objectives&error=delete-only-draft");
+  }
   await supabase
     .schema("app")
     .from("strategy_objectives")
@@ -5197,6 +5366,9 @@ export async function deleteStrategicChallengeInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&l2=challenges");
   }
   const supabase = await createSupabaseServerClient();
+  if (!(await isStrategyObjectDeletableDraft(supabase, context, challengeId))) {
+    done("/strategy-cycle?l1=strategic-directions&l2=challenges&error=delete-only-draft");
+  }
   await supabase
     .schema("app")
     .from("strategic_challenges")
@@ -5214,6 +5386,9 @@ export async function deleteStrategicDirectionInCycle(formData: FormData) {
     done("/strategy-cycle?l1=strategic-directions&l2=design");
   }
   const supabase = await createSupabaseServerClient();
+  if (!(await isStrategyObjectDeletableDraft(supabase, context, directionId))) {
+    done("/strategy-cycle?l1=strategic-directions&l2=design&error=delete-only-draft");
+  }
   await supabase
     .schema("app")
     .from("strategic_directions")

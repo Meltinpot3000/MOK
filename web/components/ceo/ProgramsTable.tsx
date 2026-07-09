@@ -2,6 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { ProgramCreateForm, type ProgramFormSelection } from "@/components/ceo/ProgramCreateForm";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import { ExpandableTable } from "./ExpandableTable";
 import {
   deriveProgramOverviewHealth,
@@ -185,11 +192,10 @@ export function ProgramsTable({
   }, [programs, ownerLabelByMembershipId]);
 
   const filteredPrograms = useMemo(() => {
-    const q = searchTitle.trim().toLowerCase();
     return programs.filter((p) => {
       if (filterStatus && p.status !== filterStatus) return false;
       if (filterOwnerMembershipId && p.owner_membership_id !== filterOwnerMembershipId) return false;
-      if (q && !p.title.toLowerCase().includes(q)) return false;
+      if (!matchesTableTitleSearch(p.title, searchTitle)) return false;
       return true;
     });
   }, [programs, filterStatus, filterOwnerMembershipId, searchTitle]);
@@ -299,53 +305,25 @@ export function ProgramsTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[120px] flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Status
-          </label>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Alle</option>
-            {PROGRAM_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {PROGRAM_STATUS_LABELS_UI[s]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[140px] flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Sponsor
-          </label>
-          <select
-            value={filterOwnerMembershipId}
-            onChange={(e) => setFilterOwnerMembershipId(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Alle</option>
-            {ownerFilterOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[160px] flex-[2]">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Suche Titel
-          </label>
-          <input
-            value={searchTitle}
-            onChange={(e) => setSearchTitle(e.target.value)}
-            placeholder="…"
-            className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-          />
-        </div>
-      </div>
+      <TableFilterBar>
+        <TableFilterSelect
+          label="Status"
+          value={filterStatus}
+          onChange={setFilterStatus}
+          options={PROGRAM_STATUSES.map((s) => ({
+            value: s,
+            label: PROGRAM_STATUS_LABELS_UI[s],
+          }))}
+        />
+        <TableFilterSelect
+          label="Sponsor"
+          value={filterOwnerMembershipId}
+          onChange={setFilterOwnerMembershipId}
+          className="min-w-[140px] flex-1"
+          options={ownerFilterOptions.map((o) => ({ value: o.id, label: o.label }))}
+        />
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
 
       <ExpandableTable<ProgramRow>
       columns={columns}
@@ -385,8 +363,8 @@ export function ProgramsTable({
               {inits.length === 0 ? (
                 <p className="text-xs text-zinc-500">Keine Initiativen verknüpft.</p>
               ) : (
-                <div className="overflow-x-auto rounded border border-zinc-200">
-                  <table className="min-w-full border-collapse text-xs">
+                <TableHorizontalScroll>
+                  <table className="w-max min-w-full border-collapse text-xs">
                     <thead>
                       <tr className="bg-zinc-50 text-left text-zinc-700">
                         <th className="border-b border-zinc-200 px-2 py-1.5 font-medium">
@@ -421,7 +399,7 @@ export function ProgramsTable({
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableHorizontalScroll>
               )}
             </div>
           </div>

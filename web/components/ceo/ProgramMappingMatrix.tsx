@@ -1,5 +1,6 @@
 "use client";
 
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { useMemo, useState } from "react";
 import type {
   ProgramMatrixCell,
@@ -16,7 +17,6 @@ import {
 import { CoverageStrengthPillButton } from "@/components/ceo/CoverageStrengthPillButton";
 import { addressedLinkCountToneClass } from "@/lib/strategy-cycle/matrix-link-count-tone";
 import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
-import { STRATEGIC_DIRECTION_STATUS_LABELS_DE } from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 
 function cellSurfaceClasses(cell: ProgramMatrixCell): string {
   if (cell.isGap) {
@@ -233,8 +233,8 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
           Für die Matrix werden mindestens eine strategische Stoßrichtung sowie mindestens eine Herausforderung oder ein Ziel im Zyklus benoetigt.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[1100px] border-collapse">
+        <TableHorizontalScroll className="mt-4">
+          <table className="w-max min-w-[1100px] border-collapse">
             <thead>
               <tr className="h-9">
                 <th className="sticky left-0 z-30 border border-b-0 border-zinc-200 bg-zinc-50 p-0" />
@@ -372,9 +372,9 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                         </div>
                         <span
                           className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium leading-none text-zinc-600"
-                          title="Status der Sto\u00DFrichtung"
+                          title="Lifecycle der Sto\u00DFrichtung"
                         >
-                          {STRATEGIC_DIRECTION_STATUS_LABELS_DE[row.directionStatus]}
+                          {row.directionLifecycleLabel}
                         </span>
                         {(nChallengeCols > 0 || nObjectiveCols > 0) ? (
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[10px] font-semibold leading-tight">
@@ -454,10 +454,10 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
                               linkAction={linkDirectionToObjectiveInCycle}
                               unlinkAction={unlinkDirectionFromObjectiveInCycle}
                               canWrite={canWrite}
-                              linkSelectionDisabled={!isObjectiveEligibleForDirectionLink(cell.objectiveStatus)}
+                              linkSelectionDisabled={!isObjectiveEligibleForDirectionLink(cell.objectiveVersioning)}
                               title={
-                                !isObjectiveEligibleForDirectionLink(cell.objectiveStatus)
-                                  ? `${cell.objectiveTitle} × ${cell.directionTitle} — Verknuepfen nur bei Status aktiv oder auffaellig`
+                                !isObjectiveEligibleForDirectionLink(cell.objectiveVersioning)
+                                  ? `${cell.objectiveTitle} × ${cell.directionTitle} — Verknuepfen nur bei aktiver, gueltiger Fassung`
                                   : `${cell.objectiveTitle} × ${cell.directionTitle}`
                               }
                               linkedClassName={`rounded px-2 py-1.5 text-left text-xs transition hover:opacity-95 ${objectiveCellSurfaceClasses(cell)}`}
@@ -495,7 +495,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
               })}
             </tbody>
           </table>
-        </div>
+        </TableHorizontalScroll>
       )}
     </article>
   );

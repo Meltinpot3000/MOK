@@ -7,74 +7,37 @@ import {
 import { buildCeoKpis, type KpiCard } from "@/lib/ceo/kpis";
 import { pickPlanningCycleAtLevel } from "@/lib/ceo/pick-planning-cycle";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
+import {
+  classifyOkrProgressVsPlan,
+  computeLinearExpectedProgressPercent,
+  type OkrProgressPlanBucket,
+} from "@/lib/okr/okr-progress-plan-bucket";
 import { getReviewCycleData } from "@/lib/review/review-cycle-data";
+import type {
+  CeoAccessContext,
+  CeoDashboardData,
+  CeoOverallProgressDetail,
+  CyclePulseLevelSnapshot,
+  CyclePulseSnapshots,
+  KeyResult,
+  OkrObjectiveKpiRow,
+  OkrProgressPlanItem,
+  PlanningCycle,
+  TenantBranding,
+} from "@/lib/ceo/types";
 
-export type PlanningCycle = {
-  id: string;
-  code: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  status: string;
-  level_no?: number;
-  cycle_scheme_id?: string;
-  cycle_scheme_name?: string;
-  is_active_scheme?: boolean;
-  legacy_planning_cycle_id?: string | null;
-};
-
-export type OkrObjectiveKpiRow = {
-  id: string;
-  title: string;
-  status: string;
-  progress_percent: number;
-};
-
-export type KeyResult = {
-  id: string;
-  title: string;
-  status: string;
-  objective_id: string;
-};
-
-export type CeoAccessContext = {
-  userId: string;
-  organizationId: string;
-  organizationName: string;
-  membershipId: string;
-  roleCodes: string[];
-};
-
-export type CyclePulseLevelSnapshot = {
-  timeProgressPercent: number;
-  contentProgressPercent: number | null;
-  deltaPp: number | null;
-  contentHint: string;
-};
-
-export type CyclePulseSnapshots = {
-  review: CyclePulseLevelSnapshot | null;
-  okr: CyclePulseLevelSnapshot | null;
-};
-
-export type CeoDashboardData = {
-  cycles: PlanningCycle[];
-  selectedCycle: PlanningCycle | null;
-  previousCycle: PlanningCycle | null;
-  objectives: OkrObjectiveKpiRow[];
-  keyResults: KeyResult[];
-  kpis: KpiCard[];
-  cyclePulse: CyclePulseSnapshots;
-};
-
-export type TenantBranding = {
-  primary_color: string;
-  secondary_color: string;
-  accent_color: string;
-  logo_url: string | null;
-  status: "draft" | "published";
-  branding_config?: Record<string, unknown> | null;
-};
+export type {
+  CeoAccessContext,
+  CeoDashboardData,
+  CeoOverallProgressDetail,
+  CyclePulseLevelSnapshot,
+  CyclePulseSnapshots,
+  KeyResult,
+  OkrObjectiveKpiRow,
+  OkrProgressPlanItem,
+  PlanningCycle,
+  TenantBranding,
+} from "@/lib/ceo/types";
 
 function pickDefaultCycle(cycles: PlanningCycle[]): PlanningCycle | null {
   if (cycles.length === 0) return null;
@@ -371,6 +334,7 @@ export async function getCeoDashboardData(
         okrAssigneeCount: 0,
         activeMemberCount: 0,
       }),
+      overallProgressDetail: null,
       cyclePulse: { review: null, okr: null },
     };
   }
@@ -457,7 +421,38 @@ export async function getCeoDashboardData(
     activeMemberCount,
   });
 
+  const selectedOkrCycle = ctx.workspace.okrCycles.find(
+    (c) => c.id === ctx.workspace.selectedOkrCycleId
+  );
+  const cycleStart = selectedOkrCycle?.start_date ?? selectedCycle.start_date;
+  const cycleEnd = selectedOkrCycle?.end_date ?? selectedCycle.end_date;
   const nowMs = Date.now();
+  const expectedProgressPercent = computeLinearExpectedProgressPercent(cycleStart, cycleEnd, nowMs);
+  const buckets: Record<OkrProgressPlanBucket, OkrProgressPlanItem[]> = {
+    ahead: [],
+    on_plan: [],
+    behind: [],
+  };
+  for (const ov of objectiveViews) {
+    const progressPercent = ov.rollupProgressPercent;
+    const bucket = classifyOkrProgressVsPlan(progressPercent, cycleStart, cycleEnd, nowMs);
+    buckets[bucket].push({
+      id: ov.objective.id,
+      title: ov.objective.title,
+      progressPercent,
+      expectedProgressPercent,
+      ownerDisplayName: ov.objective.ownerDisplayName,
+      bucket,
+    });
+  }
+  const overallProgressDetail: CeoOverallProgressDetail = {
+    cycleStart,
+    cycleEnd,
+    expectedProgressPercent,
+    buckets,
+    okrCycleId: ctx.workspace.selectedOkrCycleId,
+  };
+
   const reviewPick = pickPlanningCycleAtLevel(cycles, 2, nowMs);
   const okrPick = pickPlanningCycleAtLevel(cycles, 3, nowMs);
 
@@ -520,6 +515,7 @@ export async function getCeoDashboardData(
     objectives,
     keyResults,
     kpis,
+    overallProgressDetail,
     cyclePulse,
   };
 }

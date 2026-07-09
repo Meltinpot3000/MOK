@@ -66,21 +66,28 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
 
   if (status === "not_run") {
     return (
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-        
-        Sentinel✨-Bewertung noch nicht ausgeführt.
+      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/80 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Sentinel✨-Bewertung
+        </p>
+        <p className="mt-2 text-sm text-zinc-600">
+          Noch nicht ausgeführt. Die Bewertung erscheint hier nach dem nächsten Sentinel-Lauf.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Sentinel✨-Bewertung
-        </span>
+    <div className="space-y-3 rounded-lg border border-zinc-200 border-l-4 border-l-amber-400 bg-zinc-50/80 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Sentinel✨-Bewertung
+          </p>
+          <p className="mt-1 text-[11px] text-zinc-500">Nur zur Information — nicht direkt bearbeitbar.</p>
+        </div>
         <span
-          className={`rounded-full border px-2 py-0.5 text-xs font-medium ${getStatusBadge(status)}`}
+          className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${getStatusBadge(status)}`}
         >
           {getStatusLabel(status)}
         </span>
@@ -91,25 +98,29 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
           <p className="text-2xl font-semibold text-zinc-900">{(objective.ai_objective_score as number).toFixed(1)}</p>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2 text-sm">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {objective.ai_clarity_score != null && (
-          <div>
-            <span className="text-zinc-500">Clarity:</span> {objective.ai_clarity_score}
+          <div className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm">
+            <span className="block text-[11px] text-zinc-500">Klarheit</span>
+            <span className="font-medium text-zinc-900">{objective.ai_clarity_score}</span>
           </div>
         )}
         {objective.ai_strategic_relevance_score != null && (
-          <div>
-            <span className="text-zinc-500">Strategic Relevance:</span> {objective.ai_strategic_relevance_score}
+          <div className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm">
+            <span className="block text-[11px] text-zinc-500">Strategische Relevanz</span>
+            <span className="font-medium text-zinc-900">{objective.ai_strategic_relevance_score}</span>
           </div>
         )}
         {objective.ai_feasibility_score != null && (
-          <div>
-            <span className="text-zinc-500">Feasibility:</span> {objective.ai_feasibility_score}
+          <div className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm">
+            <span className="block text-[11px] text-zinc-500">Machbarkeit</span>
+            <span className="font-medium text-zinc-900">{objective.ai_feasibility_score}</span>
           </div>
         )}
         {objective.ai_fit_to_company_score != null && (
-          <div>
-            <span className="text-zinc-500">Fit to Company:</span> {objective.ai_fit_to_company_score}
+          <div className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm">
+            <span className="block text-[11px] text-zinc-500">Passung Unternehmen</span>
+            <span className="font-medium text-zinc-900">{objective.ai_fit_to_company_score}</span>
           </div>
         )}
       </div>
@@ -133,9 +144,9 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
         </div>
       )}
       {issues.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-zinc-600">Issues</p>
-          <ul className="mt-1 list-inside list-disc text-sm text-zinc-700">
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
+          <p className="text-xs font-medium text-amber-900">Hinweise</p>
+          <ul className="mt-1 list-inside list-disc text-sm text-amber-950">
             {issues.map((issue, i) => (
               <li key={i}>{issue}</li>
             ))}
@@ -143,7 +154,7 @@ export function ObjectiveAiPanel({ objective }: ObjectiveAiPanelProps) {
         </div>
       )}
       {objective.ai_improvement_suggestion && (
-        <div>
+        <div className="rounded-md border border-zinc-200 bg-white p-3">
           <p className="text-xs font-medium text-zinc-600">Verbesserungsvorschlag</p>
           <p className="mt-1 text-sm text-zinc-700">{objective.ai_improvement_suggestion}</p>
         </div>

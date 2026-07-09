@@ -3,7 +3,13 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
-const SUCCESS_KEYS = ["program-created", "initiative-created"];
+import { STRATEGY_REVISION_REFRESH_SUCCESS_KEYS } from "@/lib/strategy-objects/revision-status-messages";
+
+const SUCCESS_KEYS = [
+  "program-created",
+  "initiative-created",
+  ...STRATEGY_REVISION_REFRESH_SUCCESS_KEYS,
+];
 const STORAGE_KEY = "strategy-cycle-refreshed-success";
 
 /**

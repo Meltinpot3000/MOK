@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
 import { ResponsibleRowEditForm } from "@/components/ceo/ResponsibleRowEditForm";
@@ -499,7 +500,7 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
 
       <section className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Verantwortlichenliste</h2>
-        <div className="mt-4 overflow-x-auto">
+        <TableHorizontalScroll className="mt-4">
           <div className="min-w-[760px] text-sm">
             <div className="grid grid-cols-10 gap-2 border-b border-zinc-200 pb-2 text-left text-zinc-500">
               <p className="col-span-3">Name</p>
@@ -547,7 +548,7 @@ export default async function ResponsiblesPage({ searchParams }: ResponsiblesPag
               ))}
             </div>
           </div>
-        </div>
+        </TableHorizontalScroll>
         {responsibles.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">Noch keine Verantwortlichen vorhanden.</p>
         ) : null}

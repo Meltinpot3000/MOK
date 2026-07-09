@@ -1,10 +1,10 @@
 import type { ContributionLevel } from "./coverage-level";
 import { normalizeContributionLevel } from "./coverage-level";
 import {
-  type StrategicDirectionStatus,
+  getLifecycleLabelDe,
   isStrategicDirectionVisibleInProgramMatrix,
-  normalizeStrategicDirectionStatus,
-} from "./strategic-direction-lifecycle";
+  type StrategyObjectVersioningMeta,
+} from "@/lib/strategy-objects";
 
 /**
  * Programm-Matrix: Zeilen = Stossrichtungen; Spalten = Herausforderungen, danach Ziele.
@@ -32,7 +32,7 @@ export type ProgramMatrixObjective = {
   title: string;
   importance_score?: number | null;
   ai_objective_score?: number | string | null;
-  status?: string | null;
+  versioning?: StrategyObjectVersioningMeta | null;
 };
 
 export type ProgramMatrixCell = {
@@ -58,7 +58,7 @@ export type ProgramMatrixObjectiveCell = {
   objectiveId: string;
   directionId: string;
   objectiveTitle: string;
-  objectiveStatus: string | null;
+  objectiveVersioning: StrategyObjectVersioningMeta | null;
   directionTitle: string;
   score: number;
   statusTier: "strong" | "medium" | "weak";
@@ -83,7 +83,7 @@ export function matrixObjectiveCellCountsAsAddressedForOverlap(
 export type ProgramMatrixDirectionRow = {
   directionId: string;
   directionTitle: string;
-  directionStatus: StrategicDirectionStatus;
+  directionLifecycleLabel: string;
   rowScoreSum: number;
   /** Verknuepfte Ziele der Stossrichtung (fuer Zeilen-Info unabhaengig von Challenge-Spalten). */
   linkedObjectives: ProgramMatrixObjective[];
@@ -127,7 +127,7 @@ export type BuildProgramMatrixInput = {
     id: string;
     title: string;
     priority?: number | string | null;
-    status?: string | null;
+    versioning?: StrategyObjectVersioningMeta | null;
   }>;
   challengeDirectionLinks: Array<{
     strategic_challenge_id: string;
@@ -333,7 +333,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
   const objectiveById = new Map(input.objectives.map((o) => [o.id, o] as const));
 
   const directionsForMatrix = input.directions.filter((d) =>
-    isStrategicDirectionVisibleInProgramMatrix(d.status)
+    isStrategicDirectionVisibleInProgramMatrix(d.versioning)
   );
   const visibleDirectionIds = new Set(directionsForMatrix.map((d) => d.id));
 
@@ -514,7 +514,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
         objectiveId: objective.id,
         directionId: direction.id,
         objectiveTitle: objective.title,
-        objectiveStatus: objective.status ?? null,
+        objectiveVersioning: objective.versioning ?? null,
         directionTitle: direction.title,
         score: normalizedScore,
         statusTier: st,
@@ -599,7 +599,7 @@ export function buildProgramMatrix(input: BuildProgramMatrixInput): ProgramMatri
     return {
       directionId: direction.id,
       directionTitle: direction.title,
-      directionStatus: normalizeStrategicDirectionStatus(direction.status),
+      directionLifecycleLabel: getLifecycleLabelDe(direction.versioning?.identity_lifecycle_state),
       rowScoreSum: rowSums.get(direction.id) ?? 0,
       linkedObjectives: linkedObjectivesRow,
       cells,

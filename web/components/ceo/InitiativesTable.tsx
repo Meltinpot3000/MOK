@@ -2,7 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { InitiativeCreateForm, type InitiativeFormSelection } from "@/components/ceo/InitiativeCreateForm";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
 import type { InitiativeKrLinkContext, PipKeyResultOption } from "@/lib/strategy-cycle/queries";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import { ExpandableTable } from "./ExpandableTable";
 
 export type InitiativeRow = {
@@ -208,12 +214,11 @@ export function InitiativesTable({
   }, [initiatives, ownerLabelByMembershipId]);
 
   const filteredRows = useMemo(() => {
-    const q = searchTitle.trim().toLowerCase();
     return initiatives.filter((i) => {
       if (filterProgramId && i.program_id !== filterProgramId) return false;
       if (filterStatus && (i.status ?? "") !== filterStatus) return false;
       if (filterOwnerMembershipId && i.owner_membership_id !== filterOwnerMembershipId) return false;
-      if (q && !i.title.toLowerCase().includes(q)) return false;
+      if (!matchesTableTitleSearch(i.title, searchTitle)) return false;
       return true;
     });
   }, [initiatives, filterProgramId, filterStatus, filterOwnerMembershipId, searchTitle]);
@@ -328,70 +333,32 @@ export function InitiativesTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[120px] flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Status
-          </label>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Alle</option>
-            {INITIATIVE_STATUS_FILTER_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {INITIATIVE_STATUS_LABEL[s] ?? s}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[140px] flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Owner
-          </label>
-          <select
-            value={filterOwnerMembershipId}
-            onChange={(e) => setFilterOwnerMembershipId(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Alle</option>
-            {ownerFilterOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[140px] flex-1">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Programm
-          </label>
-          <select
-            value={filterProgramId}
-            onChange={(e) => setFilterProgramId(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Alle</option>
-            {programFilterOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.title}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[160px] flex-[2]">
-          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-            Suche Titel
-          </label>
-          <input
-            value={searchTitle}
-            onChange={(e) => setSearchTitle(e.target.value)}
-            placeholder="…"
-            className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-          />
-        </div>
-      </div>
+      <TableFilterBar>
+        <TableFilterSelect
+          label="Status"
+          value={filterStatus}
+          onChange={setFilterStatus}
+          options={INITIATIVE_STATUS_FILTER_ORDER.map((s) => ({
+            value: s,
+            label: INITIATIVE_STATUS_LABEL[s] ?? s,
+          }))}
+        />
+        <TableFilterSelect
+          label="Owner"
+          value={filterOwnerMembershipId}
+          onChange={setFilterOwnerMembershipId}
+          className="min-w-[140px] flex-1"
+          options={ownerFilterOptions.map((o) => ({ value: o.id, label: o.label }))}
+        />
+        <TableFilterSelect
+          label="Programm"
+          value={filterProgramId}
+          onChange={setFilterProgramId}
+          className="min-w-[140px] flex-1"
+          options={programFilterOptions.map((p) => ({ value: p.id, label: p.title }))}
+        />
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
 
       <ExpandableTable<InitiativeRow>
         columns={columns}

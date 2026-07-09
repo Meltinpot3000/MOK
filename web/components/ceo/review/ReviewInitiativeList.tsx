@@ -1,7 +1,13 @@
 "use client";
 
 import { ExpandableTable, type ColumnDef } from "@/components/ceo/ExpandableTable";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
 import { deriveInitiativeHealth } from "@/lib/review/initiative-health";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import type { ReviewStatus } from "@/lib/review/key-result-progress";
 import type { ReviewCycleInitiativeInput } from "@/lib/review/review-cycle-view-model";
 import { useMemo, useState } from "react";
@@ -50,6 +56,7 @@ export function ReviewInitiativeList({
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [programFilter, setProgramFilter] = useState<string>("");
+  const [searchTitle, setSearchTitle] = useState("");
 
   const directionOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -81,9 +88,10 @@ export function ReviewInitiativeList({
       if (statusFilter && row.status !== statusFilter) return false;
       if (ownerFilter && row.owner_membership_id !== ownerFilter) return false;
       if (programFilter && row.program_id !== programFilter) return false;
+      if (!matchesTableTitleSearch(row.title, searchTitle)) return false;
       return true;
     });
-  }, [initiativeRows, directionFilter, statusFilter, ownerFilter, programFilter]);
+  }, [initiativeRows, directionFilter, statusFilter, ownerFilter, programFilter, searchTitle]);
 
   const columns = useMemo<ColumnDef<ReviewCycleInitiativeInput>[]>(() => {
     return [
@@ -182,68 +190,45 @@ export function ReviewInitiativeList({
         Zeile mit «+» aufklappen und dort bearbeiten. Neue Initiativen werden im Strategiezyklus erfasst, nicht hier.
       </p>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-xs text-zinc-600">
-          
-          Stoßrichtung
-          <select
+      <div className="mt-4">
+        <TableFilterBar>
+          <TableFilterSelect
+            label="Stoßrichtung"
             value={directionFilter}
-            onChange={(e) => setDirectionFilter(e.target.value)}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          >
-            <option value="">Alle</option>
-            {directionOptions.map((id) => (
-              <option key={id} value={id}>
-                {directionNameById[id] ?? id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-zinc-600">
-          Status
-          <select
+            onChange={setDirectionFilter}
+            className="min-w-[140px] flex-1"
+            options={directionOptions.map((id) => ({
+              value: id,
+              label: directionNameById[id] ?? id,
+            }))}
+          />
+          <TableFilterSelect
+            label="Status"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          >
-            <option value="">Alle</option>
-            {["draft", "planned", "active", "at_risk", "on_hold", "completed", "archived"].map((s) => (
-              <option key={s} value={s}>
-                {initiativeStatusLabelDe(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-zinc-600">
-          Owner
-          <select
+            onChange={setStatusFilter}
+            options={["draft", "planned", "active", "at_risk", "on_hold", "completed", "archived"].map(
+              (s) => ({
+                value: s,
+                label: initiativeStatusLabelDe(s),
+              })
+            )}
+          />
+          <TableFilterSelect
+            label="Owner"
             value={ownerFilter}
-            onChange={(e) => setOwnerFilter(e.target.value)}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          >
-            <option value="">Alle</option>
-            {ownerFilterOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-zinc-600">
-          Programm
-          <select
+            onChange={setOwnerFilter}
+            className="min-w-[140px] flex-1"
+            options={ownerFilterOptions.map((o) => ({ value: o.id, label: o.label }))}
+          />
+          <TableFilterSelect
+            label="Programm"
             value={programFilter}
-            onChange={(e) => setProgramFilter(e.target.value)}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          >
-            <option value="">Alle</option>
-            {programOptions.map(([id, title]) => (
-              <option key={id} value={id}>
-                {title}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setProgramFilter}
+            className="min-w-[140px] flex-1"
+            options={programOptions.map(([id, title]) => ({ value: id, label: title }))}
+          />
+          <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+        </TableFilterBar>
       </div>
 
       <div className="mt-4">

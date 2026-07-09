@@ -1,6 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
 import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import { ExpandableTable } from "./ExpandableTable";
 import { LiveRangeInput } from "./LiveRangeInput";
 import { AiWaitOverlay } from "./AiWaitOverlay";
@@ -93,6 +100,18 @@ export function AnalysisEntriesTable({
   promoteToStrategicChallenge,
   attachFindingToChallenge,
 }: AnalysisEntriesTableProps) {
+  const [searchTitle, setSearchTitle] = useState("");
+  const [filterPromotion, setFilterPromotion] = useState("");
+
+  const filteredEntries = useMemo(() => {
+    return entries.filter((e) => {
+      if (!matchesTableTitleSearch(e.title, searchTitle)) return false;
+      if (filterPromotion === "linked" && !promotedBySourceId.has(e.id)) return false;
+      if (filterPromotion === "open" && promotedBySourceId.has(e.id)) return false;
+      return true;
+    });
+  }, [entries, searchTitle, filterPromotion, promotedBySourceId]);
+
   const columns = [
     {
       id: "title",
@@ -157,13 +176,31 @@ export function AnalysisEntriesTable({
   ];
 
   return (
-    <ExpandableTable<AnalysisEntryRow>
+    <div className="space-y-3">
+      <TableFilterBar>
+        <TableFilterSelect
+          label="Herausforderung"
+          value={filterPromotion}
+          onChange={setFilterPromotion}
+          options={[
+            { value: "linked", label: "Verknüpft" },
+            { value: "open", label: "Offen" },
+          ]}
+        />
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
+
+      <ExpandableTable<AnalysisEntryRow>
       columns={columns}
-      rows={entries}
+      rows={filteredEntries}
       getRowId={(e) => e.id}
       expandLabel="Details"
       rowIdPrefix="entry-"
-      emptyMessage="Keine Eintr\u00E4ge f\u00FCr die aktuellen Filter."
+      emptyMessage={
+        entries.length === 0
+          ? "Keine Eintr\u00E4ge f\u00FCr die aktuellen Filter."
+          : "Keine Treffer für die gewählten Filter."
+      }
       renderExpandedContent={(entry) => {
         const promotedChallengeId = promotedBySourceId.get(entry.id) ?? null;
         const pestelArea =
@@ -412,5 +449,6 @@ export function AnalysisEntriesTable({
         );
       }}
     />
+    </div>
   );
 }

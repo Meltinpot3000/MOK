@@ -31,6 +31,10 @@ import {
 import { okrObjectiveAllowsCheckIn, okrCheckInBlockedMessageDe } from "@/lib/okr/okr-execution-gate";
 import { okrPlanningEditBlockedMessageDe } from "@/lib/okr/okr-objective-lifecycle";
 import { resolveApprovalAssignee } from "@/lib/tasks/approval-routing";
+import {
+  evaluateAnnualTargetGateForObjective,
+  hasDirectAnnualTargetAlignment,
+} from "@/lib/okr/annual-target-okr-gate";
 
 const OKR_APP_PATHS = [
   "/okr-workspace",
@@ -205,45 +209,6 @@ async function keyResultDueDateFromOkrCycleEnd(
   return raw.length >= 10 ? raw.slice(0, 10) : raw;
 }
 
-async function replaceLeadingStrategicDirectionLink(params: {
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
-  organizationId: string;
-  cycleInstanceId: string;
-  strategyObjectiveId: string;
-  strategicDirectionId: string;
-  membershipId: string;
-}) {
-  const {
-    supabase,
-    organizationId,
-    cycleInstanceId,
-    strategyObjectiveId,
-    strategicDirectionId,
-    membershipId,
-  } = params;
-  const { error: delErr } = await supabase
-    .schema("app")
-    .from("strategic_direction_objective_links")
-    .delete()
-    .eq("organization_id", organizationId)
-    .eq("cycle_instance_id", cycleInstanceId)
-    .eq("strategy_objective_id", strategyObjectiveId);
-  if (delErr) return delErr.message;
-
-  const { error: insErr } = await supabase
-    .schema("app")
-    .from("strategic_direction_objective_links")
-    .insert({
-      organization_id: organizationId,
-      cycle_instance_id: cycleInstanceId,
-      strategy_objective_id: strategyObjectiveId,
-      strategic_direction_id: strategicDirectionId,
-      created_by_membership_id: membershipId,
-      contribution_level: "medium",
-    });
-  return insErr?.message ?? null;
-}
-
 export async function createOkrObjectiveAction(input: {
   cycleInstanceId: string;
   okrCycleId: string;
@@ -287,6 +252,22 @@ export async function createOkrObjectiveAction(input: {
   );
   if (!memOkOwner) return { error: "Ungültiger Owner (Membership)." };
   const ownerId = ownerRaw;
+  const orgSettings = await getOrgOkrSettings(auth.context.organizationId);
+  const gateOnCreate = await evaluateAnnualTargetGateForObjective({
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    okrCycleId: input.okrCycleId,
+    objectiveOwnerMembershipId: ownerId,
+    settings: orgSettings,
+    onCreate: true,
+    nextStatus: "draft",
+  });
+  if (gateOnCreate.blocked) {
+    return {
+      error:
+        "OKR-Erstellung blockiert: Für den Objective-Owner existieren keine aktiven Jahresziele im Zieljahr.",
+    };
+  }
 
   const createDenied = {
     error:
@@ -329,64 +310,6 @@ export async function createOkrObjectiveAction(input: {
     return createDenied;
   }
 
-  const { data: strategyRow, error: strategyErr } = await supabase
-    .schema("app")
-    .from("strategy_objectives")
-    .insert({
-      organization_id: auth.context.organizationId,
-      cycle_instance_id: input.cycleInstanceId,
-      title,
-      description,
-      status: "draft",
-      importance_score: 3,
-      owner_membership_id: ownerId,
-      created_by_membership_id: auth.context.membershipId,
-      created_by_source: "user",
-    })
-    .select("id")
-    .single();
-
-  if (strategyErr || !strategyRow?.id) {
-    logOkrSupabaseDiag(
-      "createOkrObjectiveAction.strategy_objectives_insert",
-      strategyErr,
-      {
-        organizationId: auth.context.organizationId,
-        membershipId: auth.context.membershipId,
-        ownerMembershipId: ownerId,
-        okrCycleId: input.okrCycleId,
-        cycleInstanceId: input.cycleInstanceId,
-      },
-      { always: true }
-    );
-    return { error: strategyErr?.message ?? "Strategie-Ziel konnte nicht angelegt werden." };
-  }
-
-  const strategyObjectiveId = strategyRow.id;
-
-  const linkErr = await replaceLeadingStrategicDirectionLink({
-    supabase,
-    organizationId: auth.context.organizationId,
-    cycleInstanceId: input.cycleInstanceId,
-    strategyObjectiveId,
-    strategicDirectionId: input.strategicDirectionId,
-    membershipId: auth.context.membershipId,
-  });
-  if (linkErr) {
-    logOkrSupabaseDiag(
-      "createOkrObjectiveAction.strategic_direction_link",
-      null,
-      {
-        organizationId: auth.context.organizationId,
-        strategyObjectiveId,
-        message: linkErr,
-      },
-      { always: true }
-    );
-    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
-    return { error: linkErr };
-  }
-
   const { data: inserted, error } = await supabase
     .schema("app")
     .from("okr_objectives")
@@ -394,6 +317,7 @@ export async function createOkrObjectiveAction(input: {
       organization_id: auth.context.organizationId,
       cycle_instance_id: input.cycleInstanceId,
       okr_cycle_id: input.okrCycleId,
+      leading_strategic_direction_id: input.strategicDirectionId,
       title,
       description,
       status: "draft",
@@ -418,24 +342,7 @@ export async function createOkrObjectiveAction(input: {
       },
       { always: true }
     );
-    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
     return { error: error?.message ?? "OKR-Objective konnte nicht angelegt werden." };
-  }
-
-  const { error: junctionErr } = await supabase.schema("app").from("okr_objective_strategy_objectives").insert({
-    okr_objective_id: inserted.id,
-    strategy_objective_id: strategyObjectiveId,
-  });
-
-  if (junctionErr) {
-    logOkrSupabaseDiag("createOkrObjectiveAction.okr_strategy_junction", junctionErr, {
-      organizationId: auth.context.organizationId,
-      okrObjectiveId: inserted.id,
-      strategyObjectiveId,
-    }, { always: true });
-    await supabase.schema("app").from("okr_objectives").delete().eq("id", inserted.id);
-    await supabase.schema("app").from("strategy_objectives").delete().eq("id", strategyObjectiveId);
-    return { error: junctionErr.message };
   }
 
   revalidateOkrPaths();
@@ -447,7 +354,7 @@ export async function createOkrObjectiveAction(input: {
     membershipId: auth.context.membershipId,
     trigger: "okr_objective_create",
   });
-  return { id: inserted.id };
+  return { id: inserted.id, warning: gateOnCreate.warning ?? undefined };
 }
 
 export async function updateOkrObjectiveAction(input: {
@@ -549,12 +456,46 @@ export async function updateOkrObjectiveAction(input: {
   const patch: Record<string, unknown> = {
     title,
     description,
+    leading_strategic_direction_id: input.strategicDirectionId,
   };
   if (input.status !== undefined) {
     patch.status = input.status?.trim() || "draft";
   }
   if (ownerId !== undefined) patch.owner_membership_id = ownerId;
   if (deputyId !== undefined) patch.deputy_membership_id = deputyId;
+  const nextStatus =
+    input.status !== undefined ? (input.status?.trim() || "draft") : (existingObj.status ?? "draft");
+  const nextOwnerId = ownerId !== undefined ? ownerId : (existingObj.owner_membership_id ?? "");
+  const orgSettings = await getOrgOkrSettings(auth.context.organizationId);
+  const gateOnUpdate = await evaluateAnnualTargetGateForObjective({
+    organizationId: auth.context.organizationId,
+    cycleInstanceId: input.cycleInstanceId,
+    okrCycleId: existingObj.okr_cycle_id,
+    objectiveOwnerMembershipId: nextOwnerId,
+    settings: orgSettings,
+    onCreate: false,
+    nextStatus,
+  });
+  if (gateOnUpdate.blocked) {
+    return {
+      error:
+        "Aktivierung blockiert: Keine aktiven Jahresziele für den Objective-Owner im relevanten Zieljahr.",
+    };
+  }
+  const activatingNow = (existingObj.status ?? "draft") === "draft" && nextStatus !== "draft";
+  if (activatingNow) {
+    const hasAlignment = await hasDirectAnnualTargetAlignment({
+      organizationId: auth.context.organizationId,
+      cycleInstanceId: input.cycleInstanceId,
+      objectiveId: input.objectiveId,
+    });
+    if (!hasAlignment) {
+      return {
+        error:
+          "Aktivierung blockiert: Objective muss mindestens einem Jahresziel zugeordnet sein oder eine genehmigte Ausnahme besitzen.",
+      };
+    }
+  }
 
   const { error } = await supabase
     .schema("app")
@@ -565,37 +506,6 @@ export async function updateOkrObjectiveAction(input: {
     .eq("cycle_instance_id", input.cycleInstanceId);
 
   if (error) return { error: error.message };
-
-  const { data: junctionRows } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", input.objectiveId);
-  const strategyObjectiveId = junctionRows?.[0]?.strategy_objective_id;
-  if (!strategyObjectiveId) {
-    return { error: "OKR-Objective hat keine Verknüpfung zu einem Strategie-Ziel." };
-  }
-
-  const stratPatch: Record<string, unknown> = { title, description };
-  if (ownerId !== undefined) stratPatch.owner_membership_id = ownerId;
-  if (deputyId !== undefined) stratPatch.deputy_membership_id = deputyId;
-  const { error: stratUpdErr } = await supabase
-    .schema("app")
-    .from("strategy_objectives")
-    .update(stratPatch)
-    .eq("id", strategyObjectiveId)
-    .eq("organization_id", auth.context.organizationId);
-  if (stratUpdErr) return { error: stratUpdErr.message };
-
-  const linkErr = await replaceLeadingStrategicDirectionLink({
-    supabase,
-    organizationId: auth.context.organizationId,
-    cycleInstanceId: input.cycleInstanceId,
-    strategyObjectiveId,
-    strategicDirectionId: input.strategicDirectionId,
-    membershipId: auth.context.membershipId,
-  });
-  if (linkErr) return { error: linkErr };
 
   const resolvedObjectiveOwner =
     ownerId !== undefined ? ownerId : existingObj.owner_membership_id;
@@ -611,7 +521,7 @@ export async function updateOkrObjectiveAction(input: {
   }
 
   revalidateOkrPaths();
-  return {};
+  return { warning: gateOnUpdate.warning ?? undefined };
 }
 
 export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string; objectiveId: string }) {
@@ -647,12 +557,6 @@ export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string;
     return objectiveWriteDeniedError();
   }
 
-  const { data: linkedStrategy } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", input.objectiveId);
-
   const { error } = await supabase
     .schema("app")
     .from("okr_objectives")
@@ -663,19 +567,144 @@ export async function deleteOkrObjectiveAction(input: { cycleInstanceId: string;
 
   if (error) return { error: error.message };
 
-  const strategyIds = linkedStrategy?.map((r) => r.strategy_objective_id) ?? [];
-  for (const sid of strategyIds) {
-    const { count, error: cntErr } = await supabase
-      .schema("app")
-      .from("okr_objective_strategy_objectives")
-      .select("*", { count: "exact", head: true })
-      .eq("strategy_objective_id", sid);
-    if (cntErr) continue;
-    if ((count ?? 0) === 0) {
-      await supabase.schema("app").from("strategy_objectives").delete().eq("id", sid);
-    }
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function upsertAnnualTargetObjectiveLinkAction(input: {
+  cycleInstanceId: string;
+  objectiveId: string;
+  annualTargetId: string;
+  alignmentType?: "direct" | "indirect" | "exception" | "operational_necessity";
+  weight?: number | null;
+  comment?: string | null;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+
+  const supabase = await createSupabaseServerClient();
+  const { data: objective } = await supabase
+    .schema("app")
+    .from("okr_objectives")
+    .select("id, owner_membership_id, deputy_membership_id, status")
+    .eq("id", input.objectiveId)
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .maybeSingle();
+  if (!objective?.id) return { error: "Objective nicht gefunden." };
+
+  const planningBlock = blockOkrPlanningEdit(objective.status);
+  if (planningBlock) return planningBlock;
+  if (
+    !(await canAccessObjective({
+      currentMembershipId: auth.context.membershipId,
+      action: "update",
+      objective: {
+        id: objective.id,
+        owner_membership_id: objective.owner_membership_id ?? null,
+        deputy_membership_id: objective.deputy_membership_id ?? null,
+      },
+    }))
+  ) {
+    return objectiveWriteDeniedError();
   }
 
+  const { data: target } = await supabase
+    .schema("app")
+    .from("annual_targets")
+    .select("id")
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("id", input.annualTargetId)
+    .maybeSingle();
+  if (!target?.id) return { error: "Jahresziel nicht gefunden." };
+
+  const { error } = await supabase
+    .schema("app")
+    .from("annual_target_okr_objective_links")
+    .upsert(
+      {
+        organization_id: auth.context.organizationId,
+        cycle_instance_id: input.cycleInstanceId,
+        annual_target_id: input.annualTargetId,
+        okr_objective_id: input.objectiveId,
+        alignment_type: input.alignmentType ?? "direct",
+        weight: input.weight ?? null,
+        comment: (input.comment ?? "").trim() || null,
+        created_by_membership_id: auth.context.membershipId,
+      },
+      { onConflict: "cycle_instance_id,annual_target_id,okr_objective_id" }
+    );
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function removeAnnualTargetObjectiveLinkAction(input: {
+  cycleInstanceId: string;
+  objectiveId: string;
+  annualTargetId: string;
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .schema("app")
+    .from("annual_target_okr_objective_links")
+    .delete()
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("okr_objective_id", input.objectiveId)
+    .eq("annual_target_id", input.annualTargetId);
+  if (error) return { error: error.message };
+  revalidateOkrPaths();
+  return {};
+}
+
+export async function upsertAnnualTargetObjectiveExceptionAction(input: {
+  cycleInstanceId: string;
+  objectiveId: string;
+  annualTargetId?: string | null;
+  exceptionReason: string;
+  approvalStatus?: "pending" | "approved" | "rejected";
+}) {
+  const auth = await requireOkrWrite();
+  if ("error" in auth) return auth;
+  const reason = input.exceptionReason.trim();
+  if (!reason) return { error: "Ausnahmebegründung fehlt." };
+
+  const supabase = await createSupabaseServerClient();
+  const { data: existing } = await supabase
+    .schema("app")
+    .from("annual_target_okr_objective_exceptions")
+    .select("id")
+    .eq("organization_id", auth.context.organizationId)
+    .eq("cycle_instance_id", input.cycleInstanceId)
+    .eq("okr_objective_id", input.objectiveId)
+    .is("annual_target_id", input.annualTargetId ?? null)
+    .maybeSingle();
+
+  const payload = {
+    organization_id: auth.context.organizationId,
+    cycle_instance_id: input.cycleInstanceId,
+    okr_objective_id: input.objectiveId,
+    annual_target_id: input.annualTargetId ?? null,
+    exception_reason: reason,
+    approval_status: input.approvalStatus ?? "pending",
+    approved_by:
+      input.approvalStatus === "approved" ? auth.context.membershipId : null,
+    approved_at:
+      input.approvalStatus === "approved" ? new Date().toISOString() : null,
+    created_by_membership_id: auth.context.membershipId,
+  };
+  const { error } = existing?.id
+    ? await supabase
+        .schema("app")
+        .from("annual_target_okr_objective_exceptions")
+        .update(payload)
+        .eq("id", existing.id)
+    : await supabase.schema("app").from("annual_target_okr_objective_exceptions").insert(payload);
+  if (error) return { error: error.message };
   revalidateOkrPaths();
   return {};
 }

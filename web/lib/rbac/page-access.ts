@@ -103,6 +103,40 @@ export async function getSidebarAccessContext(itemId: SidebarItemId) {
 }
 
 /** OKR-Arbeitsbereich: Sidebar-Schreiben oder Modulrecht `okr.write` (z. B. Teammitglied). */
+/** Strategie-Matrix / Jahresziele: Sidebar Jahresziele oder Strategiezyklus. */
+export async function getStrategyMatrixAccessContext() {
+  const userId = await getAuthenticatedUserId();
+  if (!userId) {
+    return { state: "unauthenticated" as const };
+  }
+
+  const shell = await getAppShellAccess(userId);
+  if (!shell) {
+    return { state: "forbidden" as const };
+  }
+
+  const cycle = shell.permissions["strategy-cycle"];
+  const annual = shell.permissions["annual-targets"];
+  if (!cycle?.read && !annual?.read) {
+    return { state: "forbidden" as const };
+  }
+
+  const codes = await getPermissionCodesForMembership(shell.access.membershipId);
+  const granularWrite =
+    codes.has("annual_targets.write.all") ||
+    codes.has("annual_targets.write.own") ||
+    codes.has("annual_targets.write.department");
+
+  return {
+    state: "ok" as const,
+    access: shell.access,
+    permissions: shell.permissions,
+    canWrite: Boolean(cycle?.write || annual?.write || granularWrite),
+  };
+}
+
+export const getAnnualTargetsAccessContext = getStrategyMatrixAccessContext;
+
 export async function getOkrWorkspaceEffectiveCanWrite(
   page: Extract<Awaited<ReturnType<typeof getSidebarAccessContext>>, { state: "ok" }>
 ): Promise<boolean> {

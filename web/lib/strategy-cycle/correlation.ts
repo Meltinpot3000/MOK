@@ -1,3 +1,5 @@
+import { getLifecycleLabelDe, type StrategyObjectVersioningMeta } from "@/lib/strategy-objects";
+
 export type CorrelationStatus = "green" | "yellow" | "red" | "unknown";
 
 type ChallengeInput = {
@@ -11,7 +13,7 @@ type ObjectiveInput = {
   id: string;
   title: string;
   importance_score: number | null;
-  status: string | null;
+  versioning?: StrategyObjectVersioningMeta | null;
 };
 
 type DirectionInput = {
@@ -73,15 +75,34 @@ export type CorrelationCell = {
   directionCount: number;
   directions: CorrelationDirectionDetail[];
   primaryDirectionId: string | null;
-  objectiveStatus: string | null;
+  objectiveLifecycleLabel: string;
+};
+
+export type CorrelationConflictDetail = {
+  key: string;
+  cellKey: string;
+  challengeId: string;
+  objectiveId: string;
+  challengeTitle: string;
+  objectiveTitle: string;
+  directionId: string;
+  directionTitle: string;
+  autoScore: number;
+  autoStatus: CorrelationStatus;
+  effectiveStatus: CorrelationStatus;
+  overrideNote: string | null;
 };
 
 export type CorrelationSummaryResult = {
-  objectives: Array<{ id: string; title: string; status: string | null }>;
+  objectives: Array<{ id: string; title: string; lifecycleLabel: string }>;
   challenges: Array<{ id: string; title: string }>;
   cells: CorrelationCell[];
   goodObjectivePercent: number;
+  topStrongAvgScore: number;
+  conflictPercent: number;
   weakCells: CorrelationCell[];
+  strongCells: CorrelationCell[];
+  conflictCells: CorrelationConflictDetail[];
   conflictCount: number;
 };
 
@@ -177,7 +198,8 @@ export function computeStrategicDesignCorrelationSummary(input: {
   }
 
   const cells: CorrelationCell[] = [];
-  let conflictCount = 0;
+  const conflictCells: CorrelationConflictDetail[] = [];
+  let overrideCount = 0;
 
   for (const challenge of challenges) {
     const challengeNorm = normalizeScore1to5(challenge.challenge_score);
@@ -228,8 +250,24 @@ export function computeStrategicDesignCorrelationSummary(input: {
         const override = overridesByTripletKey.get(`${objective.id}:${challenge.id}:${directionId}`);
         const effectiveStatus = override?.status ?? autoStatus;
         const hasOverride = Boolean(override);
+        if (hasOverride) {
+          overrideCount += 1;
+        }
         if (hasOverride && effectiveStatus !== autoStatus && (autoScore >= 70 || autoScore <= 35)) {
-          conflictCount += 1;
+          conflictCells.push({
+            key: `${objective.id}:${challenge.id}:${directionId}`,
+            cellKey: `${challenge.id}:${objective.id}`,
+            challengeId: challenge.id,
+            objectiveId: objective.id,
+            challengeTitle: challenge.title,
+            objectiveTitle: objective.title,
+            directionId,
+            directionTitle: direction.title,
+            autoScore,
+            autoStatus,
+            effectiveStatus,
+            overrideNote: override?.note ?? null,
+          });
         }
         directionDetails.push({
           directionId,
@@ -269,7 +307,7 @@ export function computeStrategicDesignCorrelationSummary(input: {
         directionCount: directionDetails.length,
         directions: directionDetails,
         primaryDirectionId,
-        objectiveStatus: objective.status ?? null,
+        objectiveLifecycleLabel: getLifecycleLabelDe(objective.versioning?.identity_lifecycle_state),
       });
     }
   }
@@ -283,17 +321,45 @@ export function computeStrategicDesignCorrelationSummary(input: {
   const goodObjectivePercent =
     objectives.length > 0 ? Math.round((goodObjectives.size / objectives.length) * 100) : 0;
 
+  const conflictPercent =
+    overrideCount > 0 ? Math.round((conflictCells.length / overrideCount) * 100) : 0;
+
   const weakCells = [...cells]
     .filter((cell) => cell.status === "red" || cell.status === "yellow")
     .sort((a, b) => a.score - b.score || a.challengeTitle.localeCompare(b.challengeTitle, "de"))
     .slice(0, 5);
 
+  const strongCells = [...cells]
+    .filter((cell) => cell.status === "green")
+    .sort((a, b) => b.score - a.score || a.challengeTitle.localeCompare(b.challengeTitle, "de"))
+    .slice(0, 5);
+
+  const topStrongAvgScore =
+    strongCells.length > 0
+      ? Math.round(strongCells.reduce((sum, cell) => sum + cell.score, 0) / strongCells.length)
+      : 0;
+
+  conflictCells.sort(
+    (a, b) =>
+      a.challengeTitle.localeCompare(b.challengeTitle, "de") ||
+      a.objectiveTitle.localeCompare(b.objectiveTitle, "de") ||
+      a.directionTitle.localeCompare(b.directionTitle, "de")
+  );
+
   return {
-    objectives: objectives.map((item) => ({ id: item.id, title: item.title, status: item.status ?? null })),
+    objectives: objectives.map((item) => ({
+      id: item.id,
+      title: item.title,
+      lifecycleLabel: getLifecycleLabelDe(item.versioning?.identity_lifecycle_state),
+    })),
     challenges: challenges.map((item) => ({ id: item.id, title: item.title })),
     cells,
     goodObjectivePercent,
+    topStrongAvgScore,
+    conflictPercent,
     weakCells,
-    conflictCount,
+    strongCells,
+    conflictCells,
+    conflictCount: conflictCells.length,
   };
 }

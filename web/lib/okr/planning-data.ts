@@ -168,7 +168,6 @@ export type OkrPlanningObjectiveRow = {
   leadingStrategicDirectionTitle: string | null;
   keyResults: OkrPlanningKeyResultRow[];
   contributionEdges: OkrContributionEdgePlanningRow[];
-  linkedStrategyObjectives: Array<{ id: string; title: string }>;
 };
 
 export type OkrPlanningInitiativeRow = {
@@ -309,7 +308,7 @@ export async function getOkrPlanningWorkspaceData(
           .schema("app")
           .from("okr_objectives")
           .select(
-            "id, title, description, status, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id"
+            "id, title, description, status, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id, leading_strategic_direction_id"
           )
           .eq("organization_id", organizationId)
           .in("cycle_instance_id", okrScopeInstanceIds)
@@ -412,66 +411,6 @@ export async function getOkrPlanningWorkspaceData(
     objectives = objectivesAll;
   }
   const objectiveIds = objectives.map((o) => o.id);
-
-  const leadingDirectionByObjectiveId = new Map<string, string>();
-  let okrStrategyJunctionRows: Array<{ okr_objective_id: string; strategy_objective_id: string }> = [];
-  if (objectiveIds.length > 0) {
-    const { data: junctionRows } = await supabase
-      .schema("app")
-      .from("okr_objective_strategy_objectives")
-      .select("okr_objective_id, strategy_objective_id")
-      .in("okr_objective_id", objectiveIds);
-    okrStrategyJunctionRows = (junctionRows ?? []) as typeof okrStrategyJunctionRows;
-    const strategyIds = [...new Set(okrStrategyJunctionRows.map((j) => j.strategy_objective_id))];
-    let directionLinks: Array<{ strategy_objective_id: string; strategic_direction_id: string }> = [];
-    if (strategyIds.length > 0) {
-      const dRes = await supabase
-        .schema("app")
-        .from("strategic_direction_objective_links")
-        .select("strategy_objective_id, strategic_direction_id")
-        .eq("organization_id", organizationId)
-        .in("cycle_instance_id", okrScopeInstanceIds)
-        .in("strategy_objective_id", strategyIds);
-      directionLinks = (dRes.data ?? []) as typeof directionLinks;
-    }
-    const directionByStrategy = new Map<string, string>();
-    for (const l of directionLinks) {
-      if (!directionByStrategy.has(l.strategy_objective_id)) {
-        directionByStrategy.set(l.strategy_objective_id, l.strategic_direction_id);
-      }
-    }
-    for (const j of okrStrategyJunctionRows) {
-      const dir = directionByStrategy.get(j.strategy_objective_id);
-      if (dir && !leadingDirectionByObjectiveId.has(j.okr_objective_id)) {
-        leadingDirectionByObjectiveId.set(j.okr_objective_id, dir);
-      }
-    }
-  }
-
-  const strategyObjectivesByOkrId = new Map<string, Array<{ id: string; title: string }>>();
-  const stratIdsAll = [...new Set(okrStrategyJunctionRows.map((j) => j.strategy_objective_id))];
-  const stratTitleById = new Map<string, string>();
-  if (stratIdsAll.length > 0) {
-    const { data: stratRows } = await supabase
-      .schema("app")
-      .from("strategy_objectives")
-      .select("id, title")
-      .eq("organization_id", organizationId)
-      .in("id", stratIdsAll);
-    for (const r of stratRows ?? []) {
-      stratTitleById.set(r.id as string, r.title as string);
-    }
-  }
-  for (const oid of objectiveIds) {
-    const rows = okrStrategyJunctionRows.filter((j) => j.okr_objective_id === oid);
-    strategyObjectivesByOkrId.set(
-      oid,
-      rows.map((j) => ({
-        id: j.strategy_objective_id,
-        title: stratTitleById.get(j.strategy_objective_id) ?? j.strategy_objective_id,
-      }))
-    );
-  }
 
   let keyResults: Array<{
     id: string;
@@ -607,7 +546,7 @@ export async function getOkrPlanningWorkspaceData(
   }
 
   const okrObjectivesBase: OkrPlanningObjectiveRow[] = objectives.map((obj) => {
-    const dirId = leadingDirectionByObjectiveId.get(obj.id) ?? null;
+    const dirId = (obj as { leading_strategic_direction_id?: string | null }).leading_strategic_direction_id ?? null;
     const krs = (keyResultsByObjective.get(obj.id) ?? []).map((kr) => {
       const iids = krToInitiatives.get(kr.id) ?? [];
       const krOwner = kr.owner_membership_id;
@@ -659,7 +598,6 @@ export async function getOkrPlanningWorkspaceData(
       leadingStrategicDirectionTitle: dirId ? directionTitleById.get(dirId) ?? null : null,
       keyResults: krs,
       contributionEdges: [],
-      linkedStrategyObjectives: strategyObjectivesByOkrId.get(obj.id) ?? [],
     };
   });
 

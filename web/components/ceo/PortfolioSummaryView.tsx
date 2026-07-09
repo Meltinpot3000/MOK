@@ -10,7 +10,10 @@ type PortfolioEvaluation = {
 
 type PortfolioSummaryViewProps = {
   portfolio: PortfolioEvaluation | null;
+  isStale?: boolean;
 };
+
+const PORTFOLIO_BALANCE_MAX = 5;
 
 function getBalanceColor(score: number): string {
   if (score >= 4) return "text-emerald-700 bg-emerald-50 border-emerald-200";
@@ -18,7 +21,7 @@ function getBalanceColor(score: number): string {
   return "text-red-700 bg-red-50 border-red-200";
 }
 
-export function PortfolioSummaryView({ portfolio }: PortfolioSummaryViewProps) {
+export function PortfolioSummaryView({ portfolio, isStale = false }: PortfolioSummaryViewProps) {
   if (!portfolio) {
     return (
       <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -34,9 +37,24 @@ export function PortfolioSummaryView({ portfolio }: PortfolioSummaryViewProps) {
 
   return (
     <div className="space-y-4">
+      <div
+        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
+          isStale
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+        }`}
+      >
+        <span
+          className={`h-2 w-2 rounded-full ${isStale ? "bg-amber-500" : "bg-emerald-500"}`}
+          aria-hidden
+        />
+        {isStale ? "Veraltet – Ziele wurden seither neu bewertet" : "Aktuell"}
+      </div>
       <div className={`rounded-md border p-4 ${getBalanceColor(balanceScore)}`}>
         <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Balance Score</p>
-        <p className="mt-1 text-2xl font-bold">{balanceScore}</p>
+        <p className="mt-1 text-2xl font-bold">
+          {balanceScore} von {PORTFOLIO_BALANCE_MAX}
+        </p>
       </div>
       {gaps.length > 0 && (
         <div>

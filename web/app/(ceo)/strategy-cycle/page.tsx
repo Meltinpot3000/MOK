@@ -51,6 +51,16 @@ import {
   updateAnalysisEntry,
   queueObjectiveEvaluationBackfill,
 } from "@/app/(ceo)/strategy-cycle/actions";
+import {
+  promoteStrategyObjectRevision,
+  proposeStrategyObjectDraft,
+  rejectStrategyObjectRevision,
+  updateStrategyObjectDraft,
+  linkStrategyObjectDraftAssignment,
+  unlinkStrategyObjectDraftAssignment,
+} from "@/app/(ceo)/strategy-cycle/strategy-object-revision-actions";
+import { setStrategyObjectLifecycle } from "@/app/(ceo)/strategy-cycle/strategy-object-lifecycle-actions";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { AnalysisVisualizationWorkspace } from "@/components/analysis-visualization/AnalysisVisualizationWorkspace";
 import { AiWaitOverlay } from "@/components/ceo/AiWaitOverlay";
 import { LiveRangeInput } from "@/components/ceo/LiveRangeInput";
@@ -64,22 +74,19 @@ import { ChallengesTable } from "@/components/ceo/ChallengesTable";
 import { AnalysisEntriesTable } from "@/components/ceo/AnalysisEntriesTable";
 import { ProgramPipWorkspace } from "@/components/ceo/ProgramPipWorkspace";
 import { InitiativePipWorkspace } from "@/components/ceo/InitiativePipWorkspace";
+import { StrategyDraftFocus } from "@/components/ceo/strategy-objects/StrategyDraftFocus";
 import { RefreshOnSuccess } from "@/components/ceo/RefreshOnSuccess";
+import { ObjectiveEvaluationPrompt } from "@/components/ceo/strategy-objects/ObjectiveEvaluationPrompt";
 import { ObjectiveAiPanel } from "@/components/ceo/ObjectiveAiPanel";
 import { ObjectiveBalanceScatterPlot } from "@/components/ceo/ObjectiveBalanceScatterPlot";
 import { PortfolioSummaryView } from "@/components/ceo/PortfolioSummaryView";
 import { getTenantBranding } from "@/lib/ceo/queries";
-import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { getPhase0Context } from "@/lib/phase0/queries";
+import { resolveStrategyPlanningCycle } from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
-import {
-  STRATEGIC_DIRECTION_STATUSES,
-  STRATEGIC_DIRECTION_STATUS_LABELS_DE,
-  isStrategicDirectionActiveForPrograms,
-} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
+import { isStrategicDirectionEligibleForPrograms } from "@/lib/strategy-objects/direction-program-eligibility";
 import { computeStrategicDesignCorrelationSummary } from "@/lib/strategy-cycle/correlation";
 import { computeStrategicDesignInsights } from "@/lib/strategy-cycle/strategic-design-insights";
-import { readStrategyReferenceFieldsFromBrandingConfig } from "@/lib/strategy-cycle/strategy-reference";
-import { readCompanyKennzahlenFromBrandingConfig } from "@/lib/strategy-cycle/company-info";
 import {
   getStrategyCycleWorkspaceData,
   type InitiativeKrLinkContext,
@@ -93,9 +100,19 @@ import {
 import { buildProgramMatrix } from "@/lib/strategy-cycle/program-matrix";
 import { normalizeContributionLevel, type ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { ProgramMappingMatrix } from "@/components/ceo/ProgramMappingMatrix";
+import { AnalysisNetworkRecommendationPanels } from "@/components/ceo/strategy-cycle/AnalysisNetworkRecommendationPanels";
 import { StrategyCycleOverviewLoader } from "@/components/ceo/strategy-cycle/StrategyCycleOverviewLoader";
 import { buildAnalysisEntryOverviewStats } from "@/lib/strategy-cycle/analysis-entry-overview";
+import { buildOverviewDrillTables } from "@/lib/strategy-cycle/overview-drill-tables";
 import { computeAnalysisNetworkStaleFlags } from "@/lib/strategy-cycle/analysis-network-stale";
+import { getStrategyRevisionStatusMessage } from "@/lib/strategy-objects/revision-status-messages";
+import { fetchOpenDraftsForCycle } from "@/lib/strategy-objects/revision-queries";
+
+const STRATEGY_OBJECT_RETURN_PATHS = {
+  objectives: "/strategy-cycle?l1=objectives",
+  challenges: "/strategy-cycle?l1=strategic-directions&l2=challenges",
+  directions: "/strategy-cycle?l1=strategic-directions&l2=design",
+} as const;
 
 type StrategyCycleViewPageProps = {
   searchParams: Promise<{
@@ -104,6 +121,7 @@ type StrategyCycleViewPageProps = {
     tab?: string;
     error?: string;
     success?: string;
+    strategy_draft?: string;
     sort?: string;
     min_score?: string;
     quality_band?: string;
@@ -237,12 +255,6 @@ function getL1TabTitle(tab: string) {
     default:
       return "Strategische Erkenntnisse";
   }
-}
-
-function truncateStrategyCycleTeaser(text: string, maxLen: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
-  if (t.length <= maxLen) return t;
-  return `${t.slice(0, maxLen).trimEnd()}…`;
 }
 
 function getStGallenHint(tab: string) {
@@ -417,6 +429,8 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Ziel wurde gel\u00F6scht." };
   if (success === "objective-evaluation-complete")
     return { type: "success", text: "Ziele wurden von Sentinel✨ bewertet." };
+  if (success === "objective-evaluated")
+    return { type: "success", text: "Sentinel✨-Bewertung für das Ziel wurde neu berechnet." };
   if (success === "objective-evaluation-backfill-queued")
     return { type: "success", text: "Ziele werden im Hintergrund neu bewertet." };
   if (success === "challenge-created")
@@ -450,6 +464,14 @@ function getStatusMessage(error: string | undefined, success: string | undefined
     return { type: "success", text: "Status-Override f\u00FCr die Korrelation wurde gespeichert." };
   if (success === "correlation-override-cleared")
     return { type: "success", text: "Status-Override wurde entfernt. Auto-Status ist wieder aktiv." };
+  const revisionStatus = getStrategyRevisionStatusMessage(error, success);
+  if (revisionStatus) return revisionStatus;
+  if (error) {
+    return {
+      type: "error",
+      text: "Vorgang fehlgeschlagen. Bitte Eingaben prüfen oder erneut versuchen.",
+    };
+  }
   return null;
 }
 
@@ -457,24 +479,6 @@ function deriveQualityBand(score: number): "high" | "medium" | "low" {
   if (score >= 75) return "high";
   if (score >= 50) return "medium";
   return "low";
-}
-
-function readTriScores(metadata: unknown) {
-  if (!metadata || typeof metadata !== "object") return null;
-  const tri = (metadata as Record<string, unknown>).triScores;
-  if (!tri || typeof tri !== "object") return null;
-  const row = tri as Record<string, unknown>;
-  const proximityScore = Number(row.proximityScore ?? 0);
-  const supportScore = Number(row.supportScore ?? 0);
-  const repulsionScore = Number(row.repulsionScore ?? 0);
-  if (!Number.isFinite(proximityScore) || !Number.isFinite(supportScore) || !Number.isFinite(repulsionScore)) {
-    return null;
-  }
-  return {
-    proximityScore: Math.max(0, Math.min(1, proximityScore)),
-    supportScore: Math.max(0, Math.min(1, supportScore)),
-    repulsionScore: Math.max(0, Math.min(1, repulsionScore)),
-  };
 }
 
 export default async function StrategyCycleViewPage({ searchParams }: StrategyCycleViewPageProps) {
@@ -527,7 +531,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const selectedCycle = await getActivePlanningCycle(context.organizationId);
+  const selectedCycle = await resolveStrategyPlanningCycle(context.organizationId);
 
   if (!selectedCycle) {
     return (
@@ -546,10 +550,21 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     selectedCycle.legacy_planning_cycle_id ?? undefined
   );
   const branding = await getTenantBranding(context.organizationId);
+  const openStrategyDraftByIdentityId = await fetchOpenDraftsForCycle(
+    context.organizationId,
+    selectedCycle.id
+  );
+  const revisionActions = {
+    proposeStrategyObjectDraft,
+    updateStrategyObjectDraft,
+    promoteStrategyObjectRevision,
+    rejectStrategyObjectRevision,
+    linkStrategyObjectDraftAssignment,
+    unlinkStrategyObjectDraftAssignment,
+    setStrategyObjectLifecycle,
+  };
   const analysisLlmPolicy = readAnalysisNetworkLlmPolicy(branding?.branding_config ?? null);
   const canQueueObjectiveEvaluation = isLlmFeatureEnabled(analysisLlmPolicy, "objective_evaluation");
-  const strategyReferenceFields = readStrategyReferenceFieldsFromBrandingConfig(branding?.branding_config ?? null);
-  const companyKennzahlen = readCompanyKennzahlenFromBrandingConfig(branding?.branding_config ?? null);
   const entries = ANALYSIS_TYPES.includes(activeTab as (typeof ANALYSIS_TYPES)[number])
     ? workspace.grouped[activeTab as keyof typeof workspace.grouped] ?? []
     : [];
@@ -790,12 +805,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const topChallenges = [...(workspace.challenges ?? [])]
     .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
     .slice(0, 5);
-  const topDirections = [...(workspace.strategicDirections ?? [])]
-    .sort((a, b) => Number(b.priority ?? 0) - Number(a.priority ?? 0))
-    .slice(0, 5);
-  const uncoveredChallenges = (workspace.challenges ?? []).filter(
-    (challenge) => (directionCountByChallengeId.get(challenge.id) ?? 0) === 0
-  );
   const draftChallengeCandidates = (workspace.challengeCandidates ?? []).filter((c) => c.status === "draft");
   const summaryClusters = workspace.clusters ?? [];
   const recommendedChallengeTotal = draftChallengeCandidates.length + summaryClusters.length;
@@ -804,6 +813,21 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
   const linkDraftsCount = linkDrafts.length;
   const gapFindingsCount = gapFindings.length;
   const analyseNetzwerkOpenTotal = recommendedChallengeTotal + linkDraftsCount + gapFindingsCount;
+  const recommendationClusterPanels = summaryClusters.map((cluster) => {
+    const members = workspace.clusterMembersByClusterId.get(cluster.id) ?? [];
+    const topMemberTitles = members
+      .slice(0, 4)
+      .map((member) => workspace.entryTitleById.get(member.entry_id) ?? member.entry_id);
+    return {
+      id: cluster.id,
+      label: cluster.label,
+      summary: cluster.summary ?? null,
+      cluster_score: cluster.cluster_score,
+      topMemberTitles,
+      memberCount: members.length,
+    };
+  });
+  const entryTitleByIdRecord = Object.fromEntries(workspace.entryTitleById.entries());
   const analysisNetworkStale = computeAnalysisNetworkStaleFlags({
     entries: workspace.entries,
     approvedLinks: workspace.approvedLinks ?? [],
@@ -859,13 +883,30 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     (job) =>
       job.job_type === "objective_evaluation_backfill" && isBackgroundJobStaleForUiLock(job)
   );
+  const portfolioEvaluatedAtMs = workspace.portfolioEvaluation?.portfolio_evaluated_at
+    ? new Date(workspace.portfolioEvaluation.portfolio_evaluated_at).getTime()
+    : null;
+  const latestObjectiveEvalMs = (workspace.objectives ?? []).reduce<number>((acc, o) => {
+    const at = (o as { ai_evaluated_at?: string | null }).ai_evaluated_at;
+    if (!at) return acc;
+    const ms = new Date(at).getTime();
+    return Number.isFinite(ms) && ms > acc ? ms : acc;
+  }, 0);
+  const hasOutdatedObjectiveEval = (workspace.objectives ?? []).some(
+    (o) => (o as { ai_evaluation_status?: string | null }).ai_evaluation_status === "outdated"
+  );
+  const isPortfolioEvaluationStale =
+    workspace.portfolioEvaluation != null &&
+    (portfolioEvaluatedAtMs == null ||
+      (latestObjectiveEvalMs > 0 && latestObjectiveEvalMs > portfolioEvaluatedAtMs) ||
+      hasOutdatedObjectiveEval);
   const programMatrix = buildProgramMatrix({
     challenges: workspace.challenges ?? [],
     directions: (workspace.strategicDirections ?? []).map((d) => ({
       id: d.id,
       title: d.title,
       priority: d.priority ?? null,
-      status: d.status ?? null,
+      versioning: d.versioning,
     })),
     challengeDirectionLinks: (workspace.challengeDirectionLinks ?? []).map((link) => ({
       strategic_challenge_id: link.strategic_challenge_id,
@@ -878,7 +919,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       title: o.title,
       importance_score: (o as { importance_score?: number | null }).importance_score ?? null,
       ai_objective_score: (o as { ai_objective_score?: number | string | null }).ai_objective_score ?? null,
-      status: (o as { status?: string | null }).status ?? null,
+      versioning: o.versioning,
     })),
   });
   const analysisEntryIdsByChallengeId = new Map<string, string[]>();
@@ -907,23 +948,20 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     correlationSummary: strategicDesignSummary,
   });
 
-  const overviewMissionRaw = strategyReferenceFields.mission?.trim() ?? "";
-  const overviewMissionTeaser =
-    overviewMissionRaw.length > 0 ? truncateStrategyCycleTeaser(overviewMissionRaw, 280) : null;
-  const overviewKennzParts: string[] = [];
-  if (companyKennzahlen.organizationsform) {
-    const orgLabel =
-      companyKennzahlen.organizationsform === "other" && companyKennzahlen.organizationsform_other.trim()
-        ? companyKennzahlen.organizationsform_other.trim()
-        : companyKennzahlen.organizationsform;
-    if (orgLabel) overviewKennzParts.push(orgLabel);
-  }
-  if (companyKennzahlen.unternehmensgroesse) {
-    overviewKennzParts.push(`ca. ${companyKennzahlen.unternehmensgroesse} MA`);
-  }
-  const overviewKennwerteTeaser =
-    overviewKennzParts.length > 0 ? overviewKennzParts.join(" · ") : null;
   const corporateStrategySummaryHref = `/strategy-cycle?l1=corporate-strategy&l2=summary&sort=${sort}&min_score=${minScore}&quality_band=${qualityBandFilter}`;
+
+  const objectiveScoreValues = (workspace.objectives ?? [])
+    .map((o) => Number((o as { ai_objective_score?: number | string | null }).ai_objective_score))
+    .filter((value) => Number.isFinite(value));
+  const objectiveAvgScore =
+    objectiveScoreValues.length > 0
+      ? objectiveScoreValues.reduce((acc, value) => acc + value, 0) / objectiveScoreValues.length
+      : null;
+  const portfolioBalanceScore =
+    workspace.portfolioEvaluation?.balance_score != null &&
+    Number.isFinite(Number(workspace.portfolioEvaluation.balance_score))
+      ? Number(workspace.portfolioEvaluation.balance_score)
+      : null;
 
   const extraLinkedAnalysisEntryIds = new Set(
     (workspace.challengeAnalysisEntries ?? []).map((r) => r.analysis_entry_id).filter(Boolean)
@@ -935,6 +973,66 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     workspace.clusterMembersByClusterId,
     extraLinkedAnalysisEntryIds
   );
+  const promotedEntryIdSet = new Set([
+    ...workspace.promotedBySourceId.keys(),
+    ...extraLinkedAnalysisEntryIds,
+  ]);
+  const directionCountByEntryIdRecord = Object.fromEntries(
+    [...(workspace.entryDirectionIdsByEntryId?.entries() ?? [])].map(([id, ids]) => [id, ids.length])
+  );
+  const overviewDrillTables = buildOverviewDrillTables({
+    objectives: workspace.objectives ?? [],
+    entries: (workspace.entries ?? []).map((e) => ({
+      id: e.id,
+      title: e.title,
+      analysis_type: e.analysis_type,
+      sub_type: e.sub_type,
+      impact_level: e.impact_level,
+      uncertainty_level: e.uncertainty_level,
+      quality_score:
+        typeof e.quality_score === "number" && Number.isFinite(e.quality_score)
+          ? e.quality_score
+          : null,
+    })),
+    challenges: workspace.challenges ?? [],
+    directions: workspace.strategicDirections ?? [],
+    programs: (workspace.programs ?? []).map((p) => {
+      const pr = p as {
+        id: string;
+        title: string;
+        status?: string | null;
+        owner_membership_id?: string | null;
+        budget_total?: number | null;
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+      return pr;
+    }),
+    initiatives: (workspace.initiatives ?? []).map((i) => {
+      const row = i as {
+        id: string;
+        title: string;
+        status?: string | null;
+        priority?: number | null;
+        program_id?: string | null;
+        owner_membership_id?: string | null;
+        progress_percent?: number | null;
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+      return row;
+    }),
+    directionCountByChallengeId: Object.fromEntries(directionCountByChallengeId),
+    challengeIdsByDirection: Object.fromEntries(challengeIdsByDirection),
+    objectiveIdsByDirection: Object.fromEntries(objectiveIdsByDirection),
+    promotedEntryIds: promotedEntryIdSet,
+    directionCountByEntryId: directionCountByEntryIdRecord,
+    programOverviewById,
+    programTitleById: Object.fromEntries(
+      (workspace.programs ?? []).map((p) => [p.id, p.title] as const)
+    ),
+    ownerLabelByMembershipId: ownerLabelByPipMembershipId,
+  });
 
   const analysisEntryIdsByChallengeRecord: Record<string, string[]> = {};
   for (const c of workspace.challenges ?? []) {
@@ -960,7 +1058,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
     .sort((a, b) => a.title.localeCompare(b.title, "de"));
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <header className="brand-card p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Strategiezyklus</p>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900">Arbeitsbereich Strategiezyklus</h1>
@@ -973,6 +1071,11 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
 
       <Suspense fallback={null}>
         <RefreshOnSuccess />
+        <StrategyDraftFocus />
+        <ObjectiveEvaluationPrompt
+          enabled={canQueueObjectiveEvaluation}
+          returnPath={STRATEGY_OBJECT_RETURN_PATHS.objectives}
+        />
       </Suspense>
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
@@ -1091,17 +1194,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             initiatives: (workspace.initiatives ?? []).length,
           }}
           kpis={strategicDesignInsights.kpis}
-          topChallenges={topChallenges}
-          topDirections={topDirections}
-          missionTeaser={overviewMissionTeaser}
-          kennwerteTeaser={overviewKennwerteTeaser}
+          drillTables={overviewDrillTables}
           corporateStrategySummaryHref={corporateStrategySummaryHref}
+          objectiveAvgScore={objectiveAvgScore}
+          portfolioBalanceScore={portfolioBalanceScore}
         />
       ) : null}
 
       {activeL1 === "objectives" ? (
-        <section className="space-y-4">
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-4">
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
             <article className="brand-card p-6">
               <h2 className="text-lg font-semibold text-zinc-900">Ziel erfassen</h2>
               <p className="mt-1 text-[11px] text-zinc-500">
@@ -1111,9 +1213,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </p>
               <ObjectiveCreateForm action={createObjectiveInCycle} canWrite={canWrite} />
             </article>
-            <article className="brand-card p-6">
+            <article className="brand-card min-w-0 p-6">
               <h3 className="text-base font-semibold text-zinc-900">Ziele</h3>
-              <div className="mt-4">
+              <div className="mt-4 min-w-0">
                 <ObjectivesTable
                   objectives={workspace.objectives ?? []}
                   industries={workspace.availableDimensions?.industries ?? []}
@@ -1122,6 +1224,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   businessModelIdsByObjective={Object.fromEntries(workspace.businessModelIdsByObjectiveId ?? [])}
                   creatorDisplayNameByMembershipId={workspace.creatorDisplayNameByMembershipId}
                   canWrite={canWrite}
+                  openDraftByIdentityId={openStrategyDraftByIdentityId}
+                  returnPath={STRATEGY_OBJECT_RETURN_PATHS.objectives}
+                  revisionActions={revisionActions}
                   actions={{
                     updateObjectiveInCycle,
                     deleteObjectiveInCycle,
@@ -1135,13 +1240,16 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </article>
           </div>
 
-          <article className="brand-card p-6">
+          <article className="brand-card min-w-0 p-6">
             <h3 className="text-base font-semibold text-zinc-900">Portfolio-Bewertung</h3>
             <p className="mt-1 text-sm text-zinc-600">
               Balance und Verteilung der Ziele nach Sentinel✨-Bewertung.
             </p>
             <div className="mt-4 space-y-4">
-              <PortfolioSummaryView portfolio={workspace.portfolioEvaluation ?? null} />
+              <PortfolioSummaryView
+                portfolio={workspace.portfolioEvaluation ?? null}
+                isStale={isPortfolioEvaluationStale}
+              />
               <form action={queueObjectiveEvaluationBackfill}>
                 <button
                   type="submit"
@@ -1170,35 +1278,33 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
             </div>
           </article>
 
-          <article className="brand-card p-6">
+          <article className="brand-card min-w-0 p-6">
             <h3 className="text-base font-semibold text-zinc-900">Ziel-Balance (Streudiagramm)</h3>
             <p className="mt-1 text-sm text-zinc-600">
               Grob lesbar: Intern/Extern vs Exploit/Explore (KI-Klassifikation, nur wenige Rasterpunkte). Feine
               Verschiebung unter den Punkten kommt aus Teilscores, damit Ueberlagerungen sichtbar werden.
             </p>
-            <div className="mt-4">
+            <TableHorizontalScroll className="mt-4 min-w-0" bordered={false}>
               <ObjectiveBalanceScatterPlot objectives={workspace.objectives ?? []} />
-            </div>
+            </TableHorizontalScroll>
           </article>
         </section>
       ) : null}
 
       {activeL1 === "strategic-directions" ? (
-        <section className="space-y-4">
+        <section key={activeStrategicTab} className="min-w-0 space-y-4">
           {activeStrategicTab === "dashboard" ? (
             <StrategicDesignDashboard insights={strategicDesignInsights} />
-          ) : null}
-          {activeStrategicTab === "summary" ? (
+          ) : activeStrategicTab === "summary" ? (
             <StrategicDesignSummary
               canWrite={canWrite}
               summary={strategicDesignSummary}
               onSaveOverride={saveCorrelationStatusOverride}
               onClearOverride={clearCorrelationStatusOverride}
             />
-          ) : null}
-          {activeStrategicTab === "challenges" ? (
-            <>
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+          ) : activeStrategicTab === "challenges" ? (
+            <div className="min-w-0 space-y-4">
+              <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
                 <article className="brand-card p-6">
                   <h2 className="text-lg font-semibold text-zinc-900">Herausforderung erfassen</h2>
                   <p className="mt-1 text-sm text-zinc-600">
@@ -1211,9 +1317,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     analysisEntries={analysisEntriesForChallengePills}
                   />
                 </article>
-                <article className="brand-card p-6">
+                <article className="brand-card min-w-0 p-6">
                   <h3 className="text-base font-semibold text-zinc-900">Strategische Herausforderungen</h3>
-                  <div className="mt-4">
+                  <div className="mt-4 min-w-0">
                     <ChallengesTable
                       challenges={workspace.challenges ?? []}
                       industries={workspace.availableDimensions?.industries ?? []}
@@ -1225,6 +1331,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                       challengeIdByAnalysisEntryId={challengeIdByAnalysisEntryId}
                       directionCountByChallengeId={Object.fromEntries(directionCountByChallengeId)}
                       canWrite={canWrite}
+                      openDraftByIdentityId={openStrategyDraftByIdentityId}
+                      returnPath={STRATEGY_OBJECT_RETURN_PATHS.challenges}
+                      revisionActions={revisionActions}
                       actions={{
                         updateStrategicChallengeAssessment,
                         deleteStrategicChallengeInCycle,
@@ -1239,14 +1348,14 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                   </div>
                 </article>
               </div>
-              <article className="brand-card p-6">
+              <article className="brand-card min-w-0 p-6">
             <h3 className="text-base font-semibold text-zinc-900">Heatmap (Auswirkung × Dringlichkeit)</h3>
             <p className="mt-1 text-xs text-zinc-600">
               Hohe Werte oben rechts markieren prioritär zu adressierende Herausforderungen.
             </p>
-            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div className="overflow-x-auto shrink-0">
-                <table className="min-w-[520px] border-collapse">
+            <div className="mt-4 flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
+              <TableHorizontalScroll className="min-w-0 shrink-0">
+                <table className="w-max min-w-[520px] border-collapse">
                   <thead>
                     <tr>
                       <th className="border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-700">Auswirkung \\ Dringlichkeit</th>
@@ -1279,7 +1388,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableHorizontalScroll>
               <div className="flex flex-col gap-4 lg:min-w-[280px]">
                 <div>
                   <h4 className="text-sm font-medium text-zinc-800">Top 5 Herausforderungen</h4>
@@ -1326,11 +1435,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             </div>
           </article>
-            </>
-          ) : null}
-
-          {activeStrategicTab === "design" ? (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+            </div>
+          ) : activeStrategicTab === "design" ? (
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
             <article className="brand-card p-6">
               <h2 className="text-lg font-semibold text-zinc-900">Stoßrichtung erfassen</h2>
               <p className="mt-1 text-sm text-zinc-600">
@@ -1406,29 +1513,15 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                     className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-700">Lifecycle-Status</label>
-                  <select
-                    name="status"
-                    defaultValue="draft"
-                    className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-                  >
-                    {STRATEGIC_DIRECTION_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <button type="submit" disabled={!canWrite} className="brand-btn w-full px-4 py-2 text-sm">
                   
                   Stoßrichtung speichern
                 </button>
               </form>
             </article>
-            <article className="brand-card p-6">
+            <article className="brand-card min-w-0 p-6">
               <h3 className="text-base font-semibold text-zinc-900">Strategische Stoßrichtungen</h3>
-              <div className="mt-4">
+              <div className="mt-4 min-w-0">
                 <StrategicDirectionsTable
                 directions={workspace.strategicDirections ?? []}
                 challenges={(workspace.challenges ?? []).map((c) => ({
@@ -1438,7 +1531,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 objectives={(workspace.objectives ?? []).map((o) => ({
                   id: o.id,
                   title: o.title,
-                  status: (o as { status?: string | null }).status ?? null,
+                  versioning: o.versioning,
                 }))}
                 industries={workspace.availableDimensions.industries ?? []}
                 businessModels={workspace.availableDimensions.businessModels ?? []}
@@ -1451,6 +1544,9 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
                 businessModelIdsByDirection={Object.fromEntries(directionBusinessModelIdsById)}
                 directionCoverageById={Object.fromEntries(workspace.directionCoverageById)}
                 canWrite={canWrite}
+                openDraftByIdentityId={openStrategyDraftByIdentityId}
+                returnPath={STRATEGY_OBJECT_RETURN_PATHS.directions}
+                revisionActions={revisionActions}
                 actions={{
                   updateStrategicDirectionAssessment,
                   deleteStrategicDirectionInCycle,
@@ -1467,9 +1563,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               </div>
             </article>
           </div>
-          ) : null}
-
-          {activeStrategicTab === "strategy-matrix" ? (
+          ) : activeStrategicTab === "strategy-matrix" ? (
           <ProgramMappingMatrix model={programMatrix} canWrite={canWrite} />
           ) : null}
         </section>
@@ -1483,7 +1577,7 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
               createProgramAction={createStrategyProgramInCycle}
               updateProgramAction={updateStrategyProgramInCycle}
               strategicDirectionsForPrograms={(workspace.strategicDirections ?? []).filter((d) =>
-                isStrategicDirectionActiveForPrograms(d.status)
+                isStrategicDirectionEligibleForPrograms(d.versioning)
               )}
               strategicDirectionsAll={(workspace.strategicDirections ?? []).map((d) => ({
                 id: d.id,
@@ -1583,57 +1677,6 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
       ) : null}
 
       {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Herausforderungen</h3>
-            <div className="mt-2 space-y-2">
-              {topChallenges.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine Herausforderungen vorhanden.</p>
-              ) : (
-                topChallenges.map((challenge) => (
-                  <div key={challenge.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
-                    <p className="font-medium text-zinc-900">{challenge.title}</p>
-                    <p className="text-zinc-600">Score {Number(challenge.challenge_score ?? 0).toFixed(2)}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </article>
-          <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Top 5 Stoßrichtungen</h3>
-            <div className="mt-2 space-y-2">
-              {topDirections.length === 0 ? (
-                <p className="text-xs text-zinc-600">Noch keine strategischen Stoßrichtungen vorhanden.</p>
-              ) : (
-                topDirections.map((direction) => (
-                  <div key={direction.id} className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs">
-                    <p className="font-medium text-zinc-900">{direction.title}</p>
-                    <p className="text-zinc-600">Priorität {Number(direction.priority ?? 0).toFixed(2)}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </article>
-          <article className="brand-card p-4">
-            <h3 className="text-sm font-semibold text-zinc-900">Coverage: Unadressierte Herausforderungen</h3>
-            <div className="mt-2 space-y-2">
-              {uncoveredChallenges.length === 0 ? (
-                <p className="text-xs text-emerald-700">
-                  Alle Herausforderungen sind mindestens einer Stoßrichtung zugeordnet.
-                </p>
-              ) : (
-                uncoveredChallenges.slice(0, 8).map((challenge) => (
-                  <div key={challenge.id} className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
-                    {challenge.title}
-                  </div>
-                ))
-              )}
-            </div>
-          </article>
-        </section>
-      ) : null}
-
-      {activeL1 === "corporate-strategy" && activeTab === "summary" ? (
       <section className="brand-card p-6 space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4">
           <div className="min-w-0 flex-1">
@@ -1704,202 +1747,23 @@ export default async function StrategyCycleViewPage({ searchParams }: StrategyCy
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold text-zinc-900">Empfohlene Herausforderungen</h3>
-            <p className="mt-1 text-xs text-zinc-600">
-              Herausforderungs-Vorschläge (Kandidaten und Cluster), Verbindungs-Entwürfe und Lücken — jeweils
-              aufklappbar. Die Zahl in Klammern ist die Anzahl der Einträge in dieser Liste.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <details className="brand-surface group rounded-lg border border-zinc-200">
-              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
-                <span className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
-                    Herausforderungs-Vorschläge
-                  </span>
-                  <span className="text-xs font-normal text-zinc-500">({recommendedChallengeTotal})</span>
-                </span>
-              </summary>
-              <div className="space-y-2 border-t border-zinc-200 p-3">
-                {recommendedChallengeTotal === 0 ? (
-                  <p className="text-xs text-zinc-600">
-                    Keine offenen Vorschläge. Führe «Cluster neu berechnen» oder «Lücken neu berechnen» aus.
-                  </p>
-                ) : (
-                  <>
-                    {draftChallengeCandidates.map((candidate) => (
-                      <div key={candidate.id} className="space-y-2 rounded-md border border-zinc-200 bg-white p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-zinc-900">{candidate.title}</p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                              Priorität {candidate.priority}
-                            </span>
-                            <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                              Quelle {candidate.source_type}
-                            </span>
-                          </div>
-                        </div>
-                        {candidate.description ? (
-                          <p className="text-sm text-zinc-600">{candidate.description}</p>
-                        ) : null}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <form action={promoteChallengeCandidate}>
-                            <input type="hidden" name="candidate_id" value={candidate.id} />
-                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                              Als Herausforderung übernehmen
-                            </button>
-                          </form>
-                          <form action={dismissChallengeCandidate}>
-                            <input type="hidden" name="candidate_id" value={candidate.id} />
-                            <button
-                              type="submit"
-                              disabled={!canWrite}
-                              className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-700"
-                            >
-                              Ausblenden
-                            </button>
-                          </form>
-                        </div>
-                      </div>
-                    ))}
-                    {summaryClusters.map((cluster) => {
-                      const members = workspace.clusterMembersByClusterId.get(cluster.id) ?? [];
-                      const topMemberTitles = members
-                        .slice(0, 4)
-                        .map((member) => workspace.entryTitleById.get(member.entry_id) ?? member.entry_id);
-                      return (
-                        <div key={`cluster-${cluster.id}`} className="space-y-2 rounded-md border border-zinc-200 bg-white p-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-zinc-900">{cluster.label}</p>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                                Score {Math.round(Number(cluster.cluster_score ?? 0) * 100)}
-                              </span>
-                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                                Quelle Cluster
-                              </span>
-                              <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                                {members.length} Mitglieder
-                              </span>
-                            </div>
-                          </div>
-                          {cluster.summary ? (
-                            <p className="text-sm text-zinc-600">{cluster.summary}</p>
-                          ) : null}
-                          {topMemberTitles.length > 0 ? (
-                            <p className="text-xs text-zinc-500">{topMemberTitles.join(" · ")}</p>
-                          ) : null}
-                          <form action={promoteClusterToStrategicChallenge}>
-                            <input type="hidden" name="analysis_type" value={actionTab} />
-                            <input type="hidden" name="cluster_id" value={cluster.id} />
-                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                              Als Herausforderung übernehmen
-                            </button>
-                          </form>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            </details>
-
-            <details className="brand-surface group rounded-lg border border-zinc-200">
-              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
-                <span className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
-                    Verbindungs-Entwürfe
-                  </span>
-                  <span className="text-xs font-normal text-zinc-500">({linkDraftsCount})</span>
-                </span>
-              </summary>
-              <div className="space-y-2 border-t border-zinc-200 p-3">
-                {linkDraftsCount === 0 ? (
-                  <p className="text-xs text-zinc-600">Keine offenen Entwürfe.</p>
-                ) : (
-                  linkDrafts.slice(0, 12).map((draft) => {
-                    const tri = readTriScores(draft.metadata);
-                    return (
-                      <div key={draft.id} className="rounded-md border border-zinc-200 bg-white p-2">
-                        <p className="text-xs text-zinc-700">
-                          <span className="font-medium">
-                            {workspace.entryTitleById.get(draft.source_analysis_item_id) ??
-                              draft.source_analysis_item_id}
-                          </span>
-                          {" -> "}
-                          <span className="font-medium">
-                            {workspace.entryTitleById.get(draft.target_analysis_item_id) ??
-                              draft.target_analysis_item_id}
-                          </span>
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-600">
-                          {draft.link_type} | conf {Math.round(Number(draft.confidence ?? 0) * 100)}% | s
-                          {draft.strength}
-                        </p>
-                        {tri ? (
-                          <p className="mt-1 text-xs text-zinc-500">
-                            Nähe {Math.round(tri.proximityScore * 100)}% | Unterstützung{" "}
-                            {Math.round(tri.supportScore * 100)}% | Abstossung {Math.round(tri.repulsionScore * 100)}%
-                          </p>
-                        ) : null}
-                        <p className="mt-1 text-xs text-zinc-500">{draft.comment}</p>
-                        <div className="mt-2 flex gap-2">
-                          <form action={approveLinkDraft}>
-                            <input type="hidden" name="analysis_type" value={actionTab} />
-                            <input type="hidden" name="draft_id" value={draft.id} />
-                            <button type="submit" disabled={!canWrite} className="brand-btn px-3 py-1.5 text-xs">
-                              Annehmen
-                            </button>
-                          </form>
-                          <form action={rejectLinkDraft}>
-                            <input type="hidden" name="analysis_type" value={actionTab} />
-                            <input type="hidden" name="draft_id" value={draft.id} />
-                            <button
-                              type="submit"
-                              disabled={!canWrite}
-                              className="brand-btn px-3 py-1.5 text-xs"
-                            >
-                              Ablehnen
-                            </button>
-                          </form>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </details>
-
-            <details className="brand-surface group rounded-lg border border-zinc-200">
-              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
-                <span className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-zinc-900 underline-offset-2 group-open:decoration-zinc-400">
-                    Lücken in der Betrachtung
-                  </span>
-                  <span className="text-xs font-normal text-zinc-500">({gapFindingsCount})</span>
-                </span>
-              </summary>
-              <div className="space-y-2 border-t border-zinc-200 p-3">
-                {gapFindingsCount === 0 ? (
-                  <p className="text-xs text-zinc-600">Keine offenen Lücken gefunden.</p>
-                ) : (
-                  gapFindings.slice(0, 12).map((gap) => (
-                    <div key={gap.id} className="rounded-md border border-zinc-200 bg-white p-2">
-                      <p className="text-xs font-medium text-zinc-900">
-                        {gap.gap_type} | {gap.dimension}
-                      </p>
-                      <p className="mt-1 text-xs text-zinc-600">Priorität: {gap.severity} | Status: {gap.status}</p>
-                      <p className="mt-1 text-xs text-zinc-500">{gap.recommendation}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </details>
-          </div>
-        </div>
+        <AnalysisNetworkRecommendationPanels
+          recommendedChallengeTotal={recommendedChallengeTotal}
+          draftChallengeCandidates={draftChallengeCandidates}
+          clusterPanels={recommendationClusterPanels}
+          linkDraftsCount={linkDraftsCount}
+          linkDrafts={linkDrafts}
+          gapFindingsCount={gapFindingsCount}
+          gapFindings={gapFindings}
+          entryTitleById={entryTitleByIdRecord}
+          canWrite={canWrite}
+          actionTab={actionTab}
+          promoteChallengeCandidate={promoteChallengeCandidate}
+          dismissChallengeCandidate={dismissChallengeCandidate}
+          promoteClusterToStrategicChallenge={promoteClusterToStrategicChallenge}
+          approveLinkDraft={approveLinkDraft}
+          rejectLinkDraft={rejectLinkDraft}
+        />
       </section>
       ) : null}
 

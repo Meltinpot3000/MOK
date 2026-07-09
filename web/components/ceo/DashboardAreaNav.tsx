@@ -2,36 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { PlanningCycle } from "@/lib/ceo/queries";
+import { pickPlanningCycle, scopePlanningCycles } from "@/lib/ceo/pick-planning-cycle";
+import type { PlanningCycle } from "@/lib/ceo/types";
 
 type DashboardAreaNavProps = {
   cycles: PlanningCycle[];
 };
 
-function resolveActiveTopLevelCycle(cycles: PlanningCycle[], nowIso: string): PlanningCycle | null {
-  const topLevelCycles = cycles.filter((cycle) => (cycle.level_no ?? 1) === 1);
-  const topLevelScope = topLevelCycles.some((cycle) => cycle.is_active_scheme)
-    ? topLevelCycles.filter((cycle) => cycle.is_active_scheme)
-    : topLevelCycles;
-  const nowMs = Date.parse(nowIso);
-  return (
-    topLevelScope
-      .filter((cycle) => Date.parse(cycle.start_date) <= nowMs && nowMs < Date.parse(cycle.end_date))
-      .sort((a, b) => Date.parse(b.start_date) - Date.parse(a.start_date))[0] ??
-    topLevelScope
-      .filter((cycle) => Date.parse(cycle.start_date) > nowMs)
-      .sort((a, b) => Date.parse(a.start_date) - Date.parse(b.start_date))[0] ??
-    topLevelScope
-      .filter((cycle) => Date.parse(cycle.end_date) <= nowMs)
-      .sort((a, b) => Date.parse(b.end_date) - Date.parse(a.end_date))[0] ??
-    null
-  );
+function resolveActiveTopLevelCycle(cycles: PlanningCycle[], nowMs: number): PlanningCycle | null {
+  const topLevel = scopePlanningCycles(cycles).filter((cycle) => (cycle.level_no ?? 1) === 1);
+  return pickPlanningCycle(topLevel, nowMs).cycle;
 }
 
 export function DashboardAreaNav({ cycles }: DashboardAreaNavProps) {
   const pathname = usePathname();
-  const nowIso = new Date().toISOString();
-  const activeTopLevel = resolveActiveTopLevelCycle(cycles, nowIso);
+  const activeTopLevel = resolveActiveTopLevelCycle(cycles, Date.now());
 
   const tabs: { href: string; label: string }[] = [{ href: "/dashboard", label: "Übersicht" }];
   if (activeTopLevel) {

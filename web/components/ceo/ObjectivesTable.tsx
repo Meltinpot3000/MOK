@@ -1,7 +1,28 @@
 "use client";
 
-import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
+import { useMemo, useState } from "react";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import { formatCreatorLabel } from "@/lib/creator/format";
+import {
+  definitionFieldInputClass,
+  isStrategyObjectDefinitionLocked,
+  getOperationalSignalLabelDe,
+  getReviewDecisionLabelDe,
+  formatStrategyObjectStandLabel,
+  readAssignmentIds,
+  resolveOpenDraftForVersioning,
+  strategyObjectStandSortValue,
+  STRATEGY_OBJECT_LIFECYCLE_LABELS_DE,
+  type StrategyObjectVersioningMeta,
+} from "@/lib/strategy-objects";
+import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
+import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 import { ObjectiveAiPanel } from "./ObjectiveAiPanel";
@@ -12,7 +33,6 @@ type Objective = {
   description: string | null;
   importance_score: number | null;
   time_horizon: string | null;
-  status: string | null;
   created_by_membership_id?: string | null;
   created_by_source?: string | null;
   ai_objective_score?: number | null;
@@ -28,6 +48,7 @@ type Objective = {
   ai_evaluation_status?: string | null;
   ai_evaluated_at?: string | null;
   ai_manual_override?: boolean | null;
+  versioning?: StrategyObjectVersioningMeta;
 };
 
 type ObjectivesTableProps = {
@@ -38,6 +59,17 @@ type ObjectivesTableProps = {
   businessModelIdsByObjective: Record<string, string[]>;
   creatorDisplayNameByMembershipId?: Record<string, string>;
   canWrite: boolean;
+  openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
+  returnPath?: string;
+  revisionActions?: {
+    proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    promoteStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    rejectStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    linkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    unlinkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    setStrategyObjectLifecycle: (formData: FormData) => Promise<void>;
+  };
   actions: {
     updateObjectiveInCycle: (formData: FormData) => Promise<void>;
     deleteObjectiveInCycle: (formData: FormData) => Promise<void>;
@@ -67,16 +99,25 @@ function formatExploitExploreTendency(value: string | null | undefined): string 
   return value;
 }
 
+const FORM_LABEL = "text-xs font-medium text-zinc-600";
+const FORM_INPUT =
+  "mt-1 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500";
+
 function PillSection({
   title,
+  hint,
   children,
 }: {
   title: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-medium text-zinc-600">{title}</p>
+    <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50/80 p-3">
+      <div>
+        <p className="text-xs font-medium text-zinc-700">{title}</p>
+        {hint ? <p className="mt-0.5 text-[11px] text-zinc-500">{hint}</p> : null}
+      </div>
       <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );
@@ -90,8 +131,46 @@ export function ObjectivesTable({
   businessModelIdsByObjective,
   creatorDisplayNameByMembershipId,
   canWrite,
+  openDraftByIdentityId = {},
+  returnPath = "/strategy-cycle?l1=objectives",
+  revisionActions,
   actions,
 }: ObjectivesTableProps) {
+  const [filterLifecycle, setFilterLifecycle] = useState("");
+  const [searchTitle, setSearchTitle] = useState("");
+
+  const lifecycleFilterOptions = useMemo(() => {
+    const states = [
+      ...new Set(
+        objectives
+          .map((o) => o.versioning?.identity_lifecycle_state)
+          .filter((value): value is NonNullable<typeof value> => Boolean(value))
+      ),
+    ];
+    return states
+      .sort((a, b) => a.localeCompare(b, "de"))
+      .map((state) => ({
+        value: state,
+        label: STRATEGY_OBJECT_LIFECYCLE_LABELS_DE[state] ?? state,
+      }));
+  }, [objectives]);
+
+  const filteredObjectives = useMemo(() => {
+    return objectives.filter((o) => {
+      if (filterLifecycle && o.versioning?.identity_lifecycle_state !== filterLifecycle) return false;
+      if (!matchesTableTitleSearch(o.title, searchTitle)) return false;
+      return true;
+    });
+  }, [objectives, filterLifecycle, searchTitle]);
+
+  const draftExpandedRowIds = useMemo(
+    () =>
+      filteredObjectives
+        .filter((o) => resolveOpenDraftForVersioning(o.versioning, openDraftByIdentityId))
+        .map((o) => o.id),
+    [filteredObjectives, openDraftByIdentityId]
+  );
+
   const columns = [
     {
       id: "title",
@@ -131,19 +210,53 @@ export function ObjectivesTable({
       render: (o: Objective) => String(o.importance_score ?? "-"),
     },
     {
-      id: "status",
-      label: "Status",
+      id: "versioning_stand",
+      label: "Stand",
       defaultVisible: true,
-      sortValue: (o: Objective) => o.status ?? null,
-      render: (o: Objective) => o.status ?? "-",
+      sortValue: (o: Objective) => {
+        const openDraft = resolveOpenDraftForVersioning(o.versioning, openDraftByIdentityId);
+        return strategyObjectStandSortValue(o.versioning, openDraft);
+      },
+      render: (o: Objective) => {
+        const openDraft = resolveOpenDraftForVersioning(o.versioning, openDraftByIdentityId);
+        return (
+          <span className={openDraft ? "text-sky-900" : undefined}>
+            {formatStrategyObjectStandLabel(o.versioning, openDraft)}
+          </span>
+        );
+      },
+    },
+    {
+      id: "versioning_signal",
+      label: "Lage",
+      defaultVisible: true,
+      sortValue: (o: Objective) => o.versioning?.latest_operational_signal ?? null,
+      render: (o: Objective) => getOperationalSignalLabelDe(o.versioning?.latest_operational_signal),
+    },
+    {
+      id: "versioning_review",
+      label: "Review",
+      defaultVisible: true,
+      sortValue: (o: Objective) => o.versioning?.latest_review_decision ?? null,
+      render: (o: Objective) => getReviewDecisionLabelDe(o.versioning?.latest_review_decision),
     },
     {
       id: "ai_objective_score",
       label: "Sentinel✨ Score",
       defaultVisible: true,
       sortValue: (o: Objective) => o.ai_objective_score ?? null,
-      render: (o: Objective) =>
-        o.ai_objective_score != null ? (o.ai_objective_score as number).toFixed(1) : "-",
+      render: (o: Objective) => {
+        if (o.ai_objective_score == null) return "-";
+        const isOutdated = o.ai_evaluation_status === "outdated";
+        return (
+          <span className={isOutdated ? "text-amber-700" : undefined}>
+            {(o.ai_objective_score as number).toFixed(1)} von 5
+            {isOutdated ? (
+              <span className="ml-1 text-xs font-medium">(veraltet)</span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "ai_tendency_internal_external",
@@ -200,7 +313,7 @@ export function ObjectivesTable({
     },
     {
       id: "business_models",
-      label: "Gesch\u00E4ftsmodelle",
+      label: "Geschäftsmodelle",
       defaultVisible: true,
       sortValue: (o: Objective) => {
         const ids = businessModelIdsByObjective[o.id] ?? [];
@@ -231,12 +344,30 @@ export function ObjectivesTable({
   ];
 
   return (
-    <ExpandableTable<Objective>
+    <div className="w-full min-w-0 max-w-full space-y-3">
+      <TableFilterBar>
+        {lifecycleFilterOptions.length > 0 ? (
+          <TableFilterSelect
+            label="Lifecycle"
+            value={filterLifecycle}
+            onChange={setFilterLifecycle}
+            options={lifecycleFilterOptions}
+          />
+        ) : null}
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
+
+      <ExpandableTable<Objective>
       columns={columns}
-      rows={objectives}
+      rows={filteredObjectives}
       getRowId={(o) => o.id}
+      initialExpandedIds={draftExpandedRowIds}
       expandLabel="Details"
-      emptyMessage="Keine Ziele vorhanden."
+      emptyMessage={
+        objectives.length === 0
+          ? "Keine Ziele vorhanden."
+          : "Keine Treffer für die gewählten Filter."
+      }
       renderExpandedContent={(objective) => {
         const linkedIndustryIds = new Set(
           industryIdsByObjective[objective.id] ?? []
@@ -245,148 +376,250 @@ export function ObjectivesTable({
           businessModelIdsByObjective[objective.id] ?? []
         );
 
+        const editFormId = `objective-edit-${objective.id}`;
+        const definitionLocked = isStrategyObjectDefinitionLocked({
+          objectType: "strategic_objective",
+          versioning: objective.versioning,
+        });
+        const openDraft = resolveOpenDraftForVersioning(objective.versioning, openDraftByIdentityId);
+        const lifecycleState = objective.versioning?.identity_lifecycle_state ?? null;
+        const identityId = objective.versioning?.object_identity_id ?? null;
+        const baseRevisionId = objective.versioning?.revision_id ?? objective.id;
+
+        const draftMode = Boolean(openDraft && revisionActions);
+        const assignmentsReadOnly = !draftMode && definitionLocked;
+        const draftIndustryIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "industry") : []
+        );
+        const draftBusinessModelIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "business_model") : []
+        );
+        const showUpdateButton = !definitionLocked && !openDraft;
+
+        const renderAssignmentPill = (
+          kind: "industry" | "business_model",
+          id: string,
+          label: string,
+          liveLinkAction: (fd: FormData) => Promise<void>,
+          liveUnlinkAction: (fd: FormData) => Promise<void>,
+          liveIdField: string,
+          liveIsLinked: boolean,
+          draftIsLinked: boolean
+        ) => {
+          if (draftMode && openDraft && revisionActions) {
+            return (
+              <EntityPillButton
+                key={id}
+                entityKey="revision_id"
+                entityValue={openDraft.id}
+                extraFields={{ assignment_kind: kind, assignment_id: id, return_path: returnPath }}
+                isLinked={draftIsLinked}
+                linkAction={revisionActions.linkStrategyObjectDraftAssignment}
+                unlinkAction={revisionActions.unlinkStrategyObjectDraftAssignment}
+                canWrite={canWrite}
+                title={label}
+                linkedClassName={pillLinked()}
+                unlinkedClassName={pillNeutral()}
+              >
+                {label}
+              </EntityPillButton>
+            );
+          }
+          return (
+            <EntityPillButton
+              key={id}
+              entityKey="objective_id"
+              entityValue={objective.id}
+              extraFields={{ [liveIdField]: id }}
+              isLinked={liveIsLinked}
+              linkAction={liveLinkAction}
+              unlinkAction={liveUnlinkAction}
+              canWrite={canWrite && !assignmentsReadOnly}
+              title={label}
+              linkedClassName={pillLinked()}
+              unlinkedClassName={pillNeutral()}
+            >
+              {label}
+            </EntityPillButton>
+          );
+        };
+
         return (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <ConfirmBeforeSubmitForm
-                action={actions.deleteObjectiveInCycle}
-                className="inline"
-                title="Ziel löschen?"
-                description="Das Ziel wird aus diesem Planungszyklus entfernt. Verknüpfungen und Bewertungen können verloren gehen."
-                confirmLabel="Löschen"
-              >
-                <input type="hidden" name="objective_id" value={objective.id} />
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                >
-                  Loeschen
-                </button>
-              </ConfirmBeforeSubmitForm>
-            </div>
-
-            <form
-              action={actions.updateObjectiveInCycle}
-              className="grid grid-cols-1 gap-2 md:grid-cols-5"
-            >
-              <input type="hidden" name="objective_id" value={objective.id} />
-              <label className="text-xs text-zinc-600 md:col-span-2">
-                Titel
-                <input
-                  name="title"
-                  defaultValue={objective.title}
-                  required
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Zeithorizont
-                <input
-                  name="time_horizon"
-                  defaultValue={objective.time_horizon ?? ""}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Gewicht (1–5)
-                <input
-                  type="number"
-                  name="importance_score"
-                  defaultValue={objective.importance_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Status
-                <select
-                  name="status"
-                  defaultValue={objective.status ?? "draft"}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                >
-                  <option value="draft">draft</option>
-                  <option value="active">active</option>
-                  <option value="at_risk">at_risk</option>
-                  <option value="completed">completed</option>
-                  <option value="archived">archived</option>
-                </select>
-              </label>
-              <label className="block text-xs text-zinc-600 md:col-span-4">
-                Beschreibung
-                <textarea
-                  name="description"
-                  defaultValue={objective.description ?? ""}
-                  rows={3}
-                  className="mt-1 block w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <div className="md:col-span-5">
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="brand-btn px-3 py-1.5 text-xs"
-                >
-                  Ziel aktualisieren
-                </button>
+            <div className="space-y-5 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+              <div className="border-b border-zinc-100 pb-4">
+                <h4 className="text-sm font-semibold text-zinc-900">Ziel bearbeiten</h4>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Stammdaten und Zuordnungen sind Teil der Revision. Änderungen an einer aktiven Fassung
+                  laufen über «Neue Revision» und werden mit «Revision übernehmen» aktiv.
+                </p>
+                <p className="mt-2 text-xs text-zinc-600">
+                  Ersteller:{" "}
+                  {formatCreatorLabel(
+                    objective.created_by_source,
+                    objective.created_by_membership_id
+                      ? creatorDisplayNameByMembershipId?.[objective.created_by_membership_id]
+                      : undefined
+                  )}
+                </p>
               </div>
-            </form>
+
+              {openDraft && revisionActions ? (
+                <StrategyObjectDraftPanel
+                  draft={openDraft}
+                  returnPath={returnPath}
+                  canWrite={canWrite}
+                  actions={revisionActions}
+                />
+              ) : null}
+
+              {!openDraft ? (
+                <form id={editFormId} action={actions.updateObjectiveInCycle} className="space-y-4">
+                  <input type="hidden" name="objective_id" value={objective.id} />
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Stammdaten
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                      <label className={`${FORM_LABEL} md:col-span-2`}>
+                        Titel
+                        <input
+                          name="title"
+                          defaultValue={objective.title}
+                          required
+                          readOnly={definitionLocked}
+                          aria-readonly={definitionLocked}
+                          className={definitionFieldInputClass(definitionLocked, FORM_INPUT)}
+                        />
+                      </label>
+                      <label className={FORM_LABEL}>
+                        Zeithorizont
+                        <input
+                          name="time_horizon"
+                          defaultValue={objective.time_horizon ?? ""}
+                          readOnly={definitionLocked}
+                          aria-readonly={definitionLocked}
+                          className={definitionFieldInputClass(definitionLocked, FORM_INPUT)}
+                        />
+                      </label>
+                      <label className={FORM_LABEL}>
+                        Gewicht (1–5)
+                        <input
+                          type="number"
+                          name="importance_score"
+                          defaultValue={objective.importance_score ?? 3}
+                          min={1}
+                          max={5}
+                          readOnly={definitionLocked}
+                          aria-readonly={definitionLocked}
+                          className={definitionFieldInputClass(definitionLocked, FORM_INPUT)}
+                        />
+                      </label>
+                      <label className={`block ${FORM_LABEL} md:col-span-5`}>
+                        Beschreibung
+                        <textarea
+                          name="description"
+                          defaultValue={objective.description ?? ""}
+                          rows={3}
+                          readOnly={definitionLocked}
+                          aria-readonly={definitionLocked}
+                          className={`${definitionFieldInputClass(definitionLocked, FORM_INPUT)} min-h-[5.5rem]`}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </form>
+              ) : null}
+
+              <div className="space-y-3 border-t border-zinc-100 pt-5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Zuordnungen
+                </p>
+                {assignmentsReadOnly ? (
+                  <p className="text-[11px] text-zinc-500">
+                    Zuordnungen sind in der aktiven Revision fixiert. Für Änderungen «Neue Revision».
+                  </p>
+                ) : draftMode ? (
+                  <p className="text-[11px] text-sky-800">
+                    Zuordnungen des Entwurfs — werden mit «Revision übernehmen» aktiv.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-zinc-500">
+                    Grün = verknüpft. Klick zum Verknüpfen oder Entfernen.
+                  </p>
+                )}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <PillSection title="Industrien">
+                    {industries.map((industry) =>
+                      renderAssignmentPill(
+                        "industry",
+                        industry.id,
+                        industry.name,
+                        actions.linkObjectiveToIndustryInCycle,
+                        actions.unlinkObjectiveFromIndustryInCycle,
+                        "industry_id",
+                        linkedIndustryIds.has(industry.id),
+                        draftIndustryIds.has(industry.id)
+                      )
+                    )}
+                  </PillSection>
+
+                  <PillSection title="Geschäftsmodelle">
+                    {businessModels.map((model) =>
+                      renderAssignmentPill(
+                        "business_model",
+                        model.id,
+                        model.name,
+                        actions.linkObjectiveToBusinessModelInCycle,
+                        actions.unlinkObjectiveFromBusinessModelInCycle,
+                        "business_model_id",
+                        linkedBusinessModelIds.has(model.id),
+                        draftBusinessModelIds.has(model.id)
+                      )
+                    )}
+                  </PillSection>
+                </div>
+              </div>
+
+              {showUpdateButton ? (
+                <div className="border-t border-zinc-100 pt-4">
+                  <button
+                    type="submit"
+                    form={editFormId}
+                    disabled={!canWrite}
+                    className="brand-btn px-4 py-2 text-sm"
+                  >
+                    Ziel aktualisieren
+                  </button>
+                </div>
+              ) : null}
+
+              {revisionActions ? (
+                <div className="border-t border-zinc-100 pt-4">
+                  <StrategyObjectActionBar
+                    objectType="strategic_objective"
+                    objectId={objective.id}
+                    identityId={identityId}
+                    lifecycleState={lifecycleState}
+                    baseRevisionId={baseRevisionId}
+                    hasOpenDraft={Boolean(openDraft)}
+                    canWrite={canWrite}
+                    returnPath={returnPath}
+                    objectNoun="Ziel"
+                    deleteAction={actions.deleteObjectiveInCycle}
+                    deleteIdField="objective_id"
+                    lifecycleAction={revisionActions.setStrategyObjectLifecycle}
+                    proposeAction={revisionActions.proposeStrategyObjectDraft}
+                  />
+                </div>
+              ) : null}
+            </div>
 
             <ObjectiveAiPanel objective={objective} />
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PillSection title="Industrien">
-                {industries.map((industry) => {
-                  const isLinked = linkedIndustryIds.has(industry.id);
-                  return (
-                    <EntityPillButton
-                      key={industry.id}
-                      entityKey="objective_id"
-                      entityValue={objective.id}
-                      extraFields={{ industry_id: industry.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkObjectiveToIndustryInCycle}
-                      unlinkAction={actions.unlinkObjectiveFromIndustryInCycle}
-                      canWrite={canWrite}
-                      title={industry.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {industry.name}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
-
-              <PillSection title="Gesch\u00E4ftsmodelle">
-                {businessModels.map((model) => {
-                  const isLinked = linkedBusinessModelIds.has(model.id);
-                  return (
-                    <EntityPillButton
-                      key={model.id}
-                      entityKey="objective_id"
-                      entityValue={objective.id}
-                      extraFields={{ business_model_id: model.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkObjectiveToBusinessModelInCycle}
-                      unlinkAction={
-                        actions.unlinkObjectiveFromBusinessModelInCycle
-                      }
-                      canWrite={canWrite}
-                      title={model.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {model.name}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
-            </div>
           </div>
         );
       }}
     />
+    </div>
   );
 }

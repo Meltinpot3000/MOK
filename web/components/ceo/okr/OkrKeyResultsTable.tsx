@@ -1,6 +1,7 @@
 "use client";
 
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import type { OkrObjectiveView } from "@/lib/okr/okr-cycle-view-model";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import type { ComponentProps } from "react";
@@ -113,7 +114,8 @@ export function OkrKeyResultsTable({ objectiveViews }: Props) {
   );
 
   return (
-    <table className="mt-3 w-full min-w-[640px] border-collapse text-left text-sm">
+    <TableHorizontalScroll className="mt-3">
+      <table className="w-max min-w-[640px] border-collapse text-left text-sm">
       <thead>
         <tr className="border-b border-zinc-200 text-xs text-zinc-500">
           {th("objective", "OKR-Objective", "py-2 pr-2")}
@@ -145,5 +147,6 @@ export function OkrKeyResultsTable({ objectiveViews }: Props) {
         ))}
       </tbody>
     </table>
+    </TableHorizontalScroll>
   );
 }

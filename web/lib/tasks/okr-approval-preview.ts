@@ -33,7 +33,6 @@ export type OkrObjectiveApprovalPreview = {
   ownerDisplayName: string | null;
   deputyDisplayName: string | null;
   leadingStrategicDirectionTitle: string | null;
-  linkedStrategyObjectiveTitles: string[];
   keyResults: OkrApprovalPreviewKeyResult[];
   contributionRows: OkrApprovalPreviewContributionRow[];
 };
@@ -54,7 +53,7 @@ export async function fetchOkrObjectiveApprovalPreview(
     .schema("app")
     .from("okr_objectives")
     .select(
-      "id, title, description, status, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id"
+      "id, title, description, status, okr_cycle_id, cycle_instance_id, owner_membership_id, deputy_membership_id, leading_strategic_direction_id"
     )
     .eq("id", objectiveId)
     .eq("organization_id", organizationId)
@@ -67,43 +66,7 @@ export async function fetchOkrObjectiveApprovalPreview(
   );
   const names = await fetchMembershipDisplayNames(membershipIds);
 
-  const { data: junctionRows } = await supabase
-    .schema("app")
-    .from("okr_objective_strategy_objectives")
-    .select("strategy_objective_id")
-    .eq("okr_objective_id", objectiveId);
-
-  const strategyIds = (junctionRows ?? []).map((j) => j.strategy_objective_id as string);
-  let leadingDirectionId: string | null = null;
-  const linkedStrategyObjectiveTitles: string[] = [];
-
-  if (strategyIds.length > 0) {
-    const { data: stratRows } = await supabase
-      .schema("app")
-      .from("strategy_objectives")
-      .select("id, title")
-      .eq("organization_id", organizationId)
-      .in("id", strategyIds);
-    for (const s of stratRows ?? []) {
-      linkedStrategyObjectiveTitles.push(String(s.title ?? s.id));
-    }
-
-    const cycleInstanceId = obj.cycle_instance_id as string | undefined;
-    if (cycleInstanceId) {
-      const { data: dirLinks } = await supabase
-        .schema("app")
-        .from("strategic_direction_objective_links")
-        .select("strategy_objective_id, strategic_direction_id")
-        .eq("organization_id", organizationId)
-        .eq("cycle_instance_id", cycleInstanceId)
-        .in("strategy_objective_id", strategyIds);
-      for (const link of dirLinks ?? []) {
-        if (!leadingDirectionId) {
-          leadingDirectionId = link.strategic_direction_id as string;
-        }
-      }
-    }
-  }
+  const leadingDirectionId = (obj.leading_strategic_direction_id as string | null | undefined) ?? null;
 
   let leadingStrategicDirectionTitle: string | null = null;
   if (leadingDirectionId) {
@@ -237,7 +200,6 @@ export async function fetchOkrObjectiveApprovalPreview(
       ? names.get(obj.deputy_membership_id) ?? null
       : null,
     leadingStrategicDirectionTitle,
-    linkedStrategyObjectiveTitles,
     keyResults,
     contributionRows,
   };

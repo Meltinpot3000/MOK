@@ -30,6 +30,12 @@ import {
   pillLinked,
   pillNeutral,
 } from "@/components/ceo/ExpandableTable";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
+import { normalizeTableSearchQuery } from "@/lib/table/filter-utils";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   acceptKrInitiativeSuggestionAction,
@@ -1280,9 +1286,12 @@ export function OkrPlanningWorkspace({
     [clearDirty, refreshAfterMutation]
   );
 
-  const [quickFind, setQuickFind] = useState("");
+  const [searchTitle, setSearchTitle] = useState("");
+  const [filterDirectionId, setFilterDirectionId] = useState("");
+  const [filterOwnerMembershipId, setFilterOwnerMembershipId] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
 
-  const quickLower = quickFind.trim().toLowerCase();
+  const quickLower = normalizeTableSearchQuery(searchTitle);
 
   const selectedOkrCycleEndDate = useMemo(() => {
     const id = data.selectedOkrCycleId;
@@ -1290,16 +1299,60 @@ export function OkrPlanningWorkspace({
     return data.okrCycles.find((c) => c.id === id)?.end_date ?? null;
   }, [data.okrCycles, data.selectedOkrCycleId]);
 
+  const directionFilterOptions = useMemo(() => {
+    const ids = [
+      ...new Set(
+        data.okrObjectives
+          .map((o) => o.leadingStrategicDirectionId)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+    return ids
+      .map((id) => ({
+        value: id,
+        label:
+          data.okrObjectives.find((o) => o.leadingStrategicDirectionId === id)
+            ?.leadingStrategicDirectionTitle ?? id,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "de"));
+  }, [data.okrObjectives]);
+
+  const ownerFilterOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const obj of data.okrObjectives) {
+      if (obj.ownerMembershipId && obj.ownerDisplayName) {
+        byId.set(obj.ownerMembershipId, obj.ownerDisplayName);
+      }
+    }
+    return [...byId.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1], "de"))
+      .map(([value, label]) => ({ value, label }));
+  }, [data.okrObjectives]);
+
+  const statusFilterOptions = useMemo(() => {
+    const statuses = [...new Set(data.okrObjectives.map((o) => o.status))];
+    return statuses
+      .sort((a, b) => okrObjectiveLifecycleLabelDe(a).localeCompare(okrObjectiveLifecycleLabelDe(b), "de"))
+      .map((s) => ({ value: s, label: okrObjectiveLifecycleLabelDe(s) }));
+  }, [data.okrObjectives]);
+
   const filteredOkrObjectives = useMemo(() => {
-    if (!quickLower) return data.okrObjectives;
     return data.okrObjectives.filter((obj) => {
+      if (filterDirectionId && obj.leadingStrategicDirectionId !== filterDirectionId) {
+        return false;
+      }
+      if (filterOwnerMembershipId && obj.ownerMembershipId !== filterOwnerMembershipId) {
+        return false;
+      }
+      if (filterStatus && obj.status !== filterStatus) return false;
+      if (!quickLower) return true;
       if (obj.title.toLowerCase().includes(quickLower)) return true;
       if (obj.keyResults.some((kr) => kr.title.toLowerCase().includes(quickLower))) return true;
       return obj.keyResults.some((kr) =>
         kr.linkedInitiativeTitles.some((t) => t.toLowerCase().includes(quickLower))
       );
     });
-  }, [data.okrObjectives, quickLower]);
+  }, [data.okrObjectives, quickLower, filterDirectionId, filterOwnerMembershipId, filterStatus]);
 
   const tableEmptyMessage = !data.selectedOkrCycleId
     ? "Kein Zeitraum gewählt."
@@ -1376,7 +1429,7 @@ export function OkrPlanningWorkspace({
   ]);
 
   return (
-    <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+    <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">OKR anlegen</h2>
 
@@ -1417,19 +1470,39 @@ export function OkrPlanningWorkspace({
         )}
       </article>
 
-      <article className="brand-card p-6">
+      <article className="brand-card min-w-0 p-6">
         <h2 className="text-lg font-semibold text-zinc-900">OKR-Übersicht</h2>
 
-        <label className="mt-4 block text-xs font-medium text-zinc-600">
-          Suche
-          <input
-            type="search"
-            value={quickFind}
-            onChange={(e) => setQuickFind(e.target.value)}
-            placeholder="Objective-, KR- oder Initiativ-Titel…"
-            className="mt-1 w-full max-w-xl rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-          />
-        </label>
+        <div className="mt-4 min-w-0">
+          <TableFilterBar>
+            <TableFilterSelect
+              label="Stoßrichtung"
+              value={filterDirectionId}
+              onChange={setFilterDirectionId}
+              className="min-w-[140px] flex-1"
+              options={directionFilterOptions}
+            />
+            <TableFilterSelect
+              label="Owner"
+              value={filterOwnerMembershipId}
+              onChange={setFilterOwnerMembershipId}
+              className="min-w-[140px] flex-1"
+              options={ownerFilterOptions}
+            />
+            <TableFilterSelect
+              label="Status"
+              value={filterStatus}
+              onChange={setFilterStatus}
+              options={statusFilterOptions}
+            />
+            <TableFilterSearch
+              value={searchTitle}
+              onChange={setSearchTitle}
+              label="Suche"
+              placeholder="Objective-, KR- oder Initiativ-Titel…"
+            />
+          </TableFilterBar>
+        </div>
 
         <div className="mt-4 min-w-0">
           {data.okrCycles.length === 0 ? (

@@ -5,7 +5,11 @@ import {
   compareSortKeys,
   type SortPrimitive,
 } from "@/lib/table/compare-sort-keys";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  TableExpandedPanel,
+  TableHorizontalScroll,
+} from "@/components/table/TableHorizontalScroll";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 export type ColumnDef<T> = {
   id: string;
@@ -32,6 +36,8 @@ type ExpandableTableProps<T> = {
   onDataRowClick?: (row: T) => void;
   /** Wenn false: kein Spalten-Umschalter (kompakte Tabellen). */
   enableColumnPickerUi?: boolean;
+  /** Zeilen, die beim ersten Erscheinen automatisch aufgeklappt werden (z. B. offener Revisionsentwurf). */
+  initialExpandedIds?: string[];
 };
 
 const PILL_BASE =
@@ -69,8 +75,12 @@ export function ExpandableTable<T>({
   selectedRowId = null,
   onDataRowClick,
   enableColumnPickerUi = true,
+  initialExpandedIds,
 }: ExpandableTableProps<T>) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(
+    () => new Set(initialExpandedIds ?? [])
+  );
+  const appliedInitialExpandRef = useRef<Set<string>>(new Set(initialExpandedIds ?? []));
   const [sortColumnId, setSortColumnId] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -81,6 +91,23 @@ export function ExpandableTable<T>({
     return s;
   });
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  const initialExpandKey = (initialExpandedIds ?? []).join("|");
+  useEffect(() => {
+    const ids = initialExpandedIds ?? [];
+    const toAdd = ids.filter((id) => !appliedInitialExpandRef.current.has(id));
+    if (toAdd.length === 0) return;
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of toAdd) {
+        next.add(id);
+        appliedInitialExpandRef.current.add(id);
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialExpandKey]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -130,7 +157,7 @@ export function ExpandableTable<T>({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 max-w-full space-y-2">
       {enableColumnPickerUi ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
@@ -158,8 +185,11 @@ export function ExpandableTable<T>({
           ))}
         </div>
       ) : null}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border-collapse border border-zinc-200">
+      <TableHorizontalScroll
+        onViewportWidthChange={setViewportWidth}
+        layoutKey={`${rows.length}:${expandedIds.size}:${visibleCols.size}:${columnPickerOpen ? 1 : 0}`}
+      >
+        <table className="w-max min-w-full border-collapse">
           <thead>
             <tr className="bg-zinc-50">
               <th className="w-10 border border-zinc-200 px-2 py-2 text-left text-xs font-semibold text-zinc-700" />
@@ -239,9 +269,11 @@ export function ExpandableTable<T>({
                       <tr>
                         <td
                           colSpan={visibleCols.length + 1}
-                          className="border border-zinc-200 bg-zinc-50/50 p-4"
+                          className="border border-zinc-200 p-0 align-top"
                         >
-                          {renderExpandedContent(row)}
+                          <TableExpandedPanel viewportWidth={viewportWidth}>
+                            {renderExpandedContent(row)}
+                          </TableExpandedPanel>
                         </td>
                       </tr>
                     )}
@@ -251,7 +283,7 @@ export function ExpandableTable<T>({
             )}
           </tbody>
         </table>
-      </div>
+      </TableHorizontalScroll>
     </div>
   );
 }

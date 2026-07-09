@@ -11,7 +11,11 @@ const emptyCorrelation = (): CorrelationSummaryResult => ({
   challenges: [],
   cells: [],
   goodObjectivePercent: 0,
+  topStrongAvgScore: 0,
+  conflictPercent: 0,
   weakCells: [],
+  strongCells: [],
+  conflictCells: [],
   conflictCount: 0,
 });
 

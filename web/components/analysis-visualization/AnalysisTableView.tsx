@@ -1,6 +1,7 @@
 "use client";
 
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import type { VisualizationNode } from "@/components/analysis-visualization/types";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import { useMemo, useState } from "react";
@@ -101,8 +102,8 @@ export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProp
   );
 
   return (
-    <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
-      <table className="min-w-full text-xs">
+    <TableHorizontalScroll className="rounded-md bg-white">
+      <table className="w-max min-w-full text-xs">
         <thead className="bg-zinc-50 text-zinc-700">
           <tr className="border-b border-zinc-200 text-left">
             {th("analysisType", "Analyse-Typ")}
@@ -145,6 +146,6 @@ export function AnalysisTableView({ nodes, onSelectNode }: AnalysisTableViewProp
           )}
         </tbody>
       </table>
-    </div>
+    </TableHorizontalScroll>
   );
 }

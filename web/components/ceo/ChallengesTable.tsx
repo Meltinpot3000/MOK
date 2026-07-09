@@ -1,6 +1,26 @@
 "use client";
 
-import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
+import { useMemo, useState } from "react";
+import {
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
+import {
+  definitionFieldInputClass,
+  getOperationalSignalLabelDe,
+  getReviewDecisionLabelDe,
+  formatStrategyObjectStandLabel,
+  readAssignmentIds,
+  resolveOpenDraftForVersioning,
+  strategyObjectStandSortValue,
+  isStrategyObjectDefinitionLocked,
+  type StrategyObjectVersioningMeta,
+} from "@/lib/strategy-objects";
+import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
+import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 
@@ -15,6 +35,7 @@ type Challenge = {
   challenge_score: number | null;
   relevance_level: number | null;
   risk_level: number | null;
+  versioning?: StrategyObjectVersioningMeta;
 };
 
 type AnalysisEntryOption = {
@@ -35,6 +56,17 @@ type ChallengesTableProps = {
   challengeIdByAnalysisEntryId: Record<string, string>;
   directionCountByChallengeId: Record<string, number>;
   canWrite: boolean;
+  openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
+  returnPath?: string;
+  revisionActions?: {
+    proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    promoteStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    rejectStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    linkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    unlinkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    setStrategyObjectLifecycle: (formData: FormData) => Promise<void>;
+  };
   actions: {
     updateStrategicChallengeAssessment: (formData: FormData) => Promise<void>;
     deleteStrategicChallengeInCycle: (formData: FormData) => Promise<void>;
@@ -85,8 +117,61 @@ export function ChallengesTable({
   challengeIdByAnalysisEntryId,
   directionCountByChallengeId,
   canWrite,
+  openDraftByIdentityId = {},
+  returnPath = "/strategy-cycle?l1=strategic-directions&l2=challenges",
+  revisionActions,
   actions,
 }: ChallengesTableProps) {
+  const [filterIndustryId, setFilterIndustryId] = useState("");
+  const [filterBusinessModelId, setFilterBusinessModelId] = useState("");
+  const [searchTitle, setSearchTitle] = useState("");
+
+  const industryFilterOptions = useMemo(
+    () =>
+      [...industries]
+        .sort((a, b) => a.name.localeCompare(b.name, "de"))
+        .map((i) => ({ value: i.id, label: i.name })),
+    [industries]
+  );
+
+  const businessModelFilterOptions = useMemo(
+    () =>
+      [...businessModels]
+        .sort((a, b) => a.name.localeCompare(b.name, "de"))
+        .map((m) => ({ value: m.id, label: m.name })),
+    [businessModels]
+  );
+
+  const filteredChallenges = useMemo(() => {
+    return challenges.filter((c) => {
+      if (!matchesTableTitleSearch(c.title, searchTitle)) return false;
+      if (filterIndustryId) {
+        const ids = industryIdsByChallenge[c.id] ?? [];
+        if (!ids.includes(filterIndustryId)) return false;
+      }
+      if (filterBusinessModelId) {
+        const ids = businessModelIdsByChallenge[c.id] ?? [];
+        if (!ids.includes(filterBusinessModelId)) return false;
+      }
+      return true;
+    });
+  }, [
+    challenges,
+    searchTitle,
+    filterIndustryId,
+    filterBusinessModelId,
+    industryIdsByChallenge,
+    businessModelIdsByChallenge,
+  ]);
+
+  const draftExpandedRowIds = useMemo(
+    () =>
+      filteredChallenges
+        .filter((c) => resolveOpenDraftForVersioning(c.versioning, openDraftByIdentityId))
+        .map((c) => c.id),
+    [filteredChallenges, openDraftByIdentityId]
+  );
+
   const columns = [
     {
       id: "title",
@@ -106,6 +191,37 @@ export function ChallengesTable({
         c.challenge_score != null
           ? Number(c.challenge_score).toFixed(2)
           : "-",
+    },
+    {
+      id: "versioning_stand",
+      label: "Stand",
+      defaultVisible: true,
+      sortValue: (c: Challenge) => {
+        const openDraft = resolveOpenDraftForVersioning(c.versioning, openDraftByIdentityId);
+        return strategyObjectStandSortValue(c.versioning, openDraft);
+      },
+      render: (c: Challenge) => {
+        const openDraft = resolveOpenDraftForVersioning(c.versioning, openDraftByIdentityId);
+        return (
+          <span className={openDraft ? "text-sky-900" : undefined}>
+            {formatStrategyObjectStandLabel(c.versioning, openDraft)}
+          </span>
+        );
+      },
+    },
+    {
+      id: "versioning_signal",
+      label: "Lage",
+      defaultVisible: true,
+      sortValue: (c: Challenge) => c.versioning?.latest_operational_signal ?? null,
+      render: (c: Challenge) => getOperationalSignalLabelDe(c.versioning?.latest_operational_signal),
+    },
+    {
+      id: "versioning_review",
+      label: "Review",
+      defaultVisible: true,
+      sortValue: (c: Challenge) => c.versioning?.latest_review_decision ?? null,
+      render: (c: Challenge) => getReviewDecisionLabelDe(c.versioning?.latest_review_decision),
     },
     {
       id: "directions",
@@ -192,12 +308,36 @@ export function ChallengesTable({
   ];
 
   return (
-    <ExpandableTable<Challenge>
+    <div className="w-full min-w-0 max-w-full space-y-3">
+      <TableFilterBar>
+        <TableFilterSelect
+          label="Industrie"
+          value={filterIndustryId}
+          onChange={setFilterIndustryId}
+          className="min-w-[140px] flex-1"
+          options={industryFilterOptions}
+        />
+        <TableFilterSelect
+          label="Geschäftsmodell"
+          value={filterBusinessModelId}
+          onChange={setFilterBusinessModelId}
+          className="min-w-[140px] flex-1"
+          options={businessModelFilterOptions}
+        />
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
+
+      <ExpandableTable<Challenge>
       columns={columns}
-      rows={challenges}
+      rows={filteredChallenges}
       getRowId={(c) => c.id}
+      initialExpandedIds={draftExpandedRowIds}
       expandLabel="Details"
-      emptyMessage="Keine strategischen Herausforderungen vorhanden."
+      emptyMessage={
+        challenges.length === 0
+          ? "Keine strategischen Herausforderungen vorhanden."
+          : "Keine Treffer für die gewählten Filter."
+      }
       renderExpandedContent={(challenge) => {
         const linkedIndustryIds = new Set(
           industryIdsByChallenge[challenge.id] ?? []
@@ -206,12 +346,77 @@ export function ChallengesTable({
           businessModelIdsByChallenge[challenge.id] ?? []
         );
         const linkedAnalysisEntryIds = new Set(analysisEntryIdsByChallenge[challenge.id] ?? []);
+        const definitionLocked = isStrategyObjectDefinitionLocked({
+          objectType: "strategic_challenge",
+          versioning: challenge.versioning,
+        });
+        const openDraft = resolveOpenDraftForVersioning(challenge.versioning, openDraftByIdentityId);
+        const lifecycleState = challenge.versioning?.identity_lifecycle_state ?? null;
+        const identityId = challenge.versioning?.object_identity_id ?? null;
+        const baseRevisionId = challenge.versioning?.revision_id ?? challenge.id;
+
+        const draftMode = Boolean(openDraft && revisionActions);
+        const assignmentsReadOnly = !draftMode && definitionLocked;
+        const draftIndustryIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "industry") : []
+        );
+        const draftBusinessModelIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "business_model") : []
+        );
+        const showUpdateButton = !definitionLocked && !openDraft;
+
+        const renderAssignmentPill = (
+          kind: "industry" | "business_model",
+          id: string,
+          label: string,
+          liveLinkAction: (fd: FormData) => Promise<void>,
+          liveUnlinkAction: (fd: FormData) => Promise<void>,
+          liveIdField: string,
+          liveIsLinked: boolean,
+          draftIsLinked: boolean
+        ) => {
+          if (draftMode && openDraft && revisionActions) {
+            return (
+              <EntityPillButton
+                key={id}
+                entityKey="revision_id"
+                entityValue={openDraft.id}
+                extraFields={{ assignment_kind: kind, assignment_id: id, return_path: returnPath }}
+                isLinked={draftIsLinked}
+                linkAction={revisionActions.linkStrategyObjectDraftAssignment}
+                unlinkAction={revisionActions.unlinkStrategyObjectDraftAssignment}
+                canWrite={canWrite}
+                title={label}
+                linkedClassName={pillLinked()}
+                unlinkedClassName={pillNeutral()}
+              >
+                {label}
+              </EntityPillButton>
+            );
+          }
+          return (
+            <EntityPillButton
+              key={id}
+              entityKey="strategic_challenge_id"
+              entityValue={challenge.id}
+              extraFields={{ [liveIdField]: id }}
+              isLinked={liveIsLinked}
+              linkAction={liveLinkAction}
+              unlinkAction={liveUnlinkAction}
+              canWrite={canWrite && !assignmentsReadOnly}
+              title={label}
+              linkedClassName={pillLinked()}
+              unlinkedClassName={pillNeutral()}
+            >
+              {label}
+            </EntityPillButton>
+          );
+        };
 
         return (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                
                 Verknüpfte Stoßrichtungen:{" "}
                 {directionCountByChallengeId[challenge.id] ?? 0}
               </span>
@@ -219,105 +424,132 @@ export function ChallengesTable({
                 Herausforderungs-Score:{" "}
                 {Number(challenge.challenge_score ?? 0).toFixed(2)}
               </span>
-              <ConfirmBeforeSubmitForm
-                action={actions.deleteStrategicChallengeInCycle}
-                className="inline"
-                title="Strategische Herausforderung löschen?"
-                description="Der Eintrag wird aus diesem Planungszyklus entfernt."
-                confirmLabel="Löschen"
-              >
-                <input type="hidden" name="strategic_challenge_id" value={challenge.id} />
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                >
-                  Loeschen
-                </button>
-              </ConfirmBeforeSubmitForm>
             </div>
 
-            <form
-              action={actions.updateStrategicChallengeAssessment}
-              className="space-y-3"
-            >
-              <input
-                type="hidden"
-                name="strategic_challenge_id"
-                value={challenge.id}
+            {openDraft && revisionActions ? (
+              <StrategyObjectDraftPanel
+                draft={openDraft}
+                returnPath={returnPath}
+                canWrite={canWrite}
+                actions={revisionActions}
               />
-              <label className="block text-xs text-zinc-600">
-                Titel
-                <input
-                  name="title"
-                  defaultValue={challenge.title}
-                  required
-                  className="mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="block text-xs text-zinc-600">
-                Beschreibung
-                <textarea
-                  name="description"
-                  defaultValue={challenge.description ?? ""}
-                  rows={4}
-                  className="mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
-                />
-              </label>
-              <div className="flex flex-wrap items-end gap-2">
-              <label className="text-xs text-zinc-600">
-                Auswirkung (1–5)
-                <input
-                  type="number"
-                  name="impact_score"
-                  defaultValue={challenge.impact_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Dringlichkeit (1–5)
-                <input
-                  type="number"
-                  name="urgency_score"
-                  defaultValue={challenge.urgency_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Umfang (1–5)
-                <input
-                  type="number"
-                  name="scope_score"
-                  defaultValue={challenge.scope_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Steuerbarkeit (1–5)
-                <input
-                  type="number"
-                  name="root_cause_score"
-                  defaultValue={challenge.root_cause_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={!canWrite}
-                className="brand-btn px-3 py-1.5 text-xs"
+            ) : null}
+
+            {!openDraft ? (
+              <form
+                action={actions.updateStrategicChallengeAssessment}
+                className="space-y-3"
               >
-                Bewertung speichern
-              </button>
-              </div>
-            </form>
+                <input
+                  type="hidden"
+                  name="strategic_challenge_id"
+                  value={challenge.id}
+                />
+                <label className="block text-xs text-zinc-600">
+                  Titel
+                  <input
+                    name="title"
+                    defaultValue={challenge.title}
+                    required
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="block text-xs text-zinc-600">
+                  Beschreibung
+                  <textarea
+                    name="description"
+                    defaultValue={challenge.description ?? ""}
+                    rows={4}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 block w-full max-w-2xl rounded border border-zinc-300 px-2 py-1.5 text-xs"
+                    )}
+                  />
+                </label>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="text-xs text-zinc-600">
+                    Auswirkung (1–5)
+                    <input
+                      type="number"
+                      name="impact_score"
+                      defaultValue={challenge.impact_score ?? 3}
+                      min={1}
+                      max={5}
+                      readOnly={definitionLocked}
+                      aria-readonly={definitionLocked}
+                      className={definitionFieldInputClass(
+                        definitionLocked,
+                        "ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                      )}
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-600">
+                    Dringlichkeit (1–5)
+                    <input
+                      type="number"
+                      name="urgency_score"
+                      defaultValue={challenge.urgency_score ?? 3}
+                      min={1}
+                      max={5}
+                      readOnly={definitionLocked}
+                      aria-readonly={definitionLocked}
+                      className={definitionFieldInputClass(
+                        definitionLocked,
+                        "ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                      )}
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-600">
+                    Umfang (1–5)
+                    <input
+                      type="number"
+                      name="scope_score"
+                      defaultValue={challenge.scope_score ?? 3}
+                      min={1}
+                      max={5}
+                      readOnly={definitionLocked}
+                      aria-readonly={definitionLocked}
+                      className={definitionFieldInputClass(
+                        definitionLocked,
+                        "ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                      )}
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-600">
+                    Steuerbarkeit (1–5)
+                    <input
+                      type="number"
+                      name="root_cause_score"
+                      defaultValue={challenge.root_cause_score ?? 3}
+                      min={1}
+                      max={5}
+                      readOnly={definitionLocked}
+                      aria-readonly={definitionLocked}
+                      className={definitionFieldInputClass(
+                        definitionLocked,
+                        "ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-xs"
+                      )}
+                    />
+                  </label>
+                  {showUpdateButton ? (
+                    <button
+                      type="submit"
+                      disabled={!canWrite}
+                      className="brand-btn px-3 py-1.5 text-xs"
+                    >
+                      Bewertung speichern
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            ) : null}
 
             <PillSection title="Analyse-Einträge">
               {analysisEntries.map((entry) => {
@@ -347,64 +579,70 @@ export function ChallengesTable({
               })}
             </PillSection>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PillSection title="Industrien">
-                {industries.map((industry) => {
-                  const isLinked = linkedIndustryIds.has(industry.id);
-                  return (
-                    <EntityPillButton
-                      key={industry.id}
-                      entityKey="strategic_challenge_id"
-                      entityValue={challenge.id}
-                      extraFields={{ industry_id: industry.id }}
-                      isLinked={isLinked}
-                      linkAction={
-                        actions.linkStrategicChallengeToIndustryInCycle
-                      }
-                      unlinkAction={
-                        actions.unlinkStrategicChallengeFromIndustryInCycle
-                      }
-                      canWrite={canWrite}
-                      title={industry.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {industry.name}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
+            <div className="space-y-2">
+              {assignmentsReadOnly ? (
+                <p className="text-[11px] text-zinc-500">
+                  Zuordnungen sind in der aktiven Revision fixiert. Für Änderungen «Neue Revision».
+                </p>
+              ) : draftMode ? (
+                <p className="text-[11px] text-sky-800">
+                  Zuordnungen des Entwurfs — werden mit «Revision übernehmen» aktiv.
+                </p>
+              ) : null}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <PillSection title="Industrien">
+                  {industries.map((industry) =>
+                    renderAssignmentPill(
+                      "industry",
+                      industry.id,
+                      industry.name,
+                      actions.linkStrategicChallengeToIndustryInCycle,
+                      actions.unlinkStrategicChallengeFromIndustryInCycle,
+                      "industry_id",
+                      linkedIndustryIds.has(industry.id),
+                      draftIndustryIds.has(industry.id)
+                    )
+                  )}
+                </PillSection>
 
-              <PillSection title="Gesch\u00E4ftsmodelle">
-                {businessModels.map((model) => {
-                  const isLinked = linkedBusinessModelIds.has(model.id);
-                  return (
-                    <EntityPillButton
-                      key={model.id}
-                      entityKey="strategic_challenge_id"
-                      entityValue={challenge.id}
-                      extraFields={{ business_model_id: model.id }}
-                      isLinked={isLinked}
-                      linkAction={
-                        actions.linkStrategicChallengeToBusinessModelInCycle
-                      }
-                      unlinkAction={
-                        actions.unlinkStrategicChallengeFromBusinessModelInCycle
-                      }
-                      canWrite={canWrite}
-                      title={model.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {model.name}
-                    </EntityPillButton>
-                  );
-                })}
-              </PillSection>
+                <PillSection title="Geschäftsmodelle">
+                  {businessModels.map((model) =>
+                    renderAssignmentPill(
+                      "business_model",
+                      model.id,
+                      model.name,
+                      actions.linkStrategicChallengeToBusinessModelInCycle,
+                      actions.unlinkStrategicChallengeFromBusinessModelInCycle,
+                      "business_model_id",
+                      linkedBusinessModelIds.has(model.id),
+                      draftBusinessModelIds.has(model.id)
+                    )
+                  )}
+                </PillSection>
+              </div>
             </div>
+
+            {revisionActions ? (
+              <StrategyObjectActionBar
+                objectType="strategic_challenge"
+                objectId={challenge.id}
+                identityId={identityId}
+                lifecycleState={lifecycleState}
+                baseRevisionId={baseRevisionId}
+                hasOpenDraft={Boolean(openDraft)}
+                canWrite={canWrite}
+                returnPath={returnPath}
+                objectNoun="Herausforderung"
+                deleteAction={actions.deleteStrategicChallengeInCycle}
+                deleteIdField="strategic_challenge_id"
+                lifecycleAction={revisionActions.setStrategyObjectLifecycle}
+                proposeAction={revisionActions.proposeStrategyObjectDraft}
+              />
+            ) : null}
           </div>
         );
       }}
     />
+    </div>
   );
 }

@@ -1,16 +1,20 @@
 "use client";
 
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { PlanningCycle, TenantBranding } from "@/lib/ceo/queries";
+import { usePathname, useSearchParams } from "next/navigation";
+import type { PlanningCycle, TenantBranding } from "@/lib/ceo/types";
 import {
+  isPipNavItemActive,
   isSidebarNavItemActive,
+  type PipNavItem,
   type SidebarItem,
   type SidebarPermissionMap,
 } from "@/lib/sidebar-access";
 import { JobNotificationsBell } from "@/components/ceo/JobNotificationsBell";
 import { MemberNotificationsBell } from "@/components/ceo/MemberNotificationsBell";
 import { SidebarAccountMenu } from "@/components/ceo/SidebarAccountMenu";
+import { useHoverScale } from "@/lib/ui/use-hover-scale";
 
 type CycleSidebarProps = {
   cycles: PlanningCycle[];
@@ -21,7 +25,9 @@ type CycleSidebarProps = {
   topNavItems: SidebarItem[];
   /** Offene Aufgaben + Entwurfs-OKRs für «Meine Aufgaben (n)». */
   myTasksOpenCount: number;
-  phase1NavItems: SidebarItem[];
+  strategicNavItems: SidebarItem[];
+  annualNavItems: SidebarItem[];
+  pipsNavItems: PipNavItem[];
   phase0NavItems: SidebarItem[];
   cycleNavItems: SidebarItem[];
   adminNavItems: SidebarItem[];
@@ -35,8 +41,34 @@ type CycleSidebarProps = {
 
 function cycleLinkClass(isActive: boolean): string {
   return isActive
-    ? "block rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
-    : "block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100";
+    ? "block origin-left rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+    : "block origin-left rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100";
+}
+
+function SidebarNavLink({
+  href,
+  className,
+  children,
+  ...rest
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+} & Omit<ComponentPropsWithoutRef<typeof Link>, "href" | "className" | "children">) {
+  const hover = useHoverScale({ scale: 1.02, translateY: -1 });
+
+  return (
+    <Link
+      href={href}
+      className={className}
+      style={hover.style}
+      onMouseEnter={hover.onMouseEnter}
+      onMouseLeave={hover.onMouseLeave}
+      {...rest}
+    >
+      {children}
+    </Link>
+  );
 }
 
 function UserManualIcon({ className }: { className?: string }) {
@@ -64,7 +96,9 @@ export function CycleSidebar({
   permissions,
   topNavItems,
   myTasksOpenCount,
-  phase1NavItems,
+  strategicNavItems,
+  annualNavItems,
+  pipsNavItems,
   phase0NavItems,
   cycleNavItems,
   adminNavItems,
@@ -74,6 +108,7 @@ export function CycleSidebar({
   primaryRoleLabel,
 }: CycleSidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isUserManualActive = pathname === "/user-manual" || pathname.startsWith("/user-manual/");
   const brandingConfig =
     branding?.branding_config && typeof branding.branding_config === "object"
@@ -135,7 +170,7 @@ export function CycleSidebar({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
-            <Link
+            <SidebarNavLink
               href="/user-manual"
               className={
                 isUserManualActive
@@ -146,7 +181,7 @@ export function CycleSidebar({
               title="User Manual"
             >
               <UserManualIcon />
-            </Link>
+            </SidebarNavLink>
             {showJobBell ? <JobNotificationsBell /> : null}
             <MemberNotificationsBell />
           </div>
@@ -175,7 +210,7 @@ export function CycleSidebar({
       {topNavItems.length > 0 ? (
         <div className="mb-4 space-y-1">
           {topNavItems.map((item) => (
-            <Link
+            <SidebarNavLink
               key={item.id}
               href={item.href}
               className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
@@ -183,27 +218,67 @@ export function CycleSidebar({
               {item.id === "my-tasks"
                 ? `${item.label} (${myTasksOpenCount})`
                 : item.label}
-            </Link>
+            </SidebarNavLink>
           ))}
         </div>
       ) : null}
 
-      <div className="mb-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Strategische Planung
-        </p>
-        <div className="space-y-1">
-          {phase1NavItems.map((item) => (
-            <Link
-              key={item.id}
-              href={item.href}
-              className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
-            >
-              {item.label}
-            </Link>
-          ))}
+      {strategicNavItems.length > 0 ? (
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Strategische Planung
+          </p>
+          <div className="space-y-1">
+            {strategicNavItems.map((item) => (
+              <SidebarNavLink
+                key={item.id}
+                href={item.href}
+                className={cycleLinkClass(isSidebarNavItemActive(pathname, item, searchParams))}
+              >
+                {item.label}
+              </SidebarNavLink>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
+
+      {annualNavItems.length > 0 ? (
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Jahresplanung
+          </p>
+          <div className="space-y-1">
+            {annualNavItems.map((item) => (
+              <SidebarNavLink
+                key={item.id}
+                href={item.href}
+                className={cycleLinkClass(isSidebarNavItemActive(pathname, item, searchParams))}
+              >
+                {item.label}
+              </SidebarNavLink>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {pipsNavItems.length > 0 ? (
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Programme &amp; Initiativen
+          </p>
+          <div className="space-y-1">
+            {pipsNavItems.map((item) => (
+              <SidebarNavLink
+                key={item.id}
+                href={item.href}
+                className={cycleLinkClass(isPipNavItemActive(pathname, searchParams, item))}
+              >
+                {item.label}
+              </SidebarNavLink>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -211,23 +286,23 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1">
           {phase0NavItems.map((item) => (
-            <Link
+            <SidebarNavLink
               key={item.id}
               href={item.href}
               className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
             >
               {item.label}
-            </Link>
+            </SidebarNavLink>
           ))}
           {permissions["strategy-cycle"]?.read ? (
-            <Link
+            <SidebarNavLink
               href="/unternehmensinfo"
               className={cycleLinkClass(
                 pathname === "/unternehmensinfo" || pathname.startsWith("/unternehmensinfo/")
               )}
             >
               Unternehmensinfo
-            </Link>
+            </SidebarNavLink>
           ) : null}
         </div>
       </div>
@@ -239,13 +314,13 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1 pb-2">
           {cycleNavItems.map((item) => (
-            <Link
+            <SidebarNavLink
               key={item.id}
               href={item.href}
               className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
             >
               {item.label}
-            </Link>
+            </SidebarNavLink>
           ))}
         </div>
         <div className="space-y-2">
@@ -254,10 +329,10 @@ export function CycleSidebar({
               const href = `/dashboard/cycles/${activeTopLevelCycle.id}`;
               const isActive = pathname === href;
               return (
-                <Link href={href} className={cycleLinkClass(isActive)}>
+                <SidebarNavLink href={href} className={cycleLinkClass(isActive)}>
                   <div className="truncate">{activeTopLevelCycle.name}</div>
                   <div className="mt-1 text-xs opacity-80">{activeTopLevelCycle.code}</div>
-                </Link>
+                </SidebarNavLink>
               );
             })()
           ) : null}
@@ -276,13 +351,13 @@ export function CycleSidebar({
         </p>
         <div className="space-y-1">
           {adminNavItems.map((item) => (
-            <Link
+            <SidebarNavLink
               key={item.id}
               href={item.href}
               className={cycleLinkClass(isSidebarNavItemActive(pathname, item))}
             >
               {item.label}
-            </Link>
+            </SidebarNavLink>
           ))}
         </div>
       </div>

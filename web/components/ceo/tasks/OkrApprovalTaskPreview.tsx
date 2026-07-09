@@ -51,18 +51,6 @@ export function OkrApprovalTaskPreview({ preview }: Props) {
           ) : null}
         </dl>
 
-        {preview.linkedStrategyObjectiveTitles.length > 0 ? (
-          <div className="mt-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Verknüpfte strategische Ziele
-            </p>
-            <ul className="mt-1 list-inside list-disc text-sm text-zinc-800">
-              {preview.linkedStrategyObjectiveTitles.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </article>
 
       <div>

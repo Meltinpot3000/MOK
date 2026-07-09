@@ -1,5 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { fetchDirectionsForCycle, fetchObjectivesForCycle } from "@/lib/strategy-objects/queries";
+import type { StrategyObjectVersioningMeta } from "@/lib/strategy-objects";
 import { DEFAULT_INITIATIVE_WEIGHT } from "./initiative-review-fields";
 import { buildAttentionItems, type ReviewAttentionItem } from "./review-attention-rules";
 import {
@@ -18,6 +20,17 @@ const INITIATIVE_SELECT_WITH_REVIEW_ROLLUP =
 const INITIATIVE_SELECT_LEGACY =
   "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment";
 
+function reviewStatusFromVersioning(versioning?: StrategyObjectVersioningMeta | null): string {
+  if (!versioning) return "draft";
+  if (versioning.identity_lifecycle_state === "archived") return "closed";
+  if (versioning.identity_lifecycle_state === "draft") return "draft";
+  if (versioning.identity_lifecycle_state === "active" && versioning.revision_state === "current") {
+    if (versioning.operational_status === "on_hold") return "on_hold";
+    return "active";
+  }
+  return "draft";
+}
+
 function isMissingReviewRollupColumnsError(message: string): boolean {
   if (!message.includes("does not exist")) return false;
   return (
@@ -27,27 +40,10 @@ function isMissingReviewRollupColumnsError(message: string): boolean {
   );
 }
 
-/** DB ohne Migration 0114: keine Tabelle app.strategy_objectives im PostgREST-Cache / Schema. */
-function isMissingStrategyObjectivesTable(message: string | undefined): boolean {
-  if (!message) return false;
-  const m = message.toLowerCase();
-  return (
-    m.includes("strategy_objectives") &&
-    (m.includes("schema cache") || m.includes("does not exist") || m.includes("could not find"))
-  );
-}
-
 /** DB ohne Umbenennung 0114: strategic_direction_objective_links.objective_id statt strategy_objective_id. */
 function isMissingStrategyObjectiveIdColumn(message: string | undefined): boolean {
   if (!message) return false;
   return message.includes("strategy_objective_id") && message.includes("does not exist");
-}
-
-function shouldUseLegacyReviewCycleObjectiveModel(
-  objErr: { message?: string } | null,
-  linkErr: { message?: string } | null
-): boolean {
-  return isMissingStrategyObjectivesTable(objErr?.message) || isMissingStrategyObjectiveIdColumn(linkErr?.message);
 }
 
 function isMissingOkrObjectivesTable(message: string | undefined): boolean {
@@ -336,33 +332,30 @@ export async function getReviewCycleData(
   const cycleIds = await getCycleInstanceIdsForReview(supabase, cycleInstanceId);
 
   const [
-    directionsResult,
+    directionsByCycle,
+    objectivesByCycle,
     programsResult,
     initiativesResult,
     linksResult,
     targetsResult,
   ] = await Promise.all([
-    supabase
-      .schema("app")
-      .from("strategic_directions")
-      .select("id, title, status, priority")
-      .eq("organization_id", organizationId)
-      .in("cycle_instance_id", cycleIds)
-      .order("priority", { ascending: true }),
+    Promise.all(
+      cycleIds.map((cycleId) =>
+        fetchDirectionsForCycle(organizationId, cycleId, { supabase })
+      )
+    ),
+    Promise.all(
+      cycleIds.map((cycleId) =>
+        fetchObjectivesForCycle(organizationId, cycleId, { supabase })
+      )
+    ),
     supabase
       .schema("app")
       .from("strategy_programs")
       .select("id, title, strategic_direction_id")
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIds),
-    supabase
-      .schema("app")
-      .from("initiatives")
-      .select(
-        "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at"
-      )
-      .eq("organization_id", organizationId)
-      .in("cycle_instance_id", cycleIds),
+    fetchInitiativesForReviewCycle(supabase, organizationId, cycleIds),
     supabase
       .schema("app")
       .from("initiative_target_links")
@@ -377,60 +370,55 @@ export async function getReviewCycleData(
       .in("cycle_instance_id", cycleIds),
   ]);
 
-  let objectivesResult = await supabase
-    .schema("app")
-    .from("strategy_objectives")
-    .select("id, title")
-    .eq("organization_id", organizationId)
-    .in("cycle_instance_id", cycleIds);
-
   let dirObjLinksResult = await supabase
     .schema("app")
     .from("strategic_direction_objective_links")
     .select("strategic_direction_id, strategy_objective_id")
     .eq("organization_id", organizationId);
 
-  if (shouldUseLegacyReviewCycleObjectiveModel(objectivesResult.error, dirObjLinksResult.error)) {
-    objectivesResult = await supabase
-      .schema("app")
-      .from("objectives")
-      .select("id, title")
-      .eq("organization_id", organizationId)
-      .in("cycle_instance_id", cycleIds);
+  if (isMissingStrategyObjectiveIdColumn(dirObjLinksResult.error?.message)) {
     dirObjLinksResult = (await supabase
       .schema("app")
       .from("strategic_direction_objective_links")
       .select("strategic_direction_id, objective_id")
       .eq("organization_id", organizationId)) as typeof dirObjLinksResult;
-    if (objectivesResult.error) {
-      console.error("[getReviewCycleData] objectives (legacy app.objectives)", objectivesResult.error.message);
-    }
     if (dirObjLinksResult.error) {
       console.error("[getReviewCycleData] dirObjLinks (legacy objective_id)", dirObjLinksResult.error.message);
     }
   } else {
-    for (const label of ["objectives", "dirObjLinks"] as const) {
-      const err =
-        label === "objectives" ? objectivesResult.error : dirObjLinksResult.error;
-      if (err) console.error(`[getReviewCycleData] ${label}`, err.message);
-    }
+    if (dirObjLinksResult.error) console.error("[getReviewCycleData] dirObjLinks", dirObjLinksResult.error.message);
   }
 
-  for (const label of ["directions", "programs", "initiatives", "links", "targets"] as const) {
+  for (const label of ["programs", "initiatives", "links", "targets"] as const) {
     const err =
-      label === "directions"
-        ? directionsResult.error
-        : label === "programs"
-          ? programsResult.error
-          : label === "initiatives"
-            ? initiativesResult.error
-            : label === "links"
-              ? linksResult.error
-              : targetsResult.error;
+      label === "programs"
+        ? programsResult.error
+        : label === "initiatives"
+          ? initiativesResult.error
+          : label === "links"
+            ? linksResult.error
+            : targetsResult.error;
     if (err) console.error(`[getReviewCycleData] ${label}`, err.message);
   }
 
-  const directions = (directionsResult.data ?? []) as Array<{
+  const directions = [
+    ...new Map(
+      directionsByCycle.flat().map((row) => [
+        row.id,
+        {
+          id: row.id,
+          title: row.title,
+          status: reviewStatusFromVersioning(row.versioning),
+          priority:
+            typeof row.priority === "number"
+              ? row.priority
+              : Number.isFinite(Number(row.priority))
+                ? Number(row.priority)
+                : 0,
+        },
+      ])
+    ).values(),
+  ] as Array<{
     id: string;
     title: string;
     status: string;
@@ -475,7 +463,18 @@ export async function getReviewCycleData(
     title: string;
     progress_percent: number;
   }>;
-  const objectives = (objectivesResult.data ?? []) as Array<{ id: string; title: string }>;
+  const objectives = [
+    ...new Map(
+      objectivesByCycle.flat().map((row) => [
+        row.id,
+        {
+          id: row.id,
+          title: row.title,
+          status: reviewStatusFromVersioning(row.versioning),
+        },
+      ])
+    ).values(),
+  ] as Array<{ id: string; title: string; status: string }>;
   const directionObjectiveLinksRaw = (dirObjLinksResult.data ?? []) as Array<{
     strategic_direction_id: string;
     strategy_objective_id?: string;
@@ -487,13 +486,9 @@ export async function getReviewCycleData(
       objective_id: l.strategy_objective_id ?? l.objective_id ?? "",
     }))
     .filter((l) => l.objective_id.length > 0);
-
-  const objectiveIds = new Set(objectives.map((o) => o.id));
-  const directionIds = new Set(directions.map((d) => d.id));
-
-  const filteredDirObjLinks = directionObjectiveLinks.filter(
-    (l) => directionIds.has(l.strategic_direction_id) && objectiveIds.has(l.objective_id)
-  );
+  // Read intentionally retained for parity checks across operational strategy objects.
+  void objectives;
+  void directionObjectiveLinks;
 
   let okrObjectiveIds = new Set<string>();
   const okrInCyclesRes = await supabase

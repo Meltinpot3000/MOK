@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useHoverScale } from "@/lib/ui/use-hover-scale";
 
 function initialsFrom(displayLine: string, email: string | null): string {
   const base = displayLine.trim() || email?.trim() || "?";
@@ -38,6 +39,7 @@ export function SidebarAccountMenu({ userDisplayLine, userEmail }: Props) {
   }, [open]);
 
   const initials = initialsFrom(userDisplayLine, userEmail);
+  const avatarHover = useHoverScale({ scale: 1.08, translateY: 0 });
 
   return (
     <div className="relative shrink-0" ref={wrapRef}>
@@ -47,6 +49,9 @@ export function SidebarAccountMenu({ userDisplayLine, userEmail }: Props) {
         aria-haspopup="menu"
         aria-label="Konto-Men\u00FC oeffnen"
         onClick={() => setOpen((v) => !v)}
+        style={avatarHover.style}
+        onMouseEnter={avatarHover.onMouseEnter}
+        onMouseLeave={avatarHover.onMouseLeave}
         className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-zinc-800 text-xs font-semibold text-white shadow-sm ring-2 ring-zinc-100 hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
       >
         {initials}

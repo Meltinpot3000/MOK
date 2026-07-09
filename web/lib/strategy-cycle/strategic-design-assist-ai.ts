@@ -52,7 +52,7 @@ export async function proposeStrategicDesignAssistWithGemini(input: {
   directionTitle: string;
   deterministicScore: number;
   deterministicStatus: CorrelationStatus;
-  objectiveStatus: string | null;
+  objectiveLifecycleLabel: string;
   overrideNote: string | null;
   companyContextJson: string;
   maxOutputTokens: number;
@@ -77,7 +77,7 @@ export async function proposeStrategicDesignAssistWithGemini(input: {
     `Stossrichtung: ${input.directionTitle}`,
     `Deterministischer Score: ${input.deterministicScore}`,
     `Deterministischer Status: ${input.deterministicStatus}`,
-    `Ziel-Status: ${input.objectiveStatus ?? "draft"}`,
+    `Ziel-Lifecycle: ${input.objectiveLifecycleLabel}`,
     input.overrideNote ? `Vorhandene Override-Notiz: ${input.overrideNote}` : "",
     "",
     "Unternehmenskontext (JSON):",

@@ -48,6 +48,22 @@ Auf Basis strukturierter Analyse werden strategische Entscheidungen abgeleitet u
 ### Fachliche Wirkung
 Diese Ebene übersetzt Erkenntnisse in strategische Entscheidungen. Sie beantwortet die Frage, auf welchen Feldern das Unternehmen mittelfristig Wert schaffen will und welche Voraussetzungen dafür aufgebaut werden müssen.
 
+### Herausforderungs-Profil (Systemvorschlag)
+Für priorisierte **Herausforderungen** leitet die Software ein dreiteiliges Profil ab — ohne separate «Erfüllungs-%»-Pflege:
+
+| Dimension | Quelle im Modell | Bedeutung |
+|-----------|------------------|-----------|
+| **Adressierung** | `challenge_direction_links` inkl. Beitragsstufe (low/medium/high) | Inwieweit Stoßrichtungen das Themenfeld strategisch aufgreifen |
+| **Kohärenz** | Korrelation Herausforderung × strategisches Ziel × gemeinsame Stoßrichtung (inkl. Overrides) | Ob die inhaltliche Story zwischen Problem und Zielbild stimmig ist |
+| **Umsetzung** | Gewichteter Fortschritt über Jahresziele (`progress_percent`), Initiativen (`progress_percent`) und Key Results (berechnet aus Metrik/Check-in) entlang verknüpfter Stoßrichtungen | Ob messbare Umsetzungsanker Fortschritt zeigen |
+
+**Erfüllungsgrad** = dieser gewichtete Umsetzungsprozentsatz (0–100), sobald die Herausforderung mindestens schwach adressiert ist. Ohne Verknüpfungen oder ohne Anker zeigt das System konkrete Links («Fortschritt pflegen»): Jahresziele, Initiativen/PIP, OKR-Traceability, Review/Tracking. Anzeige: Dashboard-Pop-up, Erläuterung im Modul **Strategienetzwerk**.
+
+Zusätzlich gilt als Governance-Option auf Organisationsebene: **Keine aktiven OKRs ohne gültige Jahresziele**.
+Die Regel kann im Modus `warn_only`, `block_activation` oder `block_creation` laufen. Empfohlener Standard ist
+`block_activation` (Draft erlaubt, Aktivierung blockiert). Die direkte Operationalisierung wird über
+`annual_target_okr_objective_links` dokumentiert; genehmigte Ausnahmen werden als Auditspur geführt.
+
 ---
 
 ## 2.3 Ebene 3: Jahresplanung

@@ -1,11 +1,12 @@
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
-import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
-import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { getPhase0Context } from "@/lib/phase0/queries";
+import { resolveStrategyPlanningCycle } from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
+import { getStrategyMatrixAccessContext } from "@/lib/rbac/page-access";
 import {
   addComment,
-  createAnnualTarget,
   createChallenge,
   createDirection,
   deleteCell,
@@ -15,7 +16,6 @@ import {
   removeChallengeFromDashboard,
   removeDirectionFromDashboard,
   setPrimaryAnnualTarget,
-  updateAnnualTarget,
   updateChallenge,
   updateDirection,
   upsertCell,
@@ -34,7 +34,7 @@ type StrategyMatrixViewProps = {
 
 export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyMatrixViewProps) {
   const strategyMatrixBaseHref = "/strategy-cycle?l1=corporate-strategy&l2=strategy-matrix";
-  const pageAccess = await getSidebarAccessContext("strategy-cycle");
+  const pageAccess = await getStrategyMatrixAccessContext();
   if (pageAccess.state === "unauthenticated") redirect("/login");
   if (pageAccess.state === "forbidden") redirect("/no-access");
   const canWrite = pageAccess.canWrite;
@@ -42,7 +42,7 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
 
-  const selectedCycle = await getActivePlanningCycle(context.organizationId);
+  const selectedCycle = await resolveStrategyPlanningCycle(context.organizationId);
   if (!selectedCycle) {
     return (
       <section className="brand-card p-6">
@@ -214,8 +214,8 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
           </details>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <TableHorizontalScroll>
+          <table className="w-max min-w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-200 align-top text-left">
                 <th className="py-2 pr-3 min-w-[280px]">
@@ -410,42 +410,31 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
                     })}
 
                     <td className="py-3 pr-3">
-                      <div className="brand-surface p-2 space-y-2">
+                      <div className="brand-surface space-y-2 p-2 text-xs text-zinc-700">
                         {primaryTarget ? (
-                          <form action={updateAnnualTarget} className="space-y-1">
-                            <input type="hidden" name="target_id" value={primaryTarget.id} />
-                            <input name="title" defaultValue={primaryTarget.title} className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                            <div className="grid grid-cols-3 gap-1">
-                              <input name="baseline" type="number" step="0.01" defaultValue={primaryTarget.baseline ?? 0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                              <input name="current_measure" type="number" step="0.01" defaultValue={primaryTarget.current_measure ?? 0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                              <input name="progress_percent" type="number" step="0.1" min={0} max={100} defaultValue={primaryTarget.progress_percent} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                            </div>
-                            <input name="comment" defaultValue={primaryTarget.comment ?? ""} placeholder="Kommentar" className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                            <button type="submit" disabled={!canWrite} className="brand-btn px-2 py-1 text-xs">Hauptziel speichern</button>
-                          </form>
-                        ) : (
-                          <p className="text-xs text-zinc-500">Noch kein Jahresziel vorhanden.</p>
-                        )}
-
-                        <form action={createAnnualTarget} className="space-y-1">
-                          <input type="hidden" name="direction_id" value={direction.id} />
-                          <input name="title" placeholder="Neues Jahresziel" className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                          <div className="grid grid-cols-3 gap-1">
-                            <input name="baseline" type="number" step="0.01" defaultValue={0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                            <input name="current_measure" type="number" step="0.01" defaultValue={0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                            <input name="progress_percent" type="number" step="0.1" min={0} max={100} defaultValue={0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
+                          <div>
+                            <p className="font-medium text-zinc-900">{primaryTarget.title}</p>
+                            <p className="mt-0.5 text-zinc-500">
+                              {primaryTarget.status} · {primaryTarget.progress_percent}%
+                            </p>
+                            <Link
+                              href={`/annual-targets?tab=mine&targetId=${primaryTarget.id}`}
+                              className="mt-1 inline-block text-blue-700 hover:underline"
+                            >
+                              In Jahreszielen öffnen
+                            </Link>
                           </div>
-                          <input name="comment" placeholder="Kommentar" className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                          <button type="submit" disabled={!canWrite} className="brand-btn-secondary px-2 py-1 text-xs">Jahresziel anlegen</button>
-                        </form>
-
+                        ) : (
+                          <p className="text-zinc-500">Noch kein Jahresziel.</p>
+                        )}
+                        <Link
+                          href={`/annual-targets?tab=mine&direction=${direction.id}`}
+                          className="inline-block rounded border border-zinc-300 px-2 py-1 text-zinc-700 hover:bg-zinc-50"
+                        >
+                          Jahresziel pflegen
+                        </Link>
                         {additionalTargets.length > 0 ? (
-                          <Link
-                            href={`${strategyMatrixBaseHref}&drawer_direction_id=${direction.id}`}
-                            className="inline-block rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700"
-                          >
-                            Weitere Jahresziele ({additionalTargets.length}) in der Seitenansicht
-                          </Link>
+                          <p className="text-zinc-500">+{additionalTargets.length} weitere</p>
                         ) : null}
                       </div>
                     </td>
@@ -454,7 +443,7 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
               })}
             </tbody>
           </table>
-        </div>
+        </TableHorizontalScroll>
       </section>
 
       {drawerDirection ? (
@@ -472,20 +461,17 @@ export async function StrategyMatrixView({ drawerDirectionId = null }: StrategyM
               <p className="text-sm text-zinc-600">Keine Jahresziele vorhanden.</p>
             ) : (
               drawerTargets.map((target) => (
-                <div key={target.id} className="brand-surface p-2">
-                  <form action={updateAnnualTarget} className="space-y-1">
-                    <input type="hidden" name="target_id" value={target.id} />
-                    <input name="title" defaultValue={target.title} className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                    <div className="grid grid-cols-3 gap-1">
-                      <input name="baseline" type="number" step="0.01" defaultValue={target.baseline ?? 0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                      <input name="current_measure" type="number" step="0.01" defaultValue={target.current_measure ?? 0} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                      <input name="progress_percent" type="number" step="0.1" min={0} max={100} defaultValue={target.progress_percent} className="rounded border border-zinc-300 px-1 py-1 text-xs" />
-                    </div>
-                    <input name="comment" defaultValue={target.comment ?? ""} placeholder="Kommentar" className="w-full rounded border border-zinc-300 px-1 py-1 text-xs" />
-                    <button type="submit" disabled={!canWrite} className="brand-btn px-2 py-1 text-xs">
-                      Speichern
-                    </button>
-                  </form>
+                <div key={target.id} className="brand-surface space-y-1 p-2 text-sm">
+                  <p className="font-medium text-zinc-900">{target.title}</p>
+                  <p className="text-xs text-zinc-500">
+                    {target.status} · {target.progress_percent}%
+                  </p>
+                  <Link
+                    href={`/annual-targets?tab=mine&targetId=${target.id}`}
+                    className="text-xs text-blue-700 hover:underline"
+                  >
+                    In Jahreszielen bearbeiten
+                  </Link>
                   <form action={setPrimaryAnnualTarget} className="mt-1">
                     <input type="hidden" name="direction_id" value={drawerDirection.id} />
                     <input type="hidden" name="target_id" value={target.id} />

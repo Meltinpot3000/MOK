@@ -33,7 +33,7 @@ export function ProgramPipWorkspace({
   initiativesByProgramId,
 }: ProgramPipWorkspaceProps) {
   return (
-    <section className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+    <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Programm erfassen</h2>
         <p className="mt-1 text-[11px] text-zinc-500">
@@ -51,9 +51,9 @@ export function ProgramPipWorkspace({
           onClearSelection={() => {}}
         />
       </article>
-      <article className="brand-card p-6">
+      <article className="brand-card min-w-0 p-6">
         <h3 className="text-base font-semibold text-zinc-900">Programme</h3>
-        <div className="mt-4">
+        <div className="mt-4 min-w-0">
           <ProgramsTable
             programs={programRows}
             directionTitleById={directionTitleById}

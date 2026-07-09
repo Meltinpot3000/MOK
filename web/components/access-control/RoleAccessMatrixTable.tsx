@@ -1,6 +1,7 @@
 "use client";
 
 import { SortableColumnHeaderButton } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { SIDEBAR_ITEMS } from "@/lib/sidebar-access";
 import { useMemo, useState } from "react";
 
@@ -52,7 +53,8 @@ export function RoleAccessMatrixTable({ roles, matrixMap, canWrite }: Props) {
     roleOrderDir === "asc" ? "ascending" : roleOrderDir === "desc" ? "descending" : "none";
 
   return (
-    <table className="min-w-full text-sm">
+    <TableHorizontalScroll>
+      <table className="w-max min-w-full text-sm">
       <thead>
         <tr className="border-b border-zinc-200 text-left text-zinc-500">
           <th aria-sort={itemAriaSort} className="py-2 pr-3 align-bottom">
@@ -109,5 +111,6 @@ export function RoleAccessMatrixTable({ roles, matrixMap, canWrite }: Props) {
         ))}
       </tbody>
     </table>
+    </TableHorizontalScroll>
   );
 }

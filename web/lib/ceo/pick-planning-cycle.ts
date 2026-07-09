@@ -1,4 +1,4 @@
-import type { PlanningCycle } from "@/lib/ceo/queries";
+import type { PlanningCycle } from "@/lib/ceo/types";
 import { linearCycleProgressPercent } from "@/lib/ceo/planning-cycle-time-progress";
 
 function toTime(value: string): number {

@@ -1,6 +1,7 @@
 "use client";
 
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { memberInvitationStatusLabelDe } from "@/lib/member-invitation-status";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import { useMemo, useState } from "react";
@@ -68,7 +69,8 @@ export function InvitationsClosedTable({ invitationViews }: Props) {
   }, [invitationViews, sortCol, sortDir]);
 
   return (
-    <table className="min-w-full text-sm">
+    <TableHorizontalScroll>
+      <table className="w-max min-w-full text-sm">
       <thead>
         <tr className="border-b border-zinc-200 text-left text-zinc-500">
           <SortableTableHeader
@@ -144,5 +146,6 @@ export function InvitationsClosedTable({ invitationViews }: Props) {
         ))}
       </tbody>
     </table>
+    </TableHorizontalScroll>
   );
 }

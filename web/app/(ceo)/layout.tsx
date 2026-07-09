@@ -5,9 +5,11 @@ import { CycleSidebar } from "@/components/ceo/CycleSidebar";
 import { getAppShellAccess } from "@/lib/rbac/page-access";
 import {
   getVisibleAdminNavItems,
+  getVisibleAnnualPlanningNavItems,
   getVisibleCyclesNavItems,
   getVisiblePhase0NavItems,
-  getVisiblePhase1NavItems,
+  getVisiblePipsNavItems,
+  getVisibleStrategicPlanningNavItems,
   getVisibleTopNavItems,
 } from "@/lib/sidebar-access";
 import { getOpenTaskCountForMembership } from "@/lib/tasks/approval-queries";
@@ -73,7 +75,9 @@ export default async function CeoLayout({
     ? `${access.organizationName} CITADEL`
     : "CITADEL";
   const topNavItems = getVisibleTopNavItems(sidebarPermissions);
-  const phase1NavItems = getVisiblePhase1NavItems(sidebarPermissions);
+  const strategicNavItems = getVisibleStrategicPlanningNavItems(sidebarPermissions);
+  const annualNavItems = getVisibleAnnualPlanningNavItems(sidebarPermissions);
+  const pipsNavItems = getVisiblePipsNavItems(sidebarPermissions);
   const phase0NavItems = getVisiblePhase0NavItems(sidebarPermissions);
   const cycleNavItems = getVisibleCyclesNavItems(sidebarPermissions);
   const adminNavItems = getVisibleAdminNavItems(sidebarPermissions);
@@ -96,7 +100,9 @@ export default async function CeoLayout({
         permissions={sidebarPermissions}
         topNavItems={topNavItems}
         myTasksOpenCount={myTasksOpenCount}
-        phase1NavItems={phase1NavItems}
+        strategicNavItems={strategicNavItems}
+        annualNavItems={annualNavItems}
+        pipsNavItems={pipsNavItems}
         phase0NavItems={phase0NavItems}
         cycleNavItems={cycleNavItems}
         adminNavItems={adminNavItems}
@@ -105,7 +111,7 @@ export default async function CeoLayout({
         userEmail={sidebarIdentity.email}
         primaryRoleLabel={primaryRoleLabel}
       />
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-6">{children}</main>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import type { CoverageBand, StrategicDesignInsightsResult } from "@/lib/strategy-cycle/strategic-design-insights";
 import { STRATEGIC_DESIGN_INSIGHT_THRESHOLDS } from "@/lib/strategy-cycle/strategic-design-insight-thresholds";
@@ -59,7 +60,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
   const [gapSortDir, setGapSortDir] = useState<"asc" | "desc">("asc");
   const [objSortCol, setObjSortCol] = useState<ObjTableSortCol | null>(null);
   const [objSortDir, setObjSortDir] = useState<"asc" | "desc">("asc");
-  const { topDirections, unaddressedChallenges, limitedChallengeBackingObjectives, conflicts, kpis } = insights;
+  const { topDirections, unaddressedChallenges, limitedChallengeBackingObjectives, conflicts } = insights;
 
   const requestGapSort = (col: GapTableSortCol) => {
     if (gapSortCol === col) {
@@ -137,59 +138,6 @@ export function StrategicDesignDashboard({ insights }: Props) {
   return (
     <div className="space-y-4">
       <article className="brand-card p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Übersicht Strategisches Design</h2>
-        <p className="mt-1 text-sm text-zinc-600">
-          
-          Entscheidungsorientierte Kurzsicht: Fokus-Stoßrichtungen, Lücken, Hinweise zu Zielen und Konflikten im
-          Modell. Technische Kennzahlen und Schwellen in den Tooltips erklärt.
-        </p>
-
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="brand-surface rounded-md p-3" title={kpis.coverageExplanationDe}>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Herausforderungs-Verankerung</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">
-              {kpis.coverageChallengeShare != null ? `${kpis.coverageChallengeShare}%` : "—"}
-            </p>
-            <p className="mt-1 text-[11px] text-zinc-500">Mit mittlerer/starker Stoßrichtungs-Kopplung</p>
-          </div>
-          <div className="brand-surface rounded-md p-3">
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Kritische Lücken</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">{kpis.criticalGaps}</p>
-            <p className="mt-1 text-[11px] text-zinc-500">Hohe Herausforderungs-Scores ohne starken Anker</p>
-          </div>
-          <div className="brand-surface rounded-md p-3" title={kpis.focusExplanationDe}>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Fokus-Konzentration</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">
-              {kpis.focusIndex != null ? `${Math.round(kpis.focusIndex * 100)}%` : "—"}
-            </p>
-            <p className="mt-1 text-[11px] text-zinc-500">Anteil der Top-3-Richtungen am Gesamt-Score</p>
-          </div>
-          <div className="brand-surface rounded-md p-3" title={kpis.objectiveSupportExplanationDe}>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Zielunterstützung (Reifegrad)</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">
-              {kpis.objectiveAlignmentMaturity != null
-                ? `${Math.round(kpis.objectiveAlignmentMaturity * 100)}%`
-                : "—"}
-            </p>
-            <p className="mt-1 text-[11px] text-zinc-500">
-              Top-Richtungen: Ist vs. maximal möglich bei starken Ziel-Links
-              {kpis.topDirectionsStrongObjectiveLinkShare != null
-                ? ` · ${Math.round(kpis.topDirectionsStrongObjectiveLinkShare * 100)}% mit starkem Ziel-Link`
-                : ""}
-            </p>
-            {kpis.averageObjectiveSupport != null ? (
-              <p className="mt-0.5 text-[10px] text-zinc-400">
-                Durchschnittliche Zielunterstützung (absolut): {kpis.averageObjectiveSupport.toFixed(1)}
-              </p>
-            ) : null}
-            <p className="mt-1 text-[10px] text-zinc-400">
-              Korrelations-Overrides (Matrix): {kpis.correlationConflictCount}
-            </p>
-          </div>
-        </div>
-      </article>
-
-      <article className="brand-card p-6">
         <h3 className="text-base font-semibold text-zinc-900">Fokus: führende Stoßrichtungen</h3>
         <p className="mt-1 text-xs text-zinc-600">Top 5 nach gewichtetem Score (Herausforderungen 70 %, Ziele 30 %).</p>
         {topDirections.length === 0 ? (
@@ -263,8 +211,8 @@ export function StrategicDesignDashboard({ insights }: Props) {
         {unaddressedChallenges.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-600">Keine Einträge nach aktuellen Schwellen.</p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
+          <TableHorizontalScroll className="mt-4">
+            <table className="w-max min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 text-left text-xs font-semibold text-zinc-600">
                   <SortableTableHeader
@@ -311,7 +259,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableHorizontalScroll>
         )}
       </article>
 
@@ -325,8 +273,8 @@ export function StrategicDesignDashboard({ insights }: Props) {
         {limitedChallengeBackingObjectives.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-600">Keine Kandidaten nach aktuellen Schwellen.</p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
+          <TableHorizontalScroll className="mt-4">
+            <table className="w-max min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 text-left text-xs font-semibold text-zinc-600">
                   <SortableTableHeader
@@ -365,7 +313,7 @@ export function StrategicDesignDashboard({ insights }: Props) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableHorizontalScroll>
         )}
       </article>
 

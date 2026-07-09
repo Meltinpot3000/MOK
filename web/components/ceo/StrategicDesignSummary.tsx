@@ -1,6 +1,8 @@
 "use client";
 
+import { FocusedCorrelationNetwork } from "@/components/ceo/FocusedCorrelationNetwork";
 import { SortableColumnHeaderButton } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import type { CorrelationCell, CorrelationStatus, CorrelationSummaryResult } from "@/lib/strategy-cycle/correlation";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import { useMemo, useState } from "react";
@@ -37,12 +39,112 @@ function getStatusLabel(status: CorrelationStatus): string {
   return "Unklar";
 }
 
-function getObjectiveStatusLabel(status: string | null): string {
-  if (status === "active") return "active";
-  if (status === "at_risk") return "at_risk";
-  if (status === "completed") return "completed";
-  if (status === "archived") return "archived";
-  return "draft";
+function getObjectiveLifecycleLabel(objective: CorrelationSummaryResult["objectives"][number]): string {
+  return objective.lifecycleLabel || "—";
+}
+
+type CorrelationListItem = {
+  key: string;
+  cellKey: string;
+  label: string;
+  score: number;
+  status: CorrelationStatus;
+};
+
+function CorrelationListSection({
+  title,
+  emptyText,
+  items,
+  onSelectCell,
+  getCellTone,
+  getStatusLabel,
+}: {
+  title: string;
+  emptyText: string;
+  items: CorrelationListItem[];
+  onSelectCell: (cellKey: string) => void;
+  getCellTone: (status: CorrelationStatus) => string;
+  getStatusLabel: (status: CorrelationStatus) => string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</p>
+      {items.length === 0 ? (
+        <p className="brand-surface rounded-md p-3 text-sm text-zinc-600">{emptyText}</p>
+      ) : (
+        items.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onSelectCell(item.cellKey)}
+            className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm ${getCellTone(item.status)}`}
+          >
+            <span className="min-w-0 break-words text-zinc-800">{item.label}</span>
+            <span className="shrink-0 font-semibold text-zinc-900">
+              {item.score} ({getStatusLabel(item.status)})
+            </span>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ConflictListSection({
+  title,
+  emptyText,
+  conflicts,
+  onSelectCell,
+  getStatusLabel,
+  getStatusBadge,
+}: {
+  title: string;
+  emptyText: string;
+  conflicts: CorrelationSummaryResult["conflictCells"];
+  onSelectCell: (cellKey: string) => void;
+  getStatusLabel: (status: CorrelationStatus) => string;
+  getStatusBadge: (status: CorrelationStatus) => string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</p>
+      {conflicts.length === 0 ? (
+        <p className="brand-surface rounded-md p-3 text-sm text-zinc-600">{emptyText}</p>
+      ) : (
+        conflicts.map((conflict) => (
+          <button
+            key={conflict.key}
+            type="button"
+            onClick={() => onSelectCell(conflict.cellKey)}
+            className="w-full rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-left text-sm transition hover:bg-violet-100"
+          >
+            <p className="break-words text-zinc-800">
+              {conflict.challengeTitle}
+              {" → "}
+              {conflict.objectiveTitle}
+            </p>
+            <p className="mt-1 break-words text-xs text-zinc-600">
+              Stoßrichtung: {conflict.directionTitle}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className={`rounded-full border px-2 py-0.5 ${getStatusBadge(conflict.autoStatus)}`}>
+                Auto: {getStatusLabel(conflict.autoStatus)} ({conflict.autoScore})
+              </span>
+              <span className="text-zinc-500" aria-hidden>
+                →
+              </span>
+              <span className={`rounded-full border px-2 py-0.5 ${getStatusBadge(conflict.effectiveStatus)}`}>
+                Override: {getStatusLabel(conflict.effectiveStatus)}
+              </span>
+            </div>
+            {conflict.overrideNote ? (
+              <p className="mt-1.5 text-[11px] text-zinc-500">{conflict.overrideNote}</p>
+            ) : null}
+          </button>
+        ))
+      )}
+    </div>
+  );
 }
 
 export function StrategicDesignSummary({
@@ -104,36 +206,55 @@ export function StrategicDesignSummary({
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{summary.goodObjectivePercent}%</p>
           </div>
           <div className="brand-surface rounded-md p-3">
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Schwache Korrelationen (Top 5)</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">{summary.weakCells.length}</p>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Ø Score höchste Korrelationen</p>
+            <p className="mt-1 text-2xl font-semibold text-zinc-900">
+              {summary.topStrongAvgScore}
+              <span className="ml-1 text-sm font-medium text-zinc-500">Pkt.</span>
+            </p>
           </div>
           <div className="brand-surface rounded-md p-3">
             <p className="text-xs uppercase tracking-wide text-zinc-500">Offene Konflikte (Auto vs Override)</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900">{summary.conflictCount}</p>
+            <p className="mt-1 text-2xl font-semibold text-zinc-900">{summary.conflictPercent}%</p>
           </div>
         </div>
-        {summary.weakCells.length > 0 ? (
-          <div className="mt-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Top 5 schwache Korrelationen</p>
-            {summary.weakCells.map((cell) => (
-              <button
-                key={cell.key}
-                type="button"
-                onClick={() => setSelectedCellKey(cell.key)}
-                className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm ${getCellTone(cell.status)}`}
-              >
-                <span className="text-zinc-800">
-                  {cell.challengeTitle}
-                  {" -> "}
-                  {cell.objectiveTitle}
-                </span>
-                <span className="font-semibold text-zinc-900">
-                  {cell.score} ({getStatusLabel(cell.status)})
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <CorrelationListSection
+            title="Top 5 höchste Korrelationen"
+            emptyText="Keine grünen Korrelationen vorhanden."
+            items={summary.strongCells.map((cell) => ({
+              key: cell.key,
+              cellKey: cell.key,
+              label: `${cell.challengeTitle} → ${cell.objectiveTitle}`,
+              score: cell.score,
+              status: cell.status,
+            }))}
+            onSelectCell={setSelectedCellKey}
+            getCellTone={getCellTone}
+            getStatusLabel={getStatusLabel}
+          />
+          <CorrelationListSection
+            title="Top 5 niedrigste Korrelationen"
+            emptyText="Keine schwachen Korrelationen vorhanden."
+            items={summary.weakCells.map((cell) => ({
+              key: cell.key,
+              cellKey: cell.key,
+              label: `${cell.challengeTitle} → ${cell.objectiveTitle}`,
+              score: cell.score,
+              status: cell.status,
+            }))}
+            onSelectCell={setSelectedCellKey}
+            getCellTone={getCellTone}
+            getStatusLabel={getStatusLabel}
+          />
+          <ConflictListSection
+            title="Konflikte (Auto vs. Override)"
+            emptyText="Keine offenen Konflikte zwischen Auto-Status und Override."
+            conflicts={summary.conflictCells}
+            onSelectCell={setSelectedCellKey}
+            getStatusLabel={getStatusLabel}
+            getStatusBadge={getStatusBadge}
+          />
+        </div>
       </article>
 
       <article className="brand-card p-6">
@@ -148,8 +269,8 @@ export function StrategicDesignSummary({
             Für diese Ansicht werden mindestens ein Ziel und eine strategische Herausforderung benoetigt.
           </p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full border-collapse">
+          <TableHorizontalScroll className="mt-4">
+            <table className="w-max min-w-full border-collapse">
               <thead>
                 <tr>
                   <th
@@ -219,7 +340,7 @@ export function StrategicDesignSummary({
                           buttonClassName="font-semibold text-zinc-700 hover:bg-zinc-200/50 rounded px-0.5 -mx-0.5"
                         />
                         <div className="mt-1 text-[11px] font-normal text-zinc-500">
-                          Status: {getObjectiveStatusLabel(objective.status)}
+                          Lifecycle: {getObjectiveLifecycleLabel(objective)}
                         </div>
                       </th>
                     );
@@ -264,12 +385,12 @@ export function StrategicDesignSummary({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableHorizontalScroll>
         )}
       </article>
 
-      <article className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="brand-card p-6">
+      <article className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="brand-card min-w-0 p-6">
           <h3 className="text-base font-semibold text-zinc-900">Detailpanel zur Matrix-Zelle</h3>
           {!selectedCell ? (
             <p className="mt-3 text-sm text-zinc-600">Noch keine Korrelation auswählbar.</p>
@@ -361,7 +482,7 @@ export function StrategicDesignSummary({
           )}
         </div>
 
-        <div className="brand-card p-6">
+        <div className="brand-card min-w-0 overflow-hidden p-6">
           <h3 className="text-base font-semibold text-zinc-900">Interaktive Netzwerkansicht (fokussiert)</h3>
           <p className="mt-1 text-xs text-zinc-600">
             
@@ -370,59 +491,12 @@ export function StrategicDesignSummary({
           {!selectedCell ? (
             <p className="mt-3 text-sm text-zinc-600">Keine Auswahl vorhanden.</p>
           ) : (
-            <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3">
-              <svg viewBox="0 0 760 260" className="h-[260px] w-full">
-                <rect x="20" y="100" width="220" height="60" rx="10" className="fill-white stroke-zinc-300" />
-                <text x="130" y="125" textAnchor="middle" className="fill-zinc-700 text-[12px] font-semibold">
-                  Ziel
-                </text>
-                <text x="130" y="145" textAnchor="middle" className="fill-zinc-600 text-[11px]">
-                  {selectedCell.objectiveTitle}
-                </text>
-
-                <rect x="520" y="100" width="220" height="60" rx="10" className="fill-white stroke-zinc-300" />
-                <text x="630" y="125" textAnchor="middle" className="fill-zinc-700 text-[12px] font-semibold">
-                  Herausforderung
-                </text>
-                <text x="630" y="145" textAnchor="middle" className="fill-zinc-600 text-[11px]">
-                  {selectedCell.challengeTitle}
-                </text>
-
-                {selectedCell.directions.slice(0, 3).map((direction, index) => {
-                  const y = 30 + index * 78;
-                  return (
-                    <g key={direction.directionId}>
-                      <line x1="240" y1="130" x2="360" y2={y + 30} className="stroke-zinc-400" strokeWidth="1.5" />
-                      <line x1="400" y1={y + 30} x2="520" y2="130" className="stroke-zinc-400" strokeWidth="1.5" />
-                      <rect
-                        x="360"
-                        y={y}
-                        width="40"
-                        height="60"
-                        rx="8"
-                        className={direction.effectiveStatus === "green" ? "fill-emerald-100 stroke-emerald-300" : direction.effectiveStatus === "yellow" ? "fill-amber-100 stroke-amber-300" : direction.effectiveStatus === "red" ? "fill-red-100 stroke-red-300" : "fill-zinc-100 stroke-zinc-300"}
-                      />
-                      <text x="380" y={y + 26} textAnchor="middle" className="fill-zinc-700 text-[10px] font-semibold">
-                        D{index + 1}
-                      </text>
-                      <text x="380" y={y + 41} textAnchor="middle" className="fill-zinc-600 text-[10px]">
-                        {direction.autoScore}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-              {selectedCell.directions.length > 0 ? (
-                <div className="mt-2 space-y-1 text-xs text-zinc-600">
-                  {selectedCell.directions.slice(0, 3).map((direction, index) => (
-                    <p key={direction.directionId}>
-                      D{index + 1}: {direction.directionTitle} ({getStatusLabel(direction.effectiveStatus)})
-                    </p>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-zinc-600">Keine verknüpfte Stoßrichtung vorhanden.</p>
-              )}
+            <div className="mt-4 min-w-0">
+              <FocusedCorrelationNetwork
+                cell={selectedCell}
+                getStatusLabel={getStatusLabel}
+                getStatusBadge={getStatusBadge}
+              />
             </div>
           )}
         </div>

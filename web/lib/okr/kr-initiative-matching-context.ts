@@ -62,39 +62,29 @@ export async function buildKrInitiativeMatchingContext(input: {
 
   let strategicDirection: KrInitiativeMatchingContext["strategicDirection"] = null;
   if (objective?.id) {
-    const { data: join } = await supabase
+    const { data: objRow } = await supabase
       .schema("app")
-      .from("okr_objective_strategy_objectives")
-      .select("strategy_objective_id")
-      .eq("okr_objective_id", objective.id)
-      .limit(1)
+      .from("okr_objectives")
+      .select("leading_strategic_direction_id")
+      .eq("organization_id", organizationId)
+      .eq("id", objective.id)
       .maybeSingle();
-    if (join?.strategy_objective_id) {
-      const { data: dirLink } = await supabase
+    const directionId = objRow?.leading_strategic_direction_id as string | null | undefined;
+    if (directionId) {
+      const { data: dir } = await supabase
         .schema("app")
-        .from("strategic_direction_objective_links")
-        .select("strategic_direction_id")
+        .from("strategic_directions")
+        .select("id, title, description")
         .eq("organization_id", organizationId)
         .eq("cycle_instance_id", cycleInstanceId)
-        .eq("strategy_objective_id", join.strategy_objective_id)
-        .limit(1)
+        .eq("id", directionId)
         .maybeSingle();
-      if (dirLink?.strategic_direction_id) {
-        const { data: dir } = await supabase
-          .schema("app")
-          .from("strategic_directions")
-          .select("id, title, description")
-          .eq("organization_id", organizationId)
-          .eq("cycle_instance_id", cycleInstanceId)
-          .eq("id", dirLink.strategic_direction_id)
-          .maybeSingle();
-        if (dir?.id) {
-          strategicDirection = {
-            id: dir.id,
-            title: dir.title,
-            description: dir.description ?? null,
-          };
-        }
+      if (dir?.id) {
+        strategicDirection = {
+          id: dir.id,
+          title: dir.title,
+          description: dir.description ?? null,
+        };
       }
     }
   }

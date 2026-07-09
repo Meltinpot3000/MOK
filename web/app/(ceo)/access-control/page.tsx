@@ -74,25 +74,75 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
           const { data } = await supabase
             .schema("app")
             .from("organizations")
-            .select("okr_kr_owner_must_match_objective, okr_review_notify_owners_on_schedule")
+            .select(
+              "okr_kr_owner_must_match_objective, okr_review_notify_owners_on_schedule, require_annual_targets_before_okrs, annual_target_gate_enforcement_mode, annual_target_gate_scope, annual_target_gate_allow_exceptions, annual_targets_require_signature, annual_targets_signature_mode, annual_targets_activation_requires_signed_status"
+            )
             .eq("id", access.organizationId)
             .maybeSingle();
           const row = data as {
             okr_kr_owner_must_match_objective?: boolean;
             okr_review_notify_owners_on_schedule?: boolean;
+            require_annual_targets_before_okrs?: boolean;
+            annual_target_gate_enforcement_mode?: string;
+            annual_target_gate_scope?: string;
+            annual_target_gate_allow_exceptions?: boolean;
+            annual_targets_require_signature?: boolean;
+            annual_targets_signature_mode?: string;
+            annual_targets_activation_requires_signed_status?: boolean;
           } | null;
           return {
             okrKrOwnerMustMatchObjective: Boolean(row?.okr_kr_owner_must_match_objective),
             okrReviewNotifyOwnersOnSchedule: Boolean(row?.okr_review_notify_owners_on_schedule),
+            requireAnnualTargetsBeforeOkrs: Boolean(row?.require_annual_targets_before_okrs),
+            annualTargetGateEnforcementMode:
+              row?.annual_target_gate_enforcement_mode === "off" ||
+              row?.annual_target_gate_enforcement_mode === "warn_only" ||
+              row?.annual_target_gate_enforcement_mode === "block_activation" ||
+              row?.annual_target_gate_enforcement_mode === "block_creation"
+                ? row.annual_target_gate_enforcement_mode
+                : "block_activation",
+            annualTargetGateScope:
+              row?.annual_target_gate_scope === "selected_roles" ? "selected_roles" : "all_employees",
+            annualTargetGateAllowExceptions:
+              row?.annual_target_gate_allow_exceptions === undefined
+                ? true
+                : Boolean(row?.annual_target_gate_allow_exceptions),
+            annualTargetsRequireSignature: Boolean(row?.annual_targets_require_signature),
+            annualTargetsSignatureMode:
+              row?.annual_targets_signature_mode === "internal_acknowledgement" ||
+              row?.annual_targets_signature_mode === "external_signature"
+                ? row.annual_targets_signature_mode
+                : "none",
+            annualTargetsActivationRequiresSignedStatus:
+              row?.annual_targets_activation_requires_signed_status === undefined
+                ? true
+                : Boolean(row?.annual_targets_activation_requires_signed_status),
           };
         })()
       : Promise.resolve({
           okrKrOwnerMustMatchObjective: false,
           okrReviewNotifyOwnersOnSchedule: false,
+          requireAnnualTargetsBeforeOkrs: false,
+          annualTargetGateEnforcementMode: "block_activation" as const,
+          annualTargetGateScope: "all_employees" as const,
+          annualTargetGateAllowExceptions: true,
+          annualTargetsRequireSignature: false,
+          annualTargetsSignatureMode: "none" as const,
+          annualTargetsActivationRequiresSignedStatus: true,
         });
 
   const [okrData, orgRules] = await Promise.all([okrMatrixPromise, orgRulesPromise]);
-  const { okrKrOwnerMustMatchObjective, okrReviewNotifyOwnersOnSchedule } = orgRules;
+  const {
+    okrKrOwnerMustMatchObjective,
+    okrReviewNotifyOwnersOnSchedule,
+    requireAnnualTargetsBeforeOkrs,
+    annualTargetGateEnforcementMode,
+    annualTargetGateScope,
+    annualTargetGateAllowExceptions,
+    annualTargetsRequireSignature,
+    annualTargetsSignatureMode,
+    annualTargetsActivationRequiresSignedStatus,
+  } = orgRules;
 
   async function saveAccessMatrix(formData: FormData) {
     "use server";
@@ -216,6 +266,29 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
     const krOwnerMatch = rawKr === "on" || rawKr === "true";
     const rawNotify = formData.get("okr_review_notify_owners_on_schedule");
     const notifyOwnersOnSchedule = rawNotify === "on" || rawNotify === "true";
+    const rawRequireAnnualTargets = formData.get("require_annual_targets_before_okrs");
+    const requireAnnualTargetsBeforeOkrs =
+      rawRequireAnnualTargets === "on" || rawRequireAnnualTargets === "true";
+    const rawMode = String(formData.get("annual_target_gate_enforcement_mode") ?? "block_activation").trim();
+    const enforcementMode =
+      rawMode === "off" || rawMode === "warn_only" || rawMode === "block_activation" || rawMode === "block_creation"
+        ? rawMode
+        : "block_activation";
+    const rawScope = String(formData.get("annual_target_gate_scope") ?? "all_employees").trim();
+    const gateScope = rawScope === "selected_roles" ? "selected_roles" : "all_employees";
+    const rawAllowExceptions = formData.get("annual_target_gate_allow_exceptions");
+    const gateAllowExceptions = rawAllowExceptions === "on" || rawAllowExceptions === "true";
+    const rawRequireSignature = formData.get("annual_targets_require_signature");
+    const annualTargetsRequireSignature =
+      rawRequireSignature === "on" || rawRequireSignature === "true";
+    const rawSigMode = String(formData.get("annual_targets_signature_mode") ?? "none").trim();
+    const signatureMode =
+      rawSigMode === "internal_acknowledgement" || rawSigMode === "external_signature"
+        ? rawSigMode
+        : "none";
+    const rawActivationSigned = formData.get("annual_targets_activation_requires_signed_status");
+    const activationRequiresSigned =
+      rawActivationSigned === "on" || rawActivationSigned === "true";
 
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase
@@ -224,6 +297,13 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
       .update({
         okr_kr_owner_must_match_objective: krOwnerMatch,
         okr_review_notify_owners_on_schedule: notifyOwnersOnSchedule,
+        require_annual_targets_before_okrs: requireAnnualTargetsBeforeOkrs,
+        annual_target_gate_enforcement_mode: enforcementMode,
+        annual_target_gate_scope: gateScope,
+        annual_target_gate_allow_exceptions: gateAllowExceptions,
+        annual_targets_require_signature: annualTargetsRequireSignature,
+        annual_targets_signature_mode: signatureMode,
+        annual_targets_activation_requires_signed_status: activationRequiresSigned,
       })
       .eq("id", localContext.organizationId);
 
@@ -237,6 +317,7 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
     revalidatePath("/okr/planning");
     revalidatePath("/okr/tracking");
     revalidatePath("/okr-workspace");
+    revalidatePath("/annual-targets");
     redirect("/access-control?tab=rules");
   }
 
@@ -270,13 +351,11 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
             </p>
           ) : null}
           <form action={saveAccessMatrix} className="mt-4">
-            <div className="overflow-x-auto">
-              <RoleAccessMatrixTable
-                roles={roles}
-                matrixMap={matrixMapRecord}
-                canWrite={canSaveNavMatrix}
-              />
-            </div>
+            <RoleAccessMatrixTable
+              roles={roles}
+              matrixMap={matrixMapRecord}
+              canWrite={canSaveNavMatrix}
+            />
 
             <div className="mt-4 flex items-center justify-between">
               {!canSaveNavMatrix ? (
@@ -321,13 +400,11 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
           ) : null}
 
           <form action={saveOkrObjectMatrixAction}>
-            <div className="overflow-x-auto">
-              <OkrObjectPermissionMatrix
-                roles={okrData.roles}
-                cells={okrData.cells}
-                canWrite={canSaveOkrMatrix}
-              />
-            </div>
+            <OkrObjectPermissionMatrix
+              roles={okrData.roles}
+              cells={okrData.cells}
+              canWrite={canSaveOkrMatrix}
+            />
             <div className="mt-4 flex justify-end">
               <button
                 type="submit"
@@ -428,6 +505,99 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
                       Nach „Planen“ im OKR-Review-Workspace (Versand folgt, sobald ein E-Mail-Provider
                       angebunden ist).
                     </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="require_annual_targets_before_okrs"
+                    value="true"
+                    defaultChecked={requireAnnualTargetsBeforeOkrs}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Jahresziele vor OKRs erzwingen</span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      Wenn aktiv: Für den Objective-Owner müssen aktive Jahresziele im relevanten Zieljahr existieren.
+                    </span>
+                  </span>
+                </label>
+                <label className="block text-sm text-zinc-800">
+                  <span className="font-medium">Enforcement-Modus</span>
+                  <select
+                    name="annual_target_gate_enforcement_mode"
+                    defaultValue={annualTargetGateEnforcementMode}
+                    className="mt-1 block w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="off">Aus</option>
+                    <option value="warn_only">Nur Warnung</option>
+                    <option value="block_activation">Aktivierung blockieren (empfohlen)</option>
+                    <option value="block_creation">Erstellung blockieren</option>
+                  </select>
+                </label>
+                <label className="block text-sm text-zinc-800">
+                  <span className="font-medium">Scope</span>
+                  <select
+                    name="annual_target_gate_scope"
+                    defaultValue={annualTargetGateScope}
+                    className="mt-1 block w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="all_employees">Alle Mitarbeitenden</option>
+                    <option value="selected_roles">Nur jahreszielpflichtige Rollen/Memberships</option>
+                  </select>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="annual_target_gate_allow_exceptions"
+                    value="true"
+                    defaultChecked={annualTargetGateAllowExceptions}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Ausnahmen erlauben</span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      Genehmigte Ausnahme erlaubt Aktivierung ohne direkte Jahresziel-Zuordnung.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="annual_targets_require_signature"
+                    value="true"
+                    defaultChecked={annualTargetsRequireSignature}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Digitale Signatur für Jahresziele</span>
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      Wenn aktiv: Aktivierung erst nach Signaturstatus «signed».
+                    </span>
+                  </span>
+                </label>
+                <label className="block text-sm text-zinc-800">
+                  <span className="font-medium">Signatur-Modus</span>
+                  <select
+                    name="annual_targets_signature_mode"
+                    defaultValue={annualTargetsSignatureMode}
+                    className="mt-1 block w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="none">Keine</option>
+                    <option value="internal_acknowledgement">Interne Bestätigung (MVP)</option>
+                    <option value="external_signature">Externer Anbieter (vorbereitet)</option>
+                  </select>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="annual_targets_activation_requires_signed_status"
+                    value="true"
+                    defaultChecked={annualTargetsActivationRequiresSignedStatus}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Aktivierung erfordert Signatur</span>
                   </span>
                 </label>
                 <button type="submit" className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white">

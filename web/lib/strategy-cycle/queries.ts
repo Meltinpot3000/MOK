@@ -1,4 +1,11 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { pickPlanningCycleAtLevel } from "@/lib/ceo/pick-planning-cycle";
+import { getPlanningCyclesForOrganization } from "@/lib/planning/queries";
+import {
+  fetchChallengesForCycle,
+  fetchDirectionsForCycle,
+  fetchObjectivesForCycle,
+} from "@/lib/strategy-objects/queries";
 
 /** Key-Result-Verknuepfung einer Initiative mit OKR-Kontext (PIP-UI). */
 export type InitiativeKrLinkContext = {
@@ -71,13 +78,22 @@ export type AnalysisEntry = {
 
 export async function getStrategyCycleWorkspaceData(
   organizationId: string,
-  cycleInstanceId: string,
-  legacyPlanningCycleId?: string | null
+  strategyCycleInstanceId: string,
+  legacyPlanningCycleId?: string | null,
+  options: { annualCycleInstanceId?: string | null } = {}
 ) {
+  const cycles = await getPlanningCyclesForOrganization(organizationId);
+  const annualCycleInstanceId =
+    options.annualCycleInstanceId ??
+    pickPlanningCycleAtLevel(cycles, 2, Date.now()).cycle?.id ??
+    strategyCycleInstanceId;
+
   const supabase = await createSupabaseServerClient();
+  const cycleInstanceId = strategyCycleInstanceId;
+  const annualCycleId = annualCycleInstanceId;
   const [
     entriesResult,
-    promotedResult,
+    promotedChallenges,
     linkDraftsResult,
     linksResult,
     clustersResult,
@@ -96,14 +112,16 @@ export async function getStrategyCycleWorkspaceData(
     industriesResult,
     businessModelsResult,
     operatingModelsResult,
-    strategicDirectionsResult,
-    objectivesResult,
+    strategicDirections,
+    objectives,
     clusterObjectiveRelationsResult,
     correlationOverridesResult,
     programsResult,
     annualTargetsResult,
     initiativesResult,
     initiativeTargetLinksResult,
+    annualTargetOkrLinksResult,
+    annualTargetOkrExceptionsResult,
     manualNodePositionsResult,
     challengeCandidatesResult,
     backgroundJobsResult,
@@ -118,15 +136,7 @@ export async function getStrategyCycleWorkspaceData(
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
       .order("updated_at", { ascending: false }),
-    supabase
-      .schema("app")
-      .from("strategic_challenges")
-      .select(
-        "id, title, description, source_analysis_entry_id, relevance_level, risk_level, impact_score, urgency_score, scope_score, root_cause_score, challenge_score"
-      )
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
-      .order("created_at", { ascending: false }),
+    fetchChallengesForCycle(organizationId, cycleInstanceId, { supabase }),
     supabase
       .schema("app")
       .from("analysis_item_link_draft")
@@ -247,33 +257,11 @@ export async function getStrategyCycleWorkspaceData(
       .select("id, name")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),
-    supabase
-      .schema("app")
-      .from("strategic_directions")
-      .select(
-        "id, title, description, priority, status, grouping, relevance_level, risk_level, strategic_value_score, capability_fit_score, feasibility_score, created_at, updated_at"
-      )
-      .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true }),
-    (legacyPlanningCycleId
-      ? supabase
-          .schema("app")
-          .from("strategy_objectives")
-          .select(
-            "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
-          )
-          .eq("organization_id", organizationId)
-          .or(`cycle_instance_id.eq.${cycleInstanceId},cycle_id.eq.${legacyPlanningCycleId}`)
-      : supabase
-          .schema("app")
-          .from("strategy_objectives")
-          .select(
-            "id, title, description, importance_score, time_horizon, status, created_by_membership_id, created_by_source, ai_clarity_score, ai_strategic_relevance_score, ai_feasibility_score, ai_fit_to_company_score, ai_confidence_score, ai_external_internal_classification, ai_short_long_term_classification, ai_exploit_explore_classification, ai_issues_json, ai_improvement_suggestion, ai_summary, ai_objective_score, ai_evaluation_status, ai_evaluated_at, ai_evaluation_version, ai_manual_override, ai_manual_comment"
-          )
-          .eq("organization_id", organizationId)
-          .eq("cycle_instance_id", cycleInstanceId)),
+    fetchDirectionsForCycle(organizationId, cycleInstanceId, { supabase }),
+    fetchObjectivesForCycle(organizationId, cycleInstanceId, {
+      supabase,
+      legacyPlanningCycleId,
+    }),
     supabase
       .schema("app")
       .from("cluster_objective_relations")
@@ -294,13 +282,15 @@ export async function getStrategyCycleWorkspaceData(
         "id, title, description, strategic_direction_id, owner_membership_id, budget_total, timeline, status, start_date, end_date, strategic_challenge_id, program_origin, matrix_cell_score, supported_objective_ids"
       )
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
+      .eq("cycle_instance_id", annualCycleId),
     supabase
       .schema("app")
       .from("annual_targets")
-      .select("id, title, strategic_direction_id")
+      .select(
+        "id, title, strategic_direction_id, baseline, current_measure, progress_percent, status, annual_target_type, progress_calculation_mode, target_year, bonus_weight, accountable_role_id, owner_membership_id, derivation_note"
+      )
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
+      .eq("cycle_instance_id", annualCycleId),
     supabase
       .schema("app")
       .from("initiatives")
@@ -308,7 +298,7 @@ export async function getStrategyCycleWorkspaceData(
         "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent, start_date, end_date"
       )
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId)
+      .eq("cycle_instance_id", annualCycleId)
       .order("priority", { ascending: true })
       .order("created_at", { ascending: false }),
     supabase
@@ -316,7 +306,19 @@ export async function getStrategyCycleWorkspaceData(
       .from("initiative_target_links")
       .select("id, initiative_id, annual_target_id, contribution_level, comment")
       .eq("organization_id", organizationId)
-      .eq("cycle_instance_id", cycleInstanceId),
+      .eq("cycle_instance_id", annualCycleId),
+    supabase
+      .schema("app")
+      .from("annual_target_okr_objective_links")
+      .select("id, annual_target_id, okr_objective_id, alignment_type, weight, comment, updated_at")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", annualCycleId),
+    supabase
+      .schema("app")
+      .from("annual_target_okr_objective_exceptions")
+      .select("id, annual_target_id, okr_objective_id, exception_reason, approval_status, approved_by, approved_at, updated_at")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", annualCycleId),
     supabase
       .schema("app")
       .from("analysis_manual_node_positions")
@@ -346,15 +348,18 @@ export async function getStrategyCycleWorkspaceData(
       .select(
         "balance_score, distribution_internal_external_json, distribution_exploit_explore_json, distribution_short_long_json, portfolio_gaps_json, portfolio_risks_json, portfolio_recommendation, portfolio_evaluated_at"
       )
-      .eq("cycle_instance_id", cycleInstanceId)
+      .eq("cycle_instance_id", annualCycleId)
       .maybeSingle(),
   ]);
 
   const promotedBySourceId = new Map<string, string>();
   const promotedClusterIds = new Set<string>();
-  for (const challenge of promotedResult.data ?? []) {
+  for (const challenge of promotedChallenges ?? []) {
     if (challenge.source_analysis_entry_id) {
       promotedBySourceId.set(challenge.source_analysis_entry_id, challenge.id);
+    }
+    if (challenge.source_cluster_id) {
+      promotedClusterIds.add(challenge.source_cluster_id);
     }
   }
   for (const row of challengeAnalysisEntriesResult.data ?? []) {
@@ -363,20 +368,6 @@ export async function getStrategyCycleWorkspaceData(
       promotedBySourceId.set(r.analysis_entry_id, r.strategic_challenge_id);
     }
   }
-  const { data: promotedClusters, error: promotedClustersError } = await supabase
-    .schema("app")
-    .from("strategic_challenges")
-    .select("source_cluster_id")
-    .eq("organization_id", organizationId)
-    .eq("cycle_instance_id", cycleInstanceId)
-    .not("source_cluster_id", "is", null);
-  if (!promotedClustersError && promotedClusters) {
-    for (const row of promotedClusters) {
-      if (row.source_cluster_id) promotedClusterIds.add(row.source_cluster_id);
-    }
-  }
-  // promotedClustersError occurs when source_cluster_id column does not exist (before migration 0065)
-
   const entries = (entriesResult.data ?? []) as AnalysisEntry[];
   const grouped = {
     environment: entries.filter(
@@ -395,7 +386,7 @@ export async function getStrategyCycleWorkspaceData(
   const operatingModelNameById = new Map((operatingModelsResult.data ?? []).map((item) => [item.id, item.name]));
 
   const challengeIdsBySourceEntryId = new Map<string, string[]>();
-  for (const challenge of promotedResult.data ?? []) {
+  for (const challenge of promotedChallenges ?? []) {
     if (!challenge.source_analysis_entry_id) continue;
     const current = challengeIdsBySourceEntryId.get(challenge.source_analysis_entry_id) ?? [];
     current.push(challenge.id);
@@ -514,19 +505,22 @@ export async function getStrategyCycleWorkspaceData(
     entryDirectionIdsByEntryId.set(entry.id, [...directionIds]);
   }
 
-  const challenges = (promotedResult.data ?? []).map((challenge) => ({
+  const challenges = (promotedChallenges ?? []).map((challenge) => ({
     ...challenge,
     relevance_level:
       Number.isFinite(Number(challenge.relevance_level)) ? Math.max(1, Math.min(5, Number(challenge.relevance_level))) : 3,
     risk_level: Number.isFinite(Number(challenge.risk_level)) ? Math.max(1, Math.min(5, Number(challenge.risk_level))) : 3,
   }));
-  const strategicDirections = strategicDirectionsResult.data ?? [];
-  const objectives = objectivesResult.data ?? [];
   const creatorMembershipIds = [
     ...new Set(
-      (objectives as Array<{ created_by_membership_id?: string | null }>)
-        .map((o) => o.created_by_membership_id)
-        .filter((id): id is string => Boolean(id))
+      [
+        ...(objectives as Array<{ created_by_membership_id?: string | null }>).map(
+          (o) => o.created_by_membership_id
+        ),
+        ...(challenges as Array<{ created_by_membership_id?: string | null }>).map(
+          (c) => c.created_by_membership_id
+        ),
+      ].filter((id): id is string => Boolean(id))
     ),
   ];
   const creatorDisplayNameByMembershipId = new Map<string, string>();
@@ -824,7 +818,7 @@ export async function getStrategyCycleWorkspaceData(
     ])
   );
 
-  let pipKeyResultOptions: PipKeyResultOption[] = [];
+  const pipKeyResultOptions: PipKeyResultOption[] = [];
   const { data: okrRowsForPip } = await supabase
     .schema("app")
     .from("okr_objectives")
@@ -894,7 +888,7 @@ export async function getStrategyCycleWorkspaceData(
     clusterMembersByClusterId,
     gapFindings: gapFindingsResult.data ?? [],
     entryTitleById,
-    existingChallenges: promotedResult.data ?? [],
+    existingChallenges: promotedChallenges ?? [],
     strategicDirections,
     objectives,
     clusterObjectiveRelations,
@@ -907,6 +901,8 @@ export async function getStrategyCycleWorkspaceData(
     challenges,
     annualTargets,
     initiatives,
+    annualTargetOkrLinks: annualTargetOkrLinksResult.data ?? [],
+    annualTargetOkrExceptions: annualTargetOkrExceptionsResult.data ?? [],
     challengeDirectionLinks,
     directionObjectiveLinks,
     directionIndustries: directionIndustriesResult.data ?? [],

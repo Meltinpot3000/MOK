@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPhase0Context } from "@/lib/phase0/queries";
@@ -306,8 +307,9 @@ export default async function DirectorySyncPage({ searchParams }: PageProps) {
               <p className="mt-1 text-sm text-red-700">{highlightRun.error_message}</p>
             )}
             {diffEntries.length > 0 && (
-              <div className="mt-3 max-h-96 overflow-auto rounded border border-zinc-100">
-                <table className="w-full text-left text-xs">
+              <div className="mt-3 max-h-96 overflow-y-auto rounded border border-zinc-100">
+                <TableHorizontalScroll bordered={false}>
+                  <table className="w-max min-w-full text-left text-xs">
                   <thead className="bg-zinc-50 text-zinc-600">
                     <tr>
                       <th className="px-2 py-1">Aktion</th>
@@ -327,6 +329,7 @@ export default async function DirectorySyncPage({ searchParams }: PageProps) {
                     ))}
                   </tbody>
                 </table>
+                </TableHorizontalScroll>
                 {diffEntries.length > 200 && (
                   <p className="px-2 py-1 text-xs text-zinc-500">… {diffEntries.length - 200} weitere Einträge</p>
                 )}

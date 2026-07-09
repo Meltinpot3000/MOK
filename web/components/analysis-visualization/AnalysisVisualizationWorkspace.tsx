@@ -243,7 +243,7 @@ export function AnalysisVisualizationWorkspace({
   canWrite,
   graphMaintenanceActions,
 }: AnalysisVisualizationWorkspaceProps) {
-  const [viewMode, setViewMode] = useState<VisualizationViewMode>("cluster");
+  const [viewMode, setViewMode] = useState<VisualizationViewMode>("table");
   const [showLabels, setShowLabels] = useState(true);
   const [showLinks, setShowLinks] = useState(true);
   const [showDensity, setShowDensity] = useState(true);
@@ -729,9 +729,11 @@ export function AnalysisVisualizationWorkspace({
 
   return (
     <section className="brand-card p-6">
-      <h2 className="text-lg font-semibold text-zinc-900">Analyse-Visualisierung</h2>
+      <h2 className="text-lg font-semibold text-zinc-900">
+        Zusammenfassung und Visualisierung aller Analysepunkte
+      </h2>
       <p className="mt-1 text-xs text-zinc-600">
-        Explorative Netzwerkansicht mit Cluster-, Terrain- und Tabellenmodus.
+        Nutze dieses Tool, um Analysepunkte zu clustern und daraus übergeordnete Herausforderungen abzuleiten.
       </p>
       <div className="mt-3">
         <Toolbar

@@ -31,6 +31,13 @@ export type MatrixAnnualTarget = {
   baseline: number | null;
   current_measure: number | null;
   progress_percent: number;
+  status: "draft" | "active" | "completed" | "archived";
+  annual_target_type: string;
+  progress_calculation_mode: string;
+  target_year: number | null;
+  bonus_weight: number | null;
+  owner_membership_id: string | null;
+  derivation_note: string | null;
   comment: string | null;
   is_primary: boolean;
   updated_at: string;
@@ -89,7 +96,7 @@ export async function getMatrixWorkspaceData(organizationId: string, cycleInstan
       .schema("app")
       .from("annual_targets")
       .select(
-        "id, strategic_direction_id, title, baseline, current_measure, progress_percent, comment, is_primary, updated_at"
+        "id, strategic_direction_id, title, baseline, current_measure, progress_percent, status, annual_target_type, progress_calculation_mode, target_year, bonus_weight, owner_membership_id, derivation_note, comment, is_primary, updated_at"
       )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId),

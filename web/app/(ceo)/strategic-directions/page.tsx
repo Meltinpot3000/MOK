@@ -4,7 +4,7 @@ import {
   linkStrategicDirectionToIndustry,
   linkStrategicDirectionToOperatingModel,
 } from "@/app/(ceo)/strategy-dimensions/actions";
-import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { getPhase0Context, getPlanningCycleAtLevel } from "@/lib/phase0/queries";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getBusinessModels,
@@ -31,7 +31,7 @@ export default async function StrategicDirectionsPage({ searchParams }: Strategi
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const cycle = await getActivePlanningCycle(context.organizationId);
+  const cycle = await getPlanningCycleAtLevel(context.organizationId, 1);
   if (!cycle) redirect("/planning-cycles");
 
   const [industries, businessModels, operatingModels, links] = await Promise.all([

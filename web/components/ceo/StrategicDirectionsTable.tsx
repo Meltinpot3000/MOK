@@ -1,19 +1,35 @@
 "use client";
 
-import type { ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
-import { COVERAGE_LEVEL_META } from "@/lib/strategy-cycle/coverage-level";
+import { useMemo, useState } from "react";
 import {
-  STRATEGIC_DIRECTION_STATUSES,
-  STRATEGIC_DIRECTION_STATUS_LABELS_DE,
-  normalizeStrategicDirectionStatus,
-} from "@/lib/strategy-cycle/strategic-direction-lifecycle";
+  TableFilterBar,
+  TableFilterSearch,
+  TableFilterSelect,
+} from "@/components/table/TableFilterBar";
+import type { ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
+import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
+import {
+  definitionFieldInputClass,
+  isStrategyObjectDefinitionLocked,
+  getOperationalSignalLabelDe,
+  getReviewDecisionLabelDe,
+  formatStrategyObjectStandLabel,
+  readAssignmentIds,
+  resolveOpenDraftForVersioning,
+  strategyObjectStandSortValue,
+  STRATEGY_OBJECT_LIFECYCLE_LABELS_DE,
+  type StrategyObjectVersioningMeta,
+} from "@/lib/strategy-objects";
+import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
+import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
+import { COVERAGE_LEVEL_META } from "@/lib/strategy-cycle/coverage-level";
 import {
   addressedLinkCountToneClass,
   MATRIX_TABLE_LINK_PILLS_MAX,
 } from "@/lib/strategy-cycle/matrix-link-count-tone";
 import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
 import { CoverageStrengthPillButton } from "./CoverageStrengthPillButton";
-import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 
@@ -22,7 +38,6 @@ type Direction = {
   title: string;
   description: string | null;
   priority: number | string | null;
-  status: string | null;
   grouping: string | null;
   relevance_level: number | null;
   risk_level: number | null;
@@ -31,12 +46,13 @@ type Direction = {
   feasibility_score: number | null;
   created_at: string | null;
   updated_at: string | null;
+  versioning?: StrategyObjectVersioningMeta;
 };
 
 type StrategicDirectionsTableProps = {
   directions: Direction[];
   challenges: Array<{ id: string; title: string }>;
-  objectives: Array<{ id: string; title: string; status: string | null }>;
+  objectives: Array<{ id: string; title: string; versioning?: StrategyObjectVersioningMeta }>;
   industries: Array<{ id: string; name: string }>;
   businessModels: Array<{ id: string; name: string }>;
   programsByDirectionId: Record<string, Array<{ id: string; title: string }>>;
@@ -48,6 +64,17 @@ type StrategicDirectionsTableProps = {
   businessModelIdsByDirection: Record<string, string[]>;
   directionCoverageById: Record<string, { linked: number; total: number; percent: number }>;
   canWrite: boolean;
+  openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
+  returnPath?: string;
+  revisionActions?: {
+    proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
+    promoteStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    rejectStrategyObjectRevision: (formData: FormData) => Promise<void>;
+    linkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    unlinkStrategyObjectDraftAssignment: (formData: FormData) => Promise<void>;
+    setStrategyObjectLifecycle: (formData: FormData) => Promise<void>;
+  };
   actions: {
     updateStrategicDirectionAssessment: (formData: FormData) => Promise<void>;
     deleteStrategicDirectionInCycle: (formData: FormData) => Promise<void>;
@@ -92,21 +119,53 @@ export function StrategicDirectionsTable({
   businessModelIdsByDirection,
   directionCoverageById,
   canWrite,
+  openDraftByIdentityId = {},
+  returnPath = "/strategy-cycle?l1=strategic-directions&l2=design",
+  revisionActions,
   actions,
 }: StrategicDirectionsTableProps) {
+  const [filterLifecycle, setFilterLifecycle] = useState("");
+  const [searchTitle, setSearchTitle] = useState("");
+
+  const lifecycleFilterOptions = useMemo(() => {
+    const states = [
+      ...new Set(
+        directions
+          .map((d) => d.versioning?.identity_lifecycle_state)
+          .filter((value): value is NonNullable<typeof value> => Boolean(value))
+      ),
+    ];
+    return states.map((state) => ({
+      value: state,
+      label: STRATEGY_OBJECT_LIFECYCLE_LABELS_DE[state] ?? state,
+    }));
+  }, [directions]);
+
+  const filteredDirections = useMemo(() => {
+    return directions.filter((d) => {
+      if (filterLifecycle && d.versioning?.identity_lifecycle_state !== filterLifecycle) {
+        return false;
+      }
+      if (!matchesTableTitleSearch(d.title, searchTitle)) return false;
+      return true;
+    });
+  }, [directions, filterLifecycle, searchTitle]);
+
+  const draftExpandedRowIds = useMemo(
+    () =>
+      filteredDirections
+        .filter((d) => resolveOpenDraftForVersioning(d.versioning, openDraftByIdentityId))
+        .map((d) => d.id),
+    [filteredDirections, openDraftByIdentityId]
+  );
+
   const columns = [
     {
       id: "title",
       label: "Titel",
-      sortValue: (d: Direction) =>
-        `${normalizeStrategicDirectionStatus(d.status)} ${d.title}`,
+      sortValue: (d: Direction) => d.title,
       render: (d: Direction) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-zinc-900">{d.title}</div>
-          <div className="text-xs text-zinc-500">
-            {STRATEGIC_DIRECTION_STATUS_LABELS_DE[normalizeStrategicDirectionStatus(d.status)]}
-          </div>
-        </div>
+        <span className="truncate font-medium text-zinc-900">{d.title}</span>
       ),
     },
     {
@@ -124,6 +183,37 @@ export function StrategicDirectionsTable({
       defaultVisible: false,
       sortValue: (d: Direction) => d.grouping ?? null,
       render: (d: Direction) => d.grouping ?? "-",
+    },
+    {
+      id: "versioning_stand",
+      label: "Stand",
+      defaultVisible: true,
+      sortValue: (d: Direction) => {
+        const openDraft = resolveOpenDraftForVersioning(d.versioning, openDraftByIdentityId);
+        return strategyObjectStandSortValue(d.versioning, openDraft);
+      },
+      render: (d: Direction) => {
+        const openDraft = resolveOpenDraftForVersioning(d.versioning, openDraftByIdentityId);
+        return (
+          <span className={openDraft ? "text-sky-900" : undefined}>
+            {formatStrategyObjectStandLabel(d.versioning, openDraft)}
+          </span>
+        );
+      },
+    },
+    {
+      id: "versioning_signal",
+      label: "Lage",
+      defaultVisible: true,
+      sortValue: (d: Direction) => d.versioning?.latest_operational_signal ?? null,
+      render: (d: Direction) => getOperationalSignalLabelDe(d.versioning?.latest_operational_signal),
+    },
+    {
+      id: "versioning_review",
+      label: "Review",
+      defaultVisible: true,
+      sortValue: (d: Direction) => d.versioning?.latest_review_decision ?? null,
+      render: (d: Direction) => getReviewDecisionLabelDe(d.versioning?.latest_review_decision),
     },
     {
       id: "coverage",
@@ -317,12 +407,28 @@ export function StrategicDirectionsTable({
   ];
 
   return (
-    <ExpandableTable<Direction>
+    <div className="w-full min-w-0 max-w-full space-y-3">
+      <TableFilterBar>
+        <TableFilterSelect
+          label="Lifecycle"
+          value={filterLifecycle}
+          onChange={setFilterLifecycle}
+          options={lifecycleFilterOptions}
+        />
+        <TableFilterSearch value={searchTitle} onChange={setSearchTitle} />
+      </TableFilterBar>
+
+      <ExpandableTable<Direction>
       columns={columns}
-      rows={directions}
+      rows={filteredDirections}
       getRowId={(d) => d.id}
+      initialExpandedIds={draftExpandedRowIds}
       expandLabel="Details"
-      emptyMessage="Keine strategischen Sto\u00DFrichtungen vorhanden."
+      emptyMessage={
+        directions.length === 0
+          ? "Keine strategischen Sto\u00DFrichtungen vorhanden."
+          : "Keine Treffer für die gewählten Filter."
+      }
       renderExpandedContent={(direction) => {
         const linkedChallengeIds = new Set(
           challengeIdsByDirection[direction.id] ?? []
@@ -342,6 +448,72 @@ export function StrategicDirectionsTable({
             total: challenges.length,
             percent: 0,
           };
+        const definitionLocked = isStrategyObjectDefinitionLocked({
+          objectType: "strategic_direction",
+          versioning: direction.versioning,
+        });
+        const openDraft = resolveOpenDraftForVersioning(direction.versioning, openDraftByIdentityId);
+        const lifecycleState = direction.versioning?.identity_lifecycle_state ?? null;
+        const identityId = direction.versioning?.object_identity_id ?? null;
+        const baseRevisionId = direction.versioning?.revision_id ?? direction.id;
+
+        const draftMode = Boolean(openDraft && revisionActions);
+        const assignmentsReadOnly = !draftMode && definitionLocked;
+        const draftIndustryIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "industry") : []
+        );
+        const draftBusinessModelIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "business_model") : []
+        );
+        const showUpdateButton = !definitionLocked && !openDraft;
+
+        const renderAssignmentPill = (
+          kind: "industry" | "business_model",
+          id: string,
+          label: string,
+          liveLinkAction: (fd: FormData) => Promise<void>,
+          liveUnlinkAction: (fd: FormData) => Promise<void>,
+          liveIdField: string,
+          liveIsLinked: boolean,
+          draftIsLinked: boolean
+        ) => {
+          if (draftMode && openDraft && revisionActions) {
+            return (
+              <EntityPillButton
+                key={id}
+                entityKey="revision_id"
+                entityValue={openDraft.id}
+                extraFields={{ assignment_kind: kind, assignment_id: id, return_path: returnPath }}
+                isLinked={draftIsLinked}
+                linkAction={revisionActions.linkStrategyObjectDraftAssignment}
+                unlinkAction={revisionActions.unlinkStrategyObjectDraftAssignment}
+                canWrite={canWrite}
+                title={label}
+                linkedClassName={pillLinked()}
+                unlinkedClassName={pillNeutral()}
+              >
+                {label}
+              </EntityPillButton>
+            );
+          }
+          return (
+            <EntityPillButton
+              key={id}
+              entityKey="strategic_direction_id"
+              entityValue={direction.id}
+              extraFields={{ [liveIdField]: id }}
+              isLinked={liveIsLinked}
+              linkAction={liveLinkAction}
+              unlinkAction={liveUnlinkAction}
+              canWrite={canWrite && !assignmentsReadOnly}
+              title={label}
+              linkedClassName={pillLinked()}
+              unlinkedClassName={pillNeutral()}
+            >
+              {label}
+            </EntityPillButton>
+          );
+        };
 
         return (
           <div className="space-y-4">
@@ -351,130 +523,140 @@ export function StrategicDirectionsTable({
                 {coverage.total || 0})
               </span>
               <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
-                
                 Priorität (Score):{" "}
                 {direction.priority != null && direction.priority !== ""
                   ? Number(direction.priority).toFixed(2)
                   : "—"}
               </span>
-              <ConfirmBeforeSubmitForm
-                action={actions.deleteStrategicDirectionInCycle}
-                className="inline"
-                title="Strategische Stoßrichtung löschen?"
-                description="Die Stoßrichtung wird aus diesem Planungszyklus entfernt."
-                confirmLabel="Löschen"
-              >
-                <input type="hidden" name="strategic_direction_id" value={direction.id} />
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                >
-                  Loeschen
-                </button>
-              </ConfirmBeforeSubmitForm>
             </div>
 
-            <form
-              action={actions.updateStrategicDirectionAssessment}
-              className="grid grid-cols-1 gap-2 md:grid-cols-5"
-            >
-              <input
-                type="hidden"
-                name="strategic_direction_id"
-                value={direction.id}
+            {openDraft && revisionActions ? (
+              <StrategyObjectDraftPanel
+                draft={openDraft}
+                returnPath={returnPath}
+                canWrite={canWrite}
+                actions={revisionActions}
               />
-              <label className="text-xs text-zinc-600 md:col-span-2">
-                Titel
+            ) : null}
+
+            {!openDraft ? (
+              <form
+                action={actions.updateStrategicDirectionAssessment}
+                className="grid grid-cols-1 gap-2 md:grid-cols-5"
+              >
                 <input
-                  name="title"
-                  defaultValue={direction.title}
-                  required
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                  type="hidden"
+                  name="strategic_direction_id"
+                  value={direction.id}
                 />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Strategischer Wert
-                <input
-                  type="number"
-                  name="strategic_value_score"
-                  defaultValue={direction.strategic_value_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Passung Kompetenzen
-                <input
-                  type="number"
-                  name="capability_fit_score"
-                  defaultValue={direction.capability_fit_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Machbarkeit
-                <input
-                  type="number"
-                  name="feasibility_score"
-                  defaultValue={direction.feasibility_score ?? 3}
-                  min={1}
-                  max={5}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Risiko
-                <input
-                  type="number"
-                  name="risk_score"
-                  defaultValue={direction.risk_level ?? 3}
-                  min={1}
-                  max={5}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label className="text-xs text-zinc-600">
-                Status
-                <select
-                  name="status"
-                  defaultValue={normalizeStrategicDirectionStatus(direction.status)}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                >
-                  {STRATEGIC_DIRECTION_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {STRATEGIC_DIRECTION_STATUS_LABELS_DE[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-zinc-600 md:col-span-5">
-                Beschreibung
-                <textarea
-                  name="description"
-                  defaultValue={direction.description ?? ""}
-                  rows={3}
-                  className="mt-1 block w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <p className="text-[11px] text-zinc-500 md:col-span-5">
-                
-                Priorität (1–5) und Stoßrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
-              </p>
-              <div className="md:col-span-5">
-                <button
-                  type="submit"
-                  disabled={!canWrite}
-                  className="brand-btn px-3 py-1.5 text-xs"
-                >
-                  
-                  Stoßrichtung aktualisieren
-                </button>
-              </div>
-            </form>
+                <label className="text-xs text-zinc-600 md:col-span-2">
+                  Titel
+                  <input
+                    name="title"
+                    defaultValue={direction.title}
+                    required
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Strategischer Wert
+                  <input
+                    type="number"
+                    name="strategic_value_score"
+                    defaultValue={direction.strategic_value_score ?? 3}
+                    min={1}
+                    max={5}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Passung Kompetenzen
+                  <input
+                    type="number"
+                    name="capability_fit_score"
+                    defaultValue={direction.capability_fit_score ?? 3}
+                    min={1}
+                    max={5}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Machbarkeit
+                  <input
+                    type="number"
+                    name="feasibility_score"
+                    defaultValue={direction.feasibility_score ?? 3}
+                    min={1}
+                    max={5}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="text-xs text-zinc-600">
+                  Risiko
+                  <input
+                    type="number"
+                    name="risk_score"
+                    defaultValue={direction.risk_level ?? 3}
+                    min={1}
+                    max={5}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <label className="block text-xs text-zinc-600 md:col-span-5">
+                  Beschreibung
+                  <textarea
+                    name="description"
+                    defaultValue={direction.description ?? ""}
+                    rows={3}
+                    readOnly={definitionLocked}
+                    aria-readonly={definitionLocked}
+                    className={definitionFieldInputClass(
+                      definitionLocked,
+                      "mt-1 block w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    )}
+                  />
+                </label>
+                <p className="text-[11px] text-zinc-500 md:col-span-5">
+                  Priorität (1–5) und Stoßrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
+                </p>
+                {showUpdateButton ? (
+                  <div className="md:col-span-5">
+                    <button
+                      type="submit"
+                      disabled={!canWrite}
+                      className="brand-btn px-3 py-1.5 text-xs"
+                    >
+                      Stoßrichtung aktualisieren
+                    </button>
+                  </div>
+                ) : null}
+              </form>
+            ) : null}
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <PillSection title="Herausforderungen (Vorg\u00E4nger)">
@@ -506,7 +688,7 @@ export function StrategicDirectionsTable({
                 {objectives.map((objective) => {
                   const isLinked = linkedObjectiveIds.has(objective.id);
                   const level = objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
-                  const linkOk = isObjectiveEligibleForDirectionLink(objective.status);
+                  const linkOk = isObjectiveEligibleForDirectionLink(objective.versioning);
                   return (
                     <CoverageStrengthPillButton
                       key={objective.id}
@@ -533,50 +715,50 @@ export function StrategicDirectionsTable({
                 })}
               </PillSection>
 
-              <PillSection title="Industrien">
-                {industries.map((industry) => {
-                  const isLinked = linkedIndustryIds.has(industry.id);
-                  return (
-                    <EntityPillButton
-                      key={industry.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ industry_id: industry.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkStrategicDirectionToIndustryInCycle}
-                      unlinkAction={actions.unlinkStrategicDirectionFromIndustryInCycle}
-                      canWrite={canWrite}
-                      title={industry.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {industry.name}
-                    </EntityPillButton>
-                  );
-                })}
+              <PillSection
+                title={
+                  assignmentsReadOnly
+                    ? "Industrien (in Revision fixiert)"
+                    : draftMode
+                    ? "Industrien (Entwurf)"
+                    : "Industrien"
+                }
+              >
+                {industries.map((industry) =>
+                  renderAssignmentPill(
+                    "industry",
+                    industry.id,
+                    industry.name,
+                    actions.linkStrategicDirectionToIndustryInCycle,
+                    actions.unlinkStrategicDirectionFromIndustryInCycle,
+                    "industry_id",
+                    linkedIndustryIds.has(industry.id),
+                    draftIndustryIds.has(industry.id)
+                  )
+                )}
               </PillSection>
 
-              <PillSection title="Gesch\u00E4ftsmodelle">
-                {businessModels.map((model) => {
-                  const isLinked = linkedBusinessModelIds.has(model.id);
-                  return (
-                    <EntityPillButton
-                      key={model.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ business_model_id: model.id }}
-                      isLinked={isLinked}
-                      linkAction={actions.linkStrategicDirectionToBusinessModelInCycle}
-                      unlinkAction={actions.unlinkStrategicDirectionFromBusinessModelInCycle}
-                      canWrite={canWrite}
-                      title={model.name}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {model.name}
-                    </EntityPillButton>
-                  );
-                })}
+              <PillSection
+                title={
+                  assignmentsReadOnly
+                    ? "Geschäftsmodelle (in Revision fixiert)"
+                    : draftMode
+                    ? "Geschäftsmodelle (Entwurf)"
+                    : "Geschäftsmodelle"
+                }
+              >
+                {businessModels.map((model) =>
+                  renderAssignmentPill(
+                    "business_model",
+                    model.id,
+                    model.name,
+                    actions.linkStrategicDirectionToBusinessModelInCycle,
+                    actions.unlinkStrategicDirectionFromBusinessModelInCycle,
+                    "business_model_id",
+                    linkedBusinessModelIds.has(model.id),
+                    draftBusinessModelIds.has(model.id)
+                  )
+                )}
               </PillSection>
             </div>
 
@@ -589,9 +771,28 @@ export function StrategicDirectionsTable({
                 ))}
               </PillSection>
             )}
+
+            {revisionActions ? (
+              <StrategyObjectActionBar
+                objectType="strategic_direction"
+                objectId={direction.id}
+                identityId={identityId}
+                lifecycleState={lifecycleState}
+                baseRevisionId={baseRevisionId}
+                hasOpenDraft={Boolean(openDraft)}
+                canWrite={canWrite}
+                returnPath={returnPath}
+                objectNoun="Stoßrichtung"
+                deleteAction={actions.deleteStrategicDirectionInCycle}
+                deleteIdField="strategic_direction_id"
+                lifecycleAction={revisionActions.setStrategyObjectLifecycle}
+                proposeAction={revisionActions.proposeStrategyObjectDraft}
+              />
+            ) : null}
           </div>
         );
       }}
     />
+    </div>
   );
 }

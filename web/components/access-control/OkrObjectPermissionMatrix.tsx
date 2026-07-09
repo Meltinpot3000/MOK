@@ -1,3 +1,4 @@
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { Fragment } from "react";
 import {
   OKR_OBJECT_PERMISSION_GROUP_LABEL_DE,
@@ -42,7 +43,8 @@ export function OkrObjectPermissionMatrix({ roles, cells, canWrite }: Props) {
         </ul>
       ) : null}
 
-      <table className="min-w-full text-sm">
+      <TableHorizontalScroll>
+        <table className="w-max min-w-full text-sm">
         <thead>
           <tr className="border-b border-zinc-200 text-left text-zinc-500">
             <th className="py-2 pr-3 font-medium text-zinc-700">Bereich / Rolle</th>
@@ -103,6 +105,7 @@ export function OkrObjectPermissionMatrix({ roles, cells, canWrite }: Props) {
           ))}
         </tbody>
       </table>
+      </TableHorizontalScroll>
     </div>
   );
 }

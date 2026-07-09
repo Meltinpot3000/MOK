@@ -2,7 +2,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAuthenticatedUserId } from "@/lib/ceo/queries";
 import { getAppShellAccess } from "@/lib/rbac/page-access";
-import { getPlanningCyclesForOrganization } from "@/lib/planning/queries";
+import { pickPlanningCycleAtLevel } from "@/lib/ceo/pick-planning-cycle";
+import { getPlanningCyclesForOrganization, type PlanningCycleRecord } from "@/lib/planning/queries";
 
 export type Phase0Context = {
   organizationId: string;
@@ -171,6 +172,26 @@ export async function getMembershipsForResponsibleSetup(organizationId: string):
 
 export async function getPlanningCycles(organizationId: string) {
   return getPlanningCyclesForOrganization(organizationId);
+}
+
+/**
+ * Aktueller Planungszyklus auf fester Hierarchie-Ebene (L1 Strategie, L2 Jahresplanung, L3 OKR).
+ * Kein Fallback auf andere Ebenen.
+ */
+export async function getPlanningCycleAtLevel(
+  organizationId: string,
+  levelNo: 1 | 2 | 3,
+  preferredCycleId?: string | null
+): Promise<PlanningCycleRecord | null> {
+  const cycles = await getPlanningCyclesForOrganization(organizationId);
+  if (cycles.length === 0) return null;
+
+  if (preferredCycleId) {
+    const preferred = cycles.find((cycle) => cycle.id === preferredCycleId);
+    if (preferred && (preferred.level_no ?? 1) === levelNo) return preferred;
+  }
+
+  return pickPlanningCycleAtLevel(cycles, levelNo, Date.now()).cycle;
 }
 
 export async function getActivePlanningCycle(

@@ -2,6 +2,7 @@
 
 import { ConfirmBeforeSubmitForm } from "@/components/ui/ConfirmBeforeSubmitForm";
 import { SortableTableHeader } from "@/components/table/SortableTableHeader";
+import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import { memberInvitationStatusLabelDe } from "@/lib/member-invitation-status";
 import { compareSortKeys } from "@/lib/table/compare-sort-keys";
 import Image from "next/image";
@@ -78,7 +79,8 @@ export function InvitationsPendingTable({
   }, [invitationViews, sortCol, sortDir]);
 
   return (
-    <table className="min-w-full text-sm">
+    <TableHorizontalScroll>
+      <table className="w-max min-w-full text-sm">
       <thead>
         <tr className="border-b border-zinc-200 text-left text-zinc-500">
           <SortableTableHeader
@@ -192,5 +194,6 @@ export function InvitationsPendingTable({
         ))}
       </tbody>
     </table>
+    </TableHorizontalScroll>
   );
 }

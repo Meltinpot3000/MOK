@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getSidebarAccessContext } from "@/lib/rbac/page-access";
+import { getStrategyMatrixAccessContext } from "@/lib/rbac/page-access";
 import { getMatrixCycleContextOrRedirect } from "@/lib/strategy-matrix/cycle-context";
 import { normalizeStrategicDirectionStatus } from "@/lib/strategy-cycle/strategic-direction-lifecycle";
 import { computeDirectionPriorityFromAssessment } from "@/lib/strategy-cycle/scoring";
@@ -14,12 +14,12 @@ type MatrixContext = {
 };
 
 async function getMatrixContextOrRedirect(): Promise<MatrixContext> {
-  const access = await getSidebarAccessContext("strategy-cycle");
+  const access = await getStrategyMatrixAccessContext();
   if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
   return getMatrixCycleContextOrRedirect();
 }
 
-function done(path = "/strategy-cycle?l1=corporate-strategy&l2=strategy-matrix"): never {
+function done(path = "/strategy-matrix"): never {
   revalidatePath("/strategy-cycle");
   revalidatePath("/strategy-matrix");
   redirect(path);
@@ -397,56 +397,6 @@ export async function deleteCell(formData: FormData) {
     .eq("planning_cycle_id", cycle.id)
     .eq("strategic_direction_id", String(formData.get("direction_id")))
     .eq("strategic_challenge_id", String(formData.get("challenge_id")));
-  done();
-}
-
-export async function createAnnualTarget(formData: FormData) {
-  const { localContext, cycle } = await getMatrixContextOrRedirect();
-  const directionId = String(formData.get("direction_id") ?? "");
-
-  const supabase = await createSupabaseServerClient();
-  const { data: existing } = await supabase
-    .schema("app")
-    .from("annual_targets")
-    .select("id")
-    .eq("organization_id", localContext.organizationId)
-    .eq("planning_cycle_id", cycle.id)
-    .eq("strategic_direction_id", directionId)
-    .limit(1);
-
-  await supabase.schema("app").from("annual_targets").insert({
-    organization_id: localContext.organizationId,
-    planning_cycle_id: cycle.id,
-    strategic_direction_id: directionId,
-    title: String(formData.get("title") ?? "").trim(),
-    baseline: Number(formData.get("baseline") ?? 0),
-    current_measure: Number(formData.get("current_measure") ?? 0),
-    progress_percent: Number(formData.get("progress_percent") ?? 0),
-    comment: String(formData.get("comment") ?? "").trim() || null,
-    is_primary: !existing || existing.length === 0,
-    created_by_membership_id: localContext.membershipId,
-  });
-  done();
-}
-
-export async function updateAnnualTarget(formData: FormData) {
-  const { localContext, cycle } = await getMatrixContextOrRedirect();
-  const targetId = String(formData.get("target_id") ?? "");
-
-  const supabase = await createSupabaseServerClient();
-  await supabase
-    .schema("app")
-    .from("annual_targets")
-    .update({
-      title: String(formData.get("title") ?? "").trim(),
-      baseline: Number(formData.get("baseline") ?? 0),
-      current_measure: Number(formData.get("current_measure") ?? 0),
-      progress_percent: Number(formData.get("progress_percent") ?? 0),
-      comment: String(formData.get("comment") ?? "").trim() || null,
-    })
-    .eq("id", targetId)
-    .eq("organization_id", localContext.organizationId)
-    .eq("planning_cycle_id", cycle.id);
   done();
 }
 
