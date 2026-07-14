@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export type AccessControlTabId = "navigation" | "okr" | "rules";
+export type AccessControlTabId = "navigation" | "okr" | "strategy-review" | "rules";
 
 type Props = {
   active: AccessControlTabId;
@@ -9,6 +9,7 @@ type Props = {
 const tabs: { id: AccessControlTabId; label: string }[] = [
   { id: "navigation", label: "Navigation" },
   { id: "okr", label: "OKR-Objektrechte" },
+  { id: "strategy-review", label: "Strategie-Review" },
   { id: "rules", label: "OKR-Systemregeln" },
 ];
 

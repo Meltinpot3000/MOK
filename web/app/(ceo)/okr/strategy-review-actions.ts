@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getAuthenticatedUserId, getCeoAccessContext } from "@/lib/ceo/queries";
 import { isStrategyReviewParticipantRole } from "@/lib/strategy-review/participants";
 import { isStrategyReviewDevToolsAllowed } from "@/lib/strategy-review/dev-tools-access";
+import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 async function requireContext() {
@@ -225,6 +226,18 @@ export async function inviteStrategyReviewParticipantAction(
   if (!isStrategyReviewParticipantRole(reviewRole)) {
     return { ok: false, error: "Ungültige Review-Rolle." };
   }
+
+  const perms = await getPermissionCodesForMembership(access.membershipId);
+  const canModerate = perms.has("strategy_review.moderate");
+  const canAssignLead = perms.has("strategy_review.lead_assign");
+  if (reviewRole === "lead") {
+    if (!canModerate && !canAssignLead) {
+      return { ok: false, error: "Keine Berechtigung, Review-Leitung zuzuweisen." };
+    }
+  } else if (!canModerate) {
+    return { ok: false, error: "Keine Berechtigung, Teilnehmer einzuladen." };
+  }
+
   const supabase = await createSupabaseServerClient();
 
   const { data: review, error: reviewErr } = await supabase

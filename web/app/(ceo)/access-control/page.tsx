@@ -11,12 +11,20 @@ import {
   saveOkrObjectRolePermissions,
 } from "@/lib/rbac/okr-object-role-permissions";
 import { OKR_OBJECT_PERMISSION_CODES } from "@/lib/rbac/okr-object-permission-ui";
+import {
+  getStrategyReviewPermissionMatrix,
+  restoreStrategyReviewPermissionDefaults,
+  saveStrategyReviewRolePermissions,
+} from "@/lib/rbac/strategy-review-role-permissions";
+import { STRATEGY_REVIEW_PERMISSION_CODES } from "@/lib/rbac/strategy-review-permission-ui";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getPermissionCodesForMembership } from "@/lib/rbac/permission-codes";
 import { RoleAccessMatrixTable } from "@/components/access-control/RoleAccessMatrixTable";
 import { AccessControlTabs, type AccessControlTabId } from "@/components/access-control/AccessControlTabs";
 import { OkrObjectPermissionMatrix } from "@/components/access-control/OkrObjectPermissionMatrix";
 import { RestoreOkrPermissionPresetsButton } from "@/components/access-control/RestoreOkrPermissionPresetsButton";
+import { StrategyReviewPermissionMatrix } from "@/components/access-control/StrategyReviewPermissionMatrix";
+import { RestoreStrategyReviewPermissionPresetsButton } from "@/components/access-control/RestoreStrategyReviewPermissionPresetsButton";
 import { SIDEBAR_ITEMS } from "@/lib/sidebar-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -27,6 +35,7 @@ type PageProps = {
 function parseTab(raw: string | undefined): AccessControlTabId {
   if (raw === "okr") return "okr";
   if (raw === "rules") return "rules";
+  if (raw === "strategy-review") return "strategy-review";
   return "navigation";
 }
 
@@ -54,6 +63,7 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
   const navWrite = pageAccess.canWrite;
   const canSaveNavMatrix = navWrite && canManageRoles;
   const canSaveOkrMatrix = navWrite && canManageRoles;
+  const canSaveStrategyReviewMatrix = navWrite && canManageRoles;
 
   const { roles, matrix } = await getRoleAccessMatrix(access.organizationId);
   const matrixMap = new Map(matrix.map((row) => [`${row.role_id}__${row.item_id}`, row.level]));
@@ -65,6 +75,11 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
   const okrMatrixPromise =
     tab === "okr"
       ? getOkrObjectPermissionMatrix(access.organizationId)
+      : Promise.resolve(null);
+
+  const strategyReviewMatrixPromise =
+    tab === "strategy-review"
+      ? getStrategyReviewPermissionMatrix(access.organizationId)
       : Promise.resolve(null);
 
   const orgRulesPromise =
@@ -131,7 +146,11 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
           annualTargetsActivationRequiresSignedStatus: true,
         });
 
-  const [okrData, orgRules] = await Promise.all([okrMatrixPromise, orgRulesPromise]);
+  const [okrData, strategyReviewData, orgRules] = await Promise.all([
+    okrMatrixPromise,
+    strategyReviewMatrixPromise,
+    orgRulesPromise,
+  ]);
   const {
     okrKrOwnerMustMatchObjective,
     okrReviewNotifyOwnersOnSchedule,
@@ -243,6 +262,66 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
     redirect("/access-control?tab=okr");
   }
 
+  async function saveStrategyReviewMatrixAction(formData: FormData) {
+    "use server";
+
+    const localAccess = await getSidebarAccessContext("access-control");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) {
+      redirect("/no-access");
+    }
+
+    const localUserId = await getAuthenticatedUserId();
+    if (!localUserId) redirect("/login");
+    const localContext = await getCeoAccessContext(localUserId);
+    if (!localContext) redirect("/no-access");
+
+    const localPerms = await getPermissionCodesForMembership(localContext.membershipId);
+    if (!localPerms.has("admin.manage_roles")) {
+      redirect("/no-access");
+    }
+
+    const local = await getRoleAccessMatrix(localContext.organizationId);
+    const roleIds = local.roles.map((r) => r.id);
+    const granted = new Set<string>();
+    for (const role of local.roles) {
+      for (const code of STRATEGY_REVIEW_PERMISSION_CODES) {
+        const key = `${role.id}__${code}`;
+        if (formData.get(key) === "on") granted.add(key);
+      }
+    }
+
+    await saveStrategyReviewRolePermissions(localContext.organizationId, roleIds, granted);
+    revalidatePath("/access-control");
+    redirect("/access-control?tab=strategy-review");
+  }
+
+  async function restoreStrategyReviewPresetsAction(_formData: FormData) {
+    "use server";
+
+    const localAccess = await getSidebarAccessContext("access-control");
+    if (localAccess.state !== "ok" || !localAccess.canWrite) {
+      redirect("/no-access");
+    }
+
+    const localUserId = await getAuthenticatedUserId();
+    if (!localUserId) redirect("/login");
+    const localContext = await getCeoAccessContext(localUserId);
+    if (!localContext) redirect("/no-access");
+
+    const localPerms = await getPermissionCodesForMembership(localContext.membershipId);
+    if (!localPerms.has("admin.manage_roles")) {
+      redirect("/no-access");
+    }
+
+    const local = await getRoleAccessMatrix(localContext.organizationId);
+    await restoreStrategyReviewPermissionDefaults(
+      localContext.organizationId,
+      local.roles.map((r) => ({ id: r.id, code: r.code }))
+    );
+    revalidatePath("/access-control");
+    redirect("/access-control?tab=strategy-review");
+  }
+
   async function updateOkrKrOwnerPolicyAction(formData: FormData) {
     "use server";
 
@@ -329,7 +408,8 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
           Rollenrechte, OKR-Objektzugriff und Systemregeln
         </h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Navigation pro Modul, granulare OKR-Objektrechte pro Rolle sowie Mandantenregeln für die OKR-Planung.
+          Navigation pro Modul, granulare OKR-Objektrechte, Strategie-Review-Capabilities sowie
+          Mandantenregeln für die OKR-Planung.
         </p>
       </header>
 
@@ -412,6 +492,49 @@ export default async function AccessControlPage({ searchParams }: PageProps) {
                 className="brand-btn px-4 py-2 text-sm"
               >
                 OKR-Objektrechte speichern
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {tab === "strategy-review" && strategyReviewData ? (
+        <section className="brand-card space-y-4 p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-900">Strategie-Review</h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Verfahrens-Capabilities pro Rolle (
+                <code className="text-xs">strategy_review.*</code>
+                ), analog zu <code className="text-xs">okr.review.*</code>. Die
+                Teilnehmerrolle «Review-Leitung» bleibt fallbezogen und steuert zusätzlich das
+                Meeting starten im konkreten Review.
+              </p>
+            </div>
+            <RestoreStrategyReviewPermissionPresetsButton
+              disabled={!canSaveStrategyReviewMatrix}
+              formAction={restoreStrategyReviewPresetsAction}
+            />
+          </div>
+          {!canManageRoles ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Zum Speichern ist <strong>admin.manage_roles</strong> erforderlich.
+            </p>
+          ) : null}
+
+          <form action={saveStrategyReviewMatrixAction}>
+            <StrategyReviewPermissionMatrix
+              roles={strategyReviewData.roles}
+              cells={strategyReviewData.cells}
+              canWrite={canSaveStrategyReviewMatrix}
+            />
+            <div className="mt-4 flex justify-end">
+              <button
+                type="submit"
+                disabled={!canSaveStrategyReviewMatrix}
+                className="brand-btn px-4 py-2 text-sm"
+              >
+                Strategie-Review-Rechte speichern
               </button>
             </div>
           </form>

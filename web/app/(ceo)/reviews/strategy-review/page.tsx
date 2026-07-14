@@ -116,6 +116,7 @@ export default async function ReviewsStrategyReviewPage({ searchParams }: PagePr
   const trigger = await fetchReviewTriggerState(cycle.id);
   const permissionCodes = await getPermissionCodesForMembership(context.membershipId);
   const canModerate = permissionCodes.has("strategy_review.moderate");
+  const canAssignLead = permissionCodes.has("strategy_review.lead_assign");
   const { email: viewerEmail } = await getAuthUserSidebarIdentity();
   const showDevTools = isStrategyReviewDevToolsAllowed(viewerEmail);
   const procedureStartGate = evaluateStrategyReviewProcedureStartGate({
@@ -156,6 +157,7 @@ export default async function ReviewsStrategyReviewPage({ searchParams }: PagePr
         membershipId={context.membershipId}
         canWrite={pageAccess.canWrite}
         canModerate={canModerate}
+        canAssignLead={canAssignLead}
         procedureStartGate={procedureStartGate}
         hidePageHeader
         showDevTools={showDevTools}

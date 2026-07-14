@@ -167,6 +167,8 @@ type Props = {
   membershipId: string;
   canWrite: boolean;
   canModerate?: boolean;
+  /** Darf Review-Leitung zuweisen (strategy_review.lead_assign). */
+  canAssignLead?: boolean;
   procedureStartGate?: StrategyReviewProcedureStartGate | null;
   /** Wenn gesetzt, entfällt die doppelte Überschrift (Seite liefert Titel + Reiter). */
   hidePageHeader?: boolean;
@@ -198,6 +200,7 @@ export function StrategyReviewProcedureShell({
   membershipId,
   canWrite,
   canModerate = false,
+  canAssignLead = false,
   procedureStartGate = null,
   hidePageHeader = false,
   showDevTools = false,
@@ -563,7 +566,7 @@ export function StrategyReviewProcedureShell({
           reviewId={review.id}
           participants={participants}
           memberOptions={memberOptions}
-          canWrite={canModerate}
+          canWrite={canModerate || canAssignLead}
         />
       )}
 

@@ -561,6 +561,42 @@ export default function UserManualPage() {
           </div>
 
           <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50/80 p-4 text-sm text-zinc-700">
+            <h4 className="font-semibold text-zinc-900">Register „Strategie-Review“</h4>
+            <p>
+              Verfahrens-Capabilities (<code className="text-xs">strategy_review.*</code>), analog zu{" "}
+              <code className="text-xs">okr.review.*</code>. Checkboxen pro Rolle, Speichern ersetzt nur diesen Code-Satz.
+              Standard-Presets für org_admin, executive, department_lead und team_member.
+            </p>
+            <ul className="list-disc space-y-1 pl-5 text-xs sm:text-sm">
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.read</code> – Reviewverfahren einsehen
+              </li>
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.feedback</code> – Vorab-Feedback geben
+              </li>
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.moderate</code> – Verfahren führen
+                (Ankündigung, Prep, Teilnehmer, Entscheidungen)
+              </li>
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.lead_assign</code> – Review-Leitung zuweisen
+              </li>
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.release</code> – Änderungen bestätigen und
+                abschließen
+              </li>
+              <li>
+                <code className="rounded bg-white px-1">strategy_review.force_ready</code> – Readiness erzwingen
+              </li>
+            </ul>
+            <p>
+              Die <span className="font-medium text-zinc-900">Teilnehmerrolle Lead</span> bleibt fallbezogen: sie steuert im
+              konkreten Review u. a. das Meeting starten und Ankündigung im Lead-Fenster. Org-Rechte und Lead-Zuweisung
+              greifen zusammen.
+            </p>
+          </div>
+
+          <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50/80 p-4 text-sm text-zinc-700">
             <h4 className="font-semibold text-zinc-900">Register „OKR-Systemregeln“</h4>
             <p className="font-medium text-zinc-900">Fest verdrahtete Regeln (nur Erläuterung, keine Schalter)</p>
             <ul className="list-disc space-y-2 pl-5">
