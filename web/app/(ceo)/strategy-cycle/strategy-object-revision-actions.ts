@@ -17,8 +17,8 @@ import {
 import { fetchRevisionById, fetchOpenDraftForIdentity } from "@/lib/strategy-objects/revision-queries";
 import { normalizeStrategyRevisionErrorCode } from "@/lib/strategy-objects/revision-status-messages";
 import {
-  STRATEGY_OBJECT_ASSIGNMENT_KINDS,
   STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG,
+  assignmentKindsForObjectType,
   normalizeAssignmentKind,
   readAssignmentIds,
   toggleAssignmentId,
@@ -76,8 +76,10 @@ async function readLiveAssignmentIds(
   cycleInstanceId: string,
   kind: StrategyObjectAssignmentKind
 ): Promise<string[]> {
+  const tableCfg = STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG[objectType].tables[kind];
+  if (!tableCfg) return [];
   const cfg = STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG[objectType];
-  const { table, valueColumn } = cfg.tables[kind];
+  const { table, valueColumn } = tableCfg;
   const { data } = await supabase
     .schema("app")
     .from(table)
@@ -90,6 +92,77 @@ async function readLiveAssignmentIds(
     .filter((value): value is string => typeof value === "string");
 }
 
+async function syncChallengePrimaryAnalysisEntry(
+  supabase: RevisionActionSupabase,
+  organizationId: string,
+  cycleId: string,
+  challengeId: string
+): Promise<void> {
+  const { data: rows } = await supabase
+    .schema("app")
+    .from("strategic_challenge_analysis_entries")
+    .select("analysis_entry_id")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleId)
+    .eq("strategic_challenge_id", challengeId)
+    .order("created_at", { ascending: true });
+  const primary = (rows?.[0] as { analysis_entry_id?: string } | undefined)?.analysis_entry_id ?? null;
+  await supabase
+    .schema("app")
+    .from("strategic_challenges")
+    .update({ source_analysis_entry_id: primary })
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleId)
+    .eq("id", challengeId);
+}
+
+async function applyAnalysisEntryAssignments(
+  supabase: RevisionActionSupabase,
+  organizationId: string,
+  cycleInstanceId: string,
+  oldLegacyId: string | null,
+  newLegacyId: string,
+  entryIds: string[]
+): Promise<void> {
+  const clearIds = [...new Set([oldLegacyId, newLegacyId].filter((v): v is string => Boolean(v)))];
+  for (const clearId of clearIds) {
+    await supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .delete()
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .eq("strategic_challenge_id", clearId);
+  }
+
+  const uniqueEntryIds = [...new Set(entryIds.filter(Boolean))];
+  for (const entryId of uniqueEntryIds) {
+    await supabase
+      .schema("app")
+      .from("strategic_challenge_analysis_entries")
+      .delete()
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .eq("analysis_entry_id", entryId);
+  }
+
+  if (uniqueEntryIds.length > 0) {
+    await supabase.schema("app").from("strategic_challenge_analysis_entries").insert(
+      uniqueEntryIds.map((analysis_entry_id) => ({
+        organization_id: organizationId,
+        cycle_instance_id: cycleInstanceId,
+        strategic_challenge_id: newLegacyId,
+        analysis_entry_id,
+      }))
+    );
+  }
+
+  await syncChallengePrimaryAnalysisEntry(supabase, organizationId, cycleInstanceId, newLegacyId);
+  if (oldLegacyId && oldLegacyId !== newLegacyId) {
+    await syncChallengePrimaryAnalysisEntry(supabase, organizationId, cycleInstanceId, oldLegacyId);
+  }
+}
+
 /** Beim Draft-Anlegen die aktuellen (Live-)Zuordnungen in den Draft-Payload einfrieren. */
 async function snapshotLiveAssignmentsIntoPayload(
   supabase: RevisionActionSupabase,
@@ -100,7 +173,7 @@ async function snapshotLiveAssignmentsIntoPayload(
   basePayload: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   let payload = basePayload;
-  for (const kind of STRATEGY_OBJECT_ASSIGNMENT_KINDS) {
+  for (const kind of assignmentKindsForObjectType(objectType)) {
     const ids = await readLiveAssignmentIds(
       supabase,
       organizationId,
@@ -125,8 +198,23 @@ async function applyPayloadAssignmentsToLinkTables(
   payload: Record<string, unknown>
 ): Promise<void> {
   const cfg = STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG[objectType];
-  for (const kind of STRATEGY_OBJECT_ASSIGNMENT_KINDS) {
-    const { table, valueColumn } = cfg.tables[kind];
+  for (const kind of assignmentKindsForObjectType(objectType)) {
+    if (kind === "analysis_entry" && objectType === "strategic_challenge") {
+      const ids = readAssignmentIds(payload, kind);
+      await applyAnalysisEntryAssignments(
+        supabase,
+        organizationId,
+        cycleInstanceId,
+        oldLegacyId,
+        newLegacyId,
+        ids
+      );
+      continue;
+    }
+
+    const tableCfg = cfg.tables[kind];
+    if (!tableCfg) continue;
+    const { table, valueColumn } = tableCfg;
     const ids = readAssignmentIds(payload, kind);
     const clearIds = [...new Set([oldLegacyId, newLegacyId].filter((v): v is string => Boolean(v)))];
     for (const clearId of clearIds) {
@@ -173,6 +261,14 @@ async function toggleStrategyObjectDraftAssignment(formData: FormData, op: "link
   if (!revision) {
     if (noRedirect) return;
     redirectWithError(returnPath, "revision-not-found", "draft-update-failed");
+  }
+
+  if (
+    kind === "analysis_entry" &&
+    revision.object_type !== "strategic_challenge"
+  ) {
+    if (noRedirect) return;
+    redirectWithError(returnPath, "invalid-assignment-kind", "draft-update-failed");
   }
 
   const payload = toggleAssignmentId(revision.definition_payload, kind, assignmentId, op);

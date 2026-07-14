@@ -11,11 +11,14 @@ type StrategyObjectDraftPanelProps = {
   draft: StrategyObjectRevisionRow;
   returnPath: string;
   canWrite: boolean;
+  draftFormId: string;
   actions: {
     updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
     promoteStrategyObjectRevision: (formData: FormData) => Promise<void>;
     rejectStrategyObjectRevision: (formData: FormData) => Promise<void>;
   };
+  /** Wenn true, werden Speichern/Übernehmen im StrategyObjectRevisionFooter gerendert. */
+  externalActions?: boolean;
 };
 
 function readPayloadNumber(payload: Record<string, unknown>, key: string, fallback: number): number {
@@ -168,7 +171,9 @@ export function StrategyObjectDraftPanel({
   draft,
   returnPath,
   canWrite,
+  draftFormId,
   actions,
+  externalActions = false,
 }: StrategyObjectDraftPanelProps) {
   const payload = draft.definition_payload;
 
@@ -198,7 +203,11 @@ export function StrategyObjectDraftPanel({
         </form>
       </div>
 
-      <form action={actions.updateStrategyObjectDraft} className="mt-4 space-y-3">
+      <form
+        id={draftFormId}
+        action={actions.updateStrategyObjectDraft}
+        className="mt-4 space-y-3"
+      >
         <input type="hidden" name="revision_id" value={draft.id} />
         <input type="hidden" name="object_type" value={draft.object_type} />
         <input type="hidden" name="return_path" value={returnPath} />
@@ -217,33 +226,36 @@ export function StrategyObjectDraftPanel({
           </label>
         </div>
         <DraftFields objectType={draft.object_type} payload={payload} />
-        <div className="flex flex-wrap gap-2 pt-2">
-          <button
-            type="submit"
-            disabled={!canWrite}
-            className="brand-btn rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-          >
-            Entwurf speichern
-          </button>
-        </div>
+        {!externalActions ? (
+          <>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={!canWrite}
+                className="brand-btn rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+              >
+                Entwurf speichern
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-sky-200 pt-3">
+              <form action={actions.promoteStrategyObjectRevision}>
+                <input type="hidden" name="revision_id" value={draft.id} />
+                <input type="hidden" name="return_path" value={returnPath} />
+                <button
+                  type="submit"
+                  disabled={!canWrite}
+                  className="rounded-md border border-emerald-500 bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  Revision übernehmen
+                </button>
+              </form>
+              <p className="text-xs text-sky-900/70">
+                Macht diese Fassung zur aktiven Revision (ersetzt die bisherige current-Version).
+              </p>
+            </div>
+          </>
+        ) : null}
       </form>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-sky-200 pt-3">
-        <form action={actions.promoteStrategyObjectRevision}>
-          <input type="hidden" name="revision_id" value={draft.id} />
-          <input type="hidden" name="return_path" value={returnPath} />
-          <button
-            type="submit"
-            disabled={!canWrite}
-            className="rounded-md border border-emerald-500 bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          >
-            Revision übernehmen
-          </button>
-        </form>
-        <p className="text-xs text-sky-900/70">
-          Macht diese Fassung zur aktiven Revision (ersetzt die bisherige current-Version).
-        </p>
-      </div>
     </article>
   );
 }

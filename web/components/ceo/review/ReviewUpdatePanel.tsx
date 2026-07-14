@@ -11,6 +11,7 @@ type ReviewUpdatePanelProps = {
   initiative: ReviewCycleInitiativeInput;
   canWrite: boolean;
   ownerSelectOptions: Array<{ id: string; label: string }>;
+  reviewCommentRows?: number;
 };
 
 function ownerOptionsForInitiative(
@@ -29,6 +30,7 @@ export function ReviewUpdatePanel({
   initiative,
   canWrite,
   ownerSelectOptions,
+  reviewCommentRows = 2,
 }: ReviewUpdatePanelProps) {
   const [weightOpen, setWeightOpen] = useState(false);
   const [progressPercent, setProgressPercent] = useState(initiative.progress_percent);
@@ -211,7 +213,7 @@ export function ReviewUpdatePanel({
           <textarea
             id={`rc-${initiative.id}`}
             name="review_comment"
-            rows={2}
+            rows={reviewCommentRows}
             defaultValue={initiative.review_comment ?? ""}
             disabled={!canWrite}
             className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"

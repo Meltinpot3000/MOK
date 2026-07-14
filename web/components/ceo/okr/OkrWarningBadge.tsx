@@ -2,6 +2,7 @@ import type { OkrWarningKind } from "@/lib/okr/okr-cycle-view-model";
 
 const COPY: Record<OkrWarningKind, string> = {
   no_direction: "Keine Stoßrichtung",
+  no_change_anchor: "Kein Change-Anker",
   kr_no_initiative: "KR ohne Initiative",
   initiative_no_kr: "Initiative ohne KR",
   no_checkin_stale: "Kein Check-in (alt)",

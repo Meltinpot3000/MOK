@@ -4,6 +4,7 @@ import {
   collectAncestorMembershipIds,
   collectDescendantMembershipIds,
   normMembershipId,
+  type MembershipReportingRow,
 } from "@/lib/annual-targets/membership-reporting-tree";
 
 export type AnnualTargetOwnerOption = {

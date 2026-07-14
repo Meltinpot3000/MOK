@@ -8,9 +8,9 @@ import { OrganizationUnitTree } from "@/components/ceo/OrganizationUnitTree";
 import {
   getOrganizationUnits,
   getOrganizationUnitTypes,
-  getActivePlanningCycle,
   getPhase0Context,
 } from "@/lib/phase0/queries";
+import { resolveStrategyPlanningCycle } from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -90,7 +90,7 @@ export default async function OrganizationPage() {
   const [units, unitTypes, activeCycle] = await Promise.all([
     getOrganizationUnits(context.organizationId),
     getOrganizationUnitTypes(),
-    getActivePlanningCycle(context.organizationId),
+    resolveStrategyPlanningCycle(context.organizationId),
   ]);
 
   async function createOrganizationUnit(formData: FormData) {

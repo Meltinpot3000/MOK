@@ -305,3 +305,126 @@ export async function createReviewFeedback(
   revalidatePath("/reviews");
   return {};
 }
+
+export async function createReviewMeasureFromContext(formData: FormData) {
+  const context = await getPhase0Context();
+  if (!context) return { error: "Nicht authentifiziert" };
+  const access = await getSidebarAccessContext("reviews");
+  if (access.state !== "ok" || !access.canWrite) return { error: "Keine Berechtigung" };
+
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) return { error: "Titel fehlt" };
+
+  const programId = String(formData.get("program_id") ?? "").trim();
+  if (!programId) return { error: "Programm fehlt" };
+
+  const cycleInstanceId = String(formData.get("cycle_instance_id") ?? "").trim();
+  if (!cycleInstanceId) return { error: "Zyklus fehlt" };
+
+  const directionId = String(formData.get("origin_strategic_direction_id") ?? "").trim() || null;
+  const signalType = String(formData.get("origin_review_signal_type") ?? "").trim() || null;
+  const sourceObjectType = String(formData.get("origin_source_object_type") ?? "").trim() || null;
+  const sourceObjectId = String(formData.get("origin_source_object_id") ?? "").trim() || null;
+  const reviewNote = String(formData.get("origin_review_note") ?? "").trim() || null;
+  const annualTargetId = String(formData.get("annual_target_id") ?? "").trim() || null;
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: prog, error: progErr } = await supabase
+    .schema("app")
+    .from("strategy_programs")
+    .select("id, status")
+    .eq("id", programId)
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+  if (progErr || !prog) return { error: "Ungültiges Programm" };
+  if (prog.status === "closed" || prog.status === "archived") {
+    return { error: "Programm nicht aktiv" };
+  }
+
+  const { data: created, error: insErr } = await supabase
+    .schema("app")
+    .from("initiatives")
+    .insert({
+      organization_id: context.organizationId,
+      cycle_instance_id: cycleInstanceId,
+      program_id: programId,
+      title,
+      description: reviewNote,
+      priority: 3,
+      status: "planned",
+      progress_percent: 0,
+      weight: 3,
+      owner_membership_id: context.membershipId,
+      linked_okrs: [],
+      deliverables: [],
+      created_by_membership_id: context.membershipId,
+      origin_type: "review_measure",
+      origin_review_signal_type: signalType,
+      origin_review_cycle_id: cycleInstanceId,
+      origin_source_object_type: sourceObjectType,
+      origin_source_object_id: sourceObjectId,
+      origin_strategic_direction_id: directionId,
+      origin_review_note: reviewNote,
+    })
+    .select("id")
+    .single();
+
+  if (insErr || !created?.id) return { error: insErr?.message ?? "Insert fehlgeschlagen" };
+
+  revalidatePath("/reviews");
+  return { ok: true, initiativeId: created.id };
+}
+
+export async function createReviewImpulseFromContext(formData: FormData) {
+  const context = await getPhase0Context();
+  if (!context) return { error: "Nicht authentifiziert" };
+  const access = await getSidebarAccessContext("reviews");
+  if (access.state !== "ok" || !access.canWrite) return { error: "Keine Berechtigung" };
+
+  const cycleInstanceId = String(formData.get("cycle_instance_id") ?? "").trim();
+  const feedbackType = String(formData.get("feedback_type") ?? "").trim() as FeedbackType;
+  const objectType = String(formData.get("object_type") ?? "").trim() as ObjectType;
+  const objectId = String(formData.get("object_id") ?? "").trim();
+  const comment = String(formData.get("comment") ?? "").trim() || null;
+
+  const validFeedback: FeedbackType[] = [
+    "continue",
+    "adjust",
+    "stop",
+    "escalate",
+    "revisit_direction",
+    "revisit_objective",
+  ];
+  const validObject: ObjectType[] = [
+    "objective",
+    "strategic_direction",
+    "strategy_program",
+    "initiative",
+    "key_result",
+  ];
+  if (!validFeedback.includes(feedbackType)) return { error: "Ungültiger Impuls-Typ" };
+  if (!validObject.includes(objectType)) return { error: "Ungültiges Objekt" };
+  if (!objectId) return { error: "Objekt fehlt" };
+  if (!cycleInstanceId) return { error: "Zyklus fehlt" };
+
+  const result = await createReviewFeedback(
+    cycleInstanceId,
+    feedbackType,
+    objectType,
+    objectId,
+    comment
+  );
+  if (result.error) return result;
+
+  let strategyHref = "/strategy-cycle?l1=strategic-directions";
+  if (objectType === "strategic_direction") {
+    strategyHref = `/strategy-cycle?l1=strategic-directions&focus=${objectId}`;
+  } else if (objectType === "objective") {
+    strategyHref = `/strategy-cycle?l1=objectives&focus=${objectId}`;
+  } else if (objectType === "strategy_program") {
+    strategyHref = `/strategy-cycle?l1=pips&l2=programme&focus=${objectId}`;
+  }
+
+  return { ok: true, strategyHref };
+}

@@ -43,6 +43,19 @@ export {
   type ReviewCycleInitiativeInput,
 } from "./review-cycle-view-model";
 export {
+  deriveDirectionReviewStatus,
+  enrichDirectionSummariesWithReviewStatus,
+  deriveDirectionOperationalCoverage,
+  primaryCoverageTypeLabelDe,
+  type DirectionReviewStatus,
+  type DirectionOperationalCoverage,
+  type PrimaryCoverageType,
+  type EnrichedStrategicDirectionReviewSummary,
+} from "./review-direction-status";
+export { buildReviewLagebildSnapshot, type ReviewLagebildSnapshot } from "./review-lagebild";
+export { buildReviewManagementInterpretation } from "./review-management-interpretation";
+export { buildExecutionNetworkGraph, type ExecutionNetworkGraph } from "./execution-network-graph";
+export {
   ALLOWED_INITIATIVE_WEIGHTS,
   DEFAULT_INITIATIVE_WEIGHT,
   isAllowedInitiativeWeight,

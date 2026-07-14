@@ -1,9 +1,24 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDirectionsForCycle, fetchObjectivesForCycle } from "@/lib/strategy-objects/queries";
 import type { StrategyObjectVersioningMeta } from "@/lib/strategy-objects";
+import { linearCycleProgressPercent } from "@/lib/ceo/planning-cycle-time-progress";
+import { fetchChallengesForCycle } from "@/lib/strategy-objects/queries";
 import { DEFAULT_INITIATIVE_WEIGHT } from "./initiative-review-fields";
 import { buildAttentionItems, type ReviewAttentionItem } from "./review-attention-rules";
+import {
+  deriveDirectionOperationalCoverage,
+  enrichDirectionSummariesWithReviewStatus,
+  type EnrichedStrategicDirectionReviewSummary,
+} from "./review-direction-status";
+import {
+  buildExecutionNetworkGraph,
+  type ExecutionNetworkGraph,
+} from "./execution-network-graph";
+import { buildReviewLagebildSnapshot, type ReviewLagebildSnapshot } from "./review-lagebild";
+import { buildReviewLagebildDrillTables } from "./review-lagebild-drill-tables";
+import { buildReviewManagementInterpretation } from "./review-management-interpretation";
 import {
   buildReviewCycleInitiativeRows,
   buildReviewCycleKpis,
@@ -13,6 +28,7 @@ import {
   type ReviewCycleProgramRow,
   type StrategicDirectionReviewSummary,
 } from "./review-cycle-view-model";
+import { computeContentVsTimeDeltaPp, computeReviewCycleContentProgress } from "@/lib/ceo/cycle-content-progress";
 
 const INITIATIVE_SELECT_WITH_REVIEW_ROLLUP =
   "id, title, status, priority, program_id, owner_membership_id, start_date, end_date, execution_health_override, execution_health_override_by_membership_id, execution_health_override_at, review_comment, weight, progress_percent, last_review_update_at";
@@ -38,6 +54,82 @@ function isMissingReviewRollupColumnsError(message: string): boolean {
     message.includes("progress_percent") ||
     message.includes("last_review_update_at")
   );
+}
+
+/**
+ * OKR/KR-Coverage: Ableitung über
+ * a) annual_target_okr_objective_links → JZ → Stoßrichtung
+ * b) initiative_key_result_links → Initiative → Programm → Stoßrichtung
+ */
+async function resolveDirectionIdsWithOkrCoverage(
+  supabase: SupabaseClient,
+  organizationId: string,
+  cycleIds: string[],
+  annualTargets: Array<{
+    id: string;
+    strategic_direction_id: string;
+    strategy_program_id: string | null;
+  }>,
+  initiativeRows: ReviewCycleInitiativeInput[],
+  programById: Map<string, ReviewCycleProgramRow>
+): Promise<Set<string>> {
+  const directionIds = new Set<string>();
+  const atById = new Map(annualTargets.map((t) => [t.id, t]));
+
+  const atOkrRes = await supabase
+    .schema("app")
+    .from("annual_target_okr_objective_links")
+    .select("annual_target_id")
+    .eq("organization_id", organizationId)
+    .in("cycle_instance_id", cycleIds);
+
+  if (!atOkrRes.error) {
+    for (const row of atOkrRes.data ?? []) {
+      const at = atById.get(String(row.annual_target_id));
+      if (!at) continue;
+      if (at.strategy_program_id) {
+        const prog = programById.get(at.strategy_program_id);
+        if (prog?.strategic_direction_id) {
+          directionIds.add(prog.strategic_direction_id);
+          continue;
+        }
+      }
+      if (at.strategic_direction_id) directionIds.add(at.strategic_direction_id);
+    }
+  } else {
+    console.error(
+      "[getReviewCycleData] annual_target_okr_objective_links",
+      atOkrRes.error.message
+    );
+  }
+
+  const initById = new Map(initiativeRows.map((i) => [i.id, i]));
+  const krInitRes = await supabase
+    .schema("app")
+    .from("initiative_key_result_links")
+    .select("initiative_id")
+    .eq("organization_id", organizationId)
+    .in("cycle_instance_id", cycleIds);
+
+  if (!krInitRes.error) {
+    for (const row of krInitRes.data ?? []) {
+      const init = initById.get(String(row.initiative_id));
+      if (!init?.program_id) continue;
+      if (init.resolvedDirectionSource !== "program") continue;
+      if (init.directionId) directionIds.add(init.directionId);
+      else {
+        const prog = programById.get(init.program_id);
+        if (prog?.strategic_direction_id) directionIds.add(prog.strategic_direction_id);
+      }
+    }
+  } else {
+    console.error(
+      "[getReviewCycleData] initiative_key_result_links",
+      krInitRes.error.message
+    );
+  }
+
+  return directionIds;
 }
 
 /** DB ohne Umbenennung 0114: strategic_direction_objective_links.objective_id statt strategy_objective_id. */
@@ -129,8 +221,10 @@ async function getCycleInstanceIdsForReview(
 export type ReviewCycleAnnualTargetBrief = {
   id: string;
   strategic_direction_id: string;
+  strategy_program_id: string | null;
   title: string;
   progress_percent: number;
+  status: string;
 };
 
 /** Aktive Organisationsmitglieder fuer Review-Owner-Auswahl (Namen + Rollen aus dem Tenant). */
@@ -313,15 +407,55 @@ async function loadReviewCycleOwnerContext(
   return { ownerLabelByMembershipId, ownerOptions };
 }
 
+export type ReviewCycleChallengeBrief = {
+  id: string;
+  title: string;
+};
+
+export type ReviewCycleObjectiveBrief = {
+  id: string;
+  title: string;
+  status: string;
+};
+
+export type ReviewCycleProgramBrief = {
+  id: string;
+  title: string;
+  strategic_direction_id: string | null;
+  status: string;
+};
+
+export type ReviewCycleFeedbackBrief = {
+  id: string;
+  feedback_type: string;
+  object_type: string;
+  object_id: string;
+  comment: string | null;
+};
+
 export type ReviewCycleData = {
   initiativeRows: ReviewCycleInitiativeInput[];
   directionSummaries: StrategicDirectionReviewSummary[];
+  enrichedSummaries: EnrichedStrategicDirectionReviewSummary[];
   attentionItems: ReviewAttentionItem[];
   kpis: ReviewCycleKpis;
+  lagebild: ReviewLagebildSnapshot;
+  managementInterpretation: string[];
+  executionNetwork: ExecutionNetworkGraph;
   directions: Array<{ id: string; title: string; status: string; priority: number }>;
+  programs: ReviewCycleProgramBrief[];
+  annualTargets: ReviewCycleAnnualTargetBrief[];
   ownerOptions: ReviewCycleOwnerOption[];
   annualTargetsByDirectionId: Record<string, ReviewCycleAnnualTargetBrief[]>;
+  challengesByDirectionId: Record<string, ReviewCycleChallengeBrief[]>;
+  objectivesByDirectionId: Record<string, ReviewCycleObjectiveBrief[]>;
+  reviewFeedback: ReviewCycleFeedbackBrief[];
   cycleInstanceId: string;
+  timeProgressPercent: number;
+  deltaPp: number | null;
+  cycleStartsOn: string | null;
+  cycleEndsOn: string | null;
+  lagebildDrillTables: ReturnType<typeof buildReviewLagebildDrillTables>;
 };
 
 export async function getReviewCycleData(
@@ -352,7 +486,7 @@ export async function getReviewCycleData(
     supabase
       .schema("app")
       .from("strategy_programs")
-      .select("id, title, strategic_direction_id")
+      .select("id, title, strategic_direction_id, status")
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIds),
     fetchInitiativesForReviewCycle(supabase, organizationId, cycleIds),
@@ -365,7 +499,7 @@ export async function getReviewCycleData(
     supabase
       .schema("app")
       .from("annual_targets")
-      .select("id, strategic_direction_id, title, progress_percent")
+      .select("id, strategic_direction_id, strategy_program_id, title, progress_percent, status")
       .eq("organization_id", organizationId)
       .in("cycle_instance_id", cycleIds),
   ]);
@@ -428,6 +562,7 @@ export async function getReviewCycleData(
     id: string;
     title: string;
     strategic_direction_id: string | null;
+    status: string;
   }>;
   const initiativesRaw = (initiativesResult.data ?? []) as Array<{
     id: string;
@@ -460,8 +595,10 @@ export async function getReviewCycleData(
   const annualTargets = (targetsResult.data ?? []) as Array<{
     id: string;
     strategic_direction_id: string;
+    strategy_program_id: string | null;
     title: string;
     progress_percent: number;
+    status: string;
   }>;
   const objectives = [
     ...new Map(
@@ -486,9 +623,30 @@ export async function getReviewCycleData(
       objective_id: l.strategy_objective_id ?? l.objective_id ?? "",
     }))
     .filter((l) => l.objective_id.length > 0);
-  // Read intentionally retained for parity checks across operational strategy objects.
-  void objectives;
-  void directionObjectiveLinks;
+  const challengesByCycle = await Promise.all(
+    cycleIds.map((cycleId) => fetchChallengesForCycle(organizationId, cycleId, { supabase }))
+  );
+  const challenges = [
+    ...new Map(
+      challengesByCycle.flat().map((row) => [
+        row.id,
+        { id: row.id, title: row.title },
+      ])
+    ).values(),
+  ] as ReviewCycleChallengeBrief[];
+
+  let challengeDirectionLinks: Array<{
+    strategic_challenge_id: string;
+    strategic_direction_id: string;
+  }> = [];
+  const cdlRes = await supabase
+    .schema("app")
+    .from("challenge_direction_links")
+    .select("strategic_challenge_id, strategic_direction_id")
+    .eq("organization_id", organizationId);
+  if (!cdlRes.error) {
+    challengeDirectionLinks = (cdlRes.data ?? []) as typeof challengeDirectionLinks;
+  }
 
   let okrObjectiveIds = new Set<string>();
   const okrInCyclesRes = await supabase
@@ -593,9 +751,118 @@ export async function getReviewCycleData(
     annualTargetById
   );
 
+  const directionIdsWithOkrCoverage = await resolveDirectionIdsWithOkrCoverage(
+    supabase,
+    organizationId,
+    cycleIds,
+    annualTargets,
+    initiativeRows,
+    programById
+  );
+
+  const coverageByDirectionId = new Map(
+    directions.map((d) => [
+      d.id,
+      deriveDirectionOperationalCoverage(
+        d.id,
+        programs,
+        new Map(programs.map((p) => [p.id, p.status ?? "draft"])),
+        initiativeRows,
+        annualTargets,
+        directionIdsWithOkrCoverage
+      ),
+    ])
+  );
+
   const directionSummaries = buildStrategicDirectionReviewSummaries(directions, initiativeRows);
-  const attentionItems = buildAttentionItems(initiativeRows, directionSummaries, directions);
+  const attentionItems = buildAttentionItems(
+    initiativeRows,
+    directionSummaries,
+    directions,
+    coverageByDirectionId
+  );
   const kpis = buildReviewCycleKpis(directionSummaries, initiativeRows, overdueKeyResultCount);
+
+  const { data: cycleRow } = await supabase
+    .schema("app")
+    .from("cycle_instances")
+    .select("starts_on, ends_on")
+    .eq("id", cycleInstanceId)
+    .maybeSingle();
+  const timeProgressPercent =
+    cycleRow?.starts_on && cycleRow?.ends_on
+      ? Math.round(
+          linearCycleProgressPercent(cycleRow.starts_on, cycleRow.ends_on, Date.now())
+        )
+      : 0;
+  const contentProgress = computeReviewCycleContentProgress(
+    initiativeRows.map((r) => ({
+      progress_percent: r.progress_percent,
+      weight: r.weight,
+      status: r.status,
+    }))
+  );
+  const deltaPp = computeContentVsTimeDeltaPp(
+    contentProgress.contentProgressPercent,
+    timeProgressPercent
+  );
+
+  const programStatusById = new Map(programs.map((p) => [p.id, p.status ?? "draft"]));
+  const enrichedSummaries = enrichDirectionSummariesWithReviewStatus(
+    directions,
+    directionSummaries,
+    programs,
+    programStatusById,
+    initiativeRows,
+    annualTargets,
+    directionIdsWithOkrCoverage,
+    attentionItems,
+    timeProgressPercent,
+    deltaPp
+  );
+
+  const reviewFeedbackRes = await supabase
+    .schema("app")
+    .from("review_feedback")
+    .select("id, feedback_type, object_type, object_id, comment")
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .order("created_at", { ascending: false });
+  const reviewFeedbackRaw = reviewFeedbackRes.data ?? [];
+  const reviewFeedback: ReviewCycleFeedbackBrief[] = reviewFeedbackRaw.map((f) => ({
+    id: f.id,
+    feedback_type: f.feedback_type,
+    object_type: f.object_type,
+    object_id: f.object_id,
+    comment: f.comment,
+  }));
+  const revisitFeedbackCount = reviewFeedback.filter((f) =>
+    ["revisit_direction", "revisit_objective"].includes(f.feedback_type)
+  ).length;
+
+  const lagebild = buildReviewLagebildSnapshot({
+    enrichedSummaries,
+    initiativeRows,
+    attentionItems,
+    kpis,
+    timeProgressPercent,
+    reviewFeedbackCount: reviewFeedback.length,
+  });
+  const managementInterpretation = buildReviewManagementInterpretation({
+    lagebild,
+    enrichedSummaries,
+    initiativeRows,
+    revisitFeedbackCount,
+  });
+  const executionNetwork = buildExecutionNetworkGraph({
+    enrichedSummaries,
+    programs,
+    annualTargets,
+    initiativeRows,
+    initiativeTargetLinks: targetLinks,
+    attentionItems,
+    reviewFeedback,
+  });
 
   const annualTargetsByDirectionId: Record<string, ReviewCycleAnnualTargetBrief[]> = {};
   for (const t of annualTargets) {
@@ -603,20 +870,101 @@ export async function getReviewCycleData(
     list.push({
       id: t.id,
       strategic_direction_id: t.strategic_direction_id,
+      strategy_program_id: t.strategy_program_id,
       title: t.title,
       progress_percent: Number(t.progress_percent),
+      status: t.status ?? "draft",
     });
     annualTargetsByDirectionId[t.strategic_direction_id] = list;
   }
 
+  const challengeTitleById = new Map(challenges.map((c) => [c.id, c.title]));
+  const challengesByDirectionId: Record<string, ReviewCycleChallengeBrief[]> = {};
+  for (const link of challengeDirectionLinks) {
+    const title = challengeTitleById.get(link.strategic_challenge_id);
+    if (!title) continue;
+    const list = challengesByDirectionId[link.strategic_direction_id] ?? [];
+    if (!list.some((c) => c.id === link.strategic_challenge_id)) {
+      list.push({ id: link.strategic_challenge_id, title });
+    }
+    challengesByDirectionId[link.strategic_direction_id] = list;
+  }
+
+  const objectiveTitleById = new Map(objectives.map((o) => [o.id, o]));
+  const objectivesByDirectionId: Record<string, ReviewCycleObjectiveBrief[]> = {};
+  for (const link of directionObjectiveLinks) {
+    const obj = objectiveTitleById.get(link.objective_id);
+    if (!obj) continue;
+    const list = objectivesByDirectionId[link.strategic_direction_id] ?? [];
+    if (!list.some((o) => o.id === link.objective_id)) {
+      list.push({ id: obj.id, title: obj.title, status: obj.status });
+    }
+    objectivesByDirectionId[link.strategic_direction_id] = list;
+  }
+
+  const directionNameById = Object.fromEntries(directions.map((d) => [d.id, d.title]));
+  const lagebildDrillTables = buildReviewLagebildDrillTables({
+    enrichedSummaries,
+    initiativeRows,
+    attentionItems,
+    programs: programs.map((p) => ({
+      id: p.id,
+      title: p.title,
+      strategic_direction_id: p.strategic_direction_id,
+      status: p.status ?? "draft",
+    })),
+    annualTargets: annualTargets.map((t) => ({
+      id: t.id,
+      strategic_direction_id: t.strategic_direction_id,
+      strategy_program_id: t.strategy_program_id,
+      title: t.title,
+      progress_percent: Number(t.progress_percent),
+      status: t.status ?? "draft",
+    })),
+    reviewFeedback,
+    keyResults,
+    directionNameById,
+    cycleStartsOn: cycleRow?.starts_on ?? null,
+    cycleEndsOn: cycleRow?.ends_on ?? null,
+    timeProgressPercent,
+    weightedContentProgress: contentProgress.contentProgressPercent,
+    deltaPp,
+  });
+
   return {
     initiativeRows,
     directionSummaries,
+    enrichedSummaries,
     attentionItems,
     kpis,
+    lagebild,
+    managementInterpretation,
+    executionNetwork,
     directions,
+    programs: programs.map((p) => ({
+      id: p.id,
+      title: p.title,
+      strategic_direction_id: p.strategic_direction_id,
+      status: p.status ?? "draft",
+    })),
+    annualTargets: annualTargets.map((t) => ({
+      id: t.id,
+      strategic_direction_id: t.strategic_direction_id,
+      strategy_program_id: t.strategy_program_id,
+      title: t.title,
+      progress_percent: Number(t.progress_percent),
+      status: t.status ?? "draft",
+    })),
     ownerOptions,
     annualTargetsByDirectionId,
+    challengesByDirectionId,
+    objectivesByDirectionId,
+    reviewFeedback,
     cycleInstanceId,
+    timeProgressPercent,
+    deltaPp,
+    cycleStartsOn: cycleRow?.starts_on ?? null,
+    cycleEndsOn: cycleRow?.ends_on ?? null,
+    lagebildDrillTables,
   };
 }

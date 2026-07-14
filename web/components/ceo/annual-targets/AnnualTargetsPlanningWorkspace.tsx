@@ -44,6 +44,10 @@ import {
 } from "@/lib/annual-targets/lifecycle";
 import { smartDimensionMark } from "@/lib/annual-targets/smart-check";
 import {
+  classifyAnnualTargetExecutionMode,
+  PROGRAM_STATUSES_FOR_PLANNING,
+} from "@/lib/change-run/change-run-model";
+import {
   SMART_DIMENSION_KEYS,
   SMART_DIMENSION_LABELS_DE,
 } from "@/lib/annual-targets/types";
@@ -108,7 +112,7 @@ export function AnnualTargetsPlanningWorkspace({
     { id: "owner", label: "Owner", render: (r) => r.ownerDisplayName },
     { id: "direction", label: "Stoßrichtung", render: (r) => r.directionTitle },
     { id: "objective", label: "Strategisches Ziel", render: (r) => r.strategicObjectiveTitle ?? "—" },
-    { id: "program", label: "Programm", render: (r) => r.programTitle ?? "—" },
+    { id: "program", label: "Programm", render: (r) => r.programTitle ?? (r.strategy_program_id ? "—" : "Run") },
     {
       id: "type",
       label: "Typ",
@@ -256,6 +260,21 @@ function AnnualTargetForm({
   const [progressMode, setProgressMode] = useState<ProgressCalculationMode>(
     editRow?.progress_calculation_mode ?? "manual"
   );
+  const [programId, setProgramId] = useState(editRow?.strategy_program_id ?? "");
+  const executionMode = classifyAnnualTargetExecutionMode(programId || null);
+  const progressModeOptions = useMemo(() => {
+    if (executionMode === "run") {
+      return PROGRESS_CALCULATION_MODES.filter((m) => m !== "key_result_based");
+    }
+    return PROGRESS_CALCULATION_MODES;
+  }, [executionMode]);
+  const selectablePrograms = useMemo(
+    () =>
+      context.programs.filter((p) =>
+        (PROGRAM_STATUSES_FOR_PLANNING as readonly string[]).includes(p.status ?? "draft")
+      ),
+    [context.programs]
+  );
 
   return (
     <form id="annual-target-form" action={action} className="mt-4 space-y-3">
@@ -372,7 +391,7 @@ function AnnualTargetForm({
           onChange={(e) => setProgressMode(e.target.value as ProgressCalculationMode)}
           className={INPUT}
         >
-          {PROGRESS_CALCULATION_MODES.map((m) => (
+          {progressModeOptions.map((m) => (
             <option key={m} value={m}>
               {PROGRESS_CALCULATION_MODE_LABELS_DE[m]}
             </option>
@@ -396,19 +415,33 @@ function AnnualTargetForm({
         </select>
       </div>
       <div>
-        <label className={LABEL}>Programm (optional)</label>
+        <label className={LABEL}>
+          {executionMode === "change" ? "Change-Programm *" : "Programm (leer = Run-Jahresziel)"}
+        </label>
         <select
           name="strategy_program_id"
-          defaultValue={editRow?.strategy_program_id ?? ""}
+          value={programId}
+          onChange={(e) => {
+            setProgramId(e.target.value);
+            if (!e.target.value && progressMode === "key_result_based") {
+              setProgressMode("manual");
+            }
+          }}
           className={INPUT}
         >
-          <option value="">— keins —</option>
-          {context.programs.map((p) => (
+          <option value="">— Run (kein Programm) —</option>
+          {selectablePrograms.map((p) => (
             <option key={p.id} value={p.id}>
               {p.title}
+              {p.status && p.status !== "active" ? ` (${p.status})` : ""}
             </option>
           ))}
         </select>
+        <p className="mt-1 text-xs text-zinc-500">
+          {executionMode === "change"
+            ? "Change-Jahresziel: Programm Pflicht. OKR-Verknüpfung erst nach Freigabe (active) von Programm und Jahresziel."
+            : "Run-Jahresziel: stabile Betriebsziele ohne Programm, ohne OKR und ohne Initiativen."}
+        </p>
       </div>
       <div>
         <label className={LABEL}>{ANNUAL_TARGET_DERIVATION_NOTE_LABEL_DE}</label>

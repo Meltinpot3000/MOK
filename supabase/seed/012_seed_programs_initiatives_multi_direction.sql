@@ -149,16 +149,57 @@ begin
     created_by_membership_id,
     created_by_source
   )
-  values (
-    c_seed,
-    v_org_id,
-    v_pc,
-    v_ci,
-    '[Seed] Demo-Herausforderung (Matrix-Anker)',
-    'Seed: eine Herausforderung fuer Challenge–Direction-Links aller Demo-Richtungen.',
-    v_admin,
-    'user'
-  )
+  values
+    (
+      c_seed,
+      v_org_id,
+      v_pc,
+      v_ci,
+      'Margendruck und Commoditisierung im Standardgeschaeft',
+      'OEM-Einkauf reduziert Preise bei konfektionsnahen Standardleitungen; ohne Nachweis von OTIF, Traceability und Co-Engineering-Mehrwert wird CabTec zum austauschbaren Lieferanten. Ziel bis 2028: DB-sichere Abgrenzung Standard vs. Engineering und Volumen nur mit Mindest-DB in Maschinenbau und Intralogistik.',
+      v_admin,
+      'user'
+    ),
+    (
+      '31000000-0000-4000-8000-000000000002'::uuid,
+      v_org_id,
+      v_pc,
+      v_ci,
+      'Fachkraefte- und Wissensengpaesse in AV und Serienanlauf',
+      'Offene Stellen und Wissensinseln in UL, Hochvolt und Crimp-Technik verlangsamen Freigaben in Maschinenbau-Projekten. Ueberstunden erhoehen Qualitaetsrisiko — Ziel bis 2028: kritische Rollen besetzt, Schulungspfad AV/QS und Wiederverwendung AV-Module messbar erhoehen.',
+      v_admin,
+      'user'
+    ),
+    (
+      '31000000-0000-4000-8000-000000000003'::uuid,
+      v_org_id,
+      v_pc,
+      v_ci,
+      'Regulatorik, Traceability und Export-Compliance',
+      'EU-Nachhaltigkeits- und Haftungsanforderungen erhoehen Dokumentationspflicht entlang der Lieferkette. Fehlende durchgaengige Traceability von Material bis Pruefprotokoll gefaehrdet Serienfreigaben und Exportauftraege.',
+      v_admin,
+      'user'
+    ),
+    (
+      '31000000-0000-4000-8000-000000000004'::uuid,
+      v_org_id,
+      v_pc,
+      v_ci,
+      'Lange Durchlaufzeiten von Anfrage bis AV-Freigabe',
+      'Medienbrueche zwischen Vertrieb, AV und Planung verursachen Wartezeiten und Nacharbeit. Kunden vergleichen Time-to-Quote mit Wettbewerbern; interne Priorisierung ist unklar.',
+      v_admin,
+      'user'
+    ),
+    (
+      '31000000-0000-4000-8000-000000000005'::uuid,
+      v_org_id,
+      v_pc,
+      v_ci,
+      'Umsatzkonzentration und Planungsvolatilitaet bei Key Accounts',
+      'Hoher Anteil des Umsatzes bei wenigen OEMs erhoeht Verhandlungsdruck. Budgetaenderungen einzelner Kunden fuehren zu Auslastungsschwankungen in der Konfektion.',
+      v_admin,
+      'user'
+    )
   on conflict (id) do update
   set
     title = excluded.title,
@@ -185,8 +226,8 @@ begin
       v_org_id,
       v_pc,
       v_ci,
-      '[Seed] Wachstum & Marktanteil',
-      'Demo: Differenzierung und nachhaltiges Wachstum im Kerngeschaeft.',
+      'Differenziertes Wachstum im OEM-Co-Engineering',
+      'Antwort auf Margendruck: CabTec waechst in Intralogistik und Nutzfahrzeug ueber fruehe Co-Engineering-Einbindung statt Preisfuehrerschaft. Ziel bis 2028: Co-Engineering-Umsatzanteil +10 Prozentpunkte und Win-Rate in Fokus-OEMs messbar — Kern des Hybrid-Modells Engineering plus Konfektion.',
       'draft',
       v_admin,
       'user',
@@ -197,8 +238,8 @@ begin
       v_org_id,
       v_pc,
       v_ci,
-      '[Seed] Operative Exzellenz',
-      'Demo: Kosten, Qualitaet und Durchlaufzeiten verbessern.',
+      'Konfektionsexzellenz und OTIF-Fuehrerschaft',
+      'Operative Exzellenz in AV, Produktion und Qualitaetssicherung: kuerzere Durchlaufzeiten, hohe FTQ im Serienanlauf und OTIF-Werte, die Key Accounts als verlaesslichen Partner bestaetigen.',
       'draft',
       v_admin,
       'user',
@@ -209,8 +250,8 @@ begin
       v_org_id,
       v_pc,
       v_ci,
-      '[Seed] Kundenerlebnis & Loyalitaet',
-      'Demo: Onboarding, Support und Retention staerken.',
+      'Kundenerlebnis und Transparenz entlang des Auftrags',
+      'Von Angebot bis Auslieferung erleben Kunden planbare Termine, proaktive Kommunikation und schnelle Reklamationsbearbeitung — unterstuetzt durch digitale Statussichtbarkeit.',
       'draft',
       v_admin,
       'user',
@@ -221,8 +262,8 @@ begin
       v_org_id,
       v_pc,
       v_ci,
-      '[Seed] Innovation & Produkte',
-      'Demo: Neue Angebote und Plattformfaehigkeit.',
+      'Digitale AV- und Serienanlauf-Beschleunigung',
+      'Standardisierte AV-Module, KI-gestuetzte Pruefungen und Shopfloor-Rueckmeldung verkürzen Time-to-Quote und Time-to-Series ohne Qualitaetsverlust.',
       'draft',
       v_admin,
       'user',
@@ -233,8 +274,8 @@ begin
       v_org_id,
       v_pc,
       v_ci,
-      '[Seed] Nachhaltigkeit & Governance',
-      'Demo: Regulatorik, ESG und Risikosteuerung.',
+      'Compliance-faehige und nachhaltige Lieferkette',
+      'ESG-Nachweise, Produkthaftung und Exportprozesse sind industrialisiert; Material- und Lieferantenentscheidungen sind auditierbar und risikoarm.',
       'draft',
       v_admin,
       'user',
@@ -260,10 +301,10 @@ begin
   )
   values
     (l1, v_org_id, v_pc, v_ci, d1, c_seed, v_admin),
-    (l2, v_org_id, v_pc, v_ci, d2, c_seed, v_admin),
-    (l3, v_org_id, v_pc, v_ci, d3, c_seed, v_admin),
-    (l4, v_org_id, v_pc, v_ci, d4, c_seed, v_admin),
-    (l5, v_org_id, v_pc, v_ci, d5, c_seed, v_admin)
+    (l2, v_org_id, v_pc, v_ci, d2, '31000000-0000-4000-8000-000000000004'::uuid, v_admin),
+    (l3, v_org_id, v_pc, v_ci, d3, '31000000-0000-4000-8000-000000000005'::uuid, v_admin),
+    (l4, v_org_id, v_pc, v_ci, d4, '31000000-0000-4000-8000-000000000002'::uuid, v_admin),
+    (l5, v_org_id, v_pc, v_ci, d5, '31000000-0000-4000-8000-000000000003'::uuid, v_admin)
   on conflict (id) do update
   set
     organization_id = excluded.organization_id,
@@ -298,7 +339,7 @@ begin
       v_ci,
       d1,
       '[Seed] Programm Revenue Acceleration',
-      'Wachstumsprogramm: Pipeline, Pricing und Channel.',
+      'Wachstumsprogramm: Co-Engineering-Pipeline in Intralogistik und Nutzfahrzeug, Pricing nach Deckungsbeitrag und Partnerkanal-Ausbau.',
       'draft',
       'manual',
       v_admin

@@ -47,7 +47,7 @@ export type ChallengeResolutionProfile = {
   managementAssessedProgress: number | null;
   calculatedProgressFromKeyResults: number | null;
   calculatedProgressFromInitiatives: number | null;
-  progressSource: "manual" | "key_result_based" | "initiative_based" | "hybrid" | "none";
+  progressSource: "manual" | "key_result_based" | "program_based" | "hybrid" | "none";
   fulfillmentGaps: FulfillmentGap[];
   systemHintDe: string;
   evidence: ChallengeResolutionEvidence;
@@ -469,7 +469,7 @@ export function deriveChallengeResolutionProfile(
         : (annualTargetModes.values().next().value as
             | "manual"
             | "key_result_based"
-            | "initiative_based"
+            | "program_based"
             | "hybrid");
   const fulfillmentPercent = deriveFulfillmentPercent(addressing, managementProgress ?? executionPercent);
   const fulfillmentCtx = fulfillmentContextForChallenge({
@@ -582,7 +582,7 @@ export type ChallengeResolutionProfileDto = {
   managementAssessedProgress: number | null;
   calculatedProgressFromKeyResults: number | null;
   calculatedProgressFromInitiatives: number | null;
-  progressSource: "manual" | "key_result_based" | "initiative_based" | "hybrid" | "none";
+  progressSource: "manual" | "key_result_based" | "program_based" | "hybrid" | "none";
   fulfillmentGaps: FulfillmentGap[];
   systemHintDe: string;
   topDirections: ChallengeResolutionEvidence["topDirections"];

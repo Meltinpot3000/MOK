@@ -76,11 +76,12 @@ export async function evaluateAnnualTargetGateForObjective(input: {
   const { data: annualRows } = await supabase
     .schema("app")
     .from("annual_targets")
-    .select("id, status, target_year, owner_membership_id, signature_status")
+    .select("id, status, target_year, owner_membership_id, signature_status, strategy_program_id")
     .eq("organization_id", organizationId)
     .eq("owner_membership_id", objectiveOwnerMembershipId)
     .eq("target_year", targetYear)
-    .eq("status", "active");
+    .eq("status", "active")
+    .not("strategy_program_id", "is", null);
 
   const activeAnnualTargetsCount = (annualRows ?? []).filter((row) =>
     isAnnualTargetOkrValid(
@@ -89,6 +90,7 @@ export async function evaluateAnnualTargetGateForObjective(input: {
         targetYear: (row.target_year as number | null) ?? null,
         ownerMembershipId: (row.owner_membership_id as string | null) ?? null,
         signatureStatus: String(row.signature_status ?? "not_required"),
+        strategyProgramId: (row.strategy_program_id as string | null) ?? null,
       },
       objectiveOwnerMembershipId,
       targetYear,
@@ -121,14 +123,18 @@ export async function hasDirectAnnualTargetAlignment(input: {
   objectiveId: string;
 }): Promise<boolean> {
   const supabase = await createSupabaseServerClient();
-  const { count } = await supabase
+  const { data: links } = await supabase
     .schema("app")
     .from("annual_target_okr_objective_links")
-    .select("id", { count: "exact", head: true })
+    .select("id, annual_target_id, annual_targets(strategy_program_id)")
     .eq("organization_id", input.organizationId)
     .eq("cycle_instance_id", input.cycleInstanceId)
     .eq("okr_objective_id", input.objectiveId);
-  if ((count ?? 0) > 0) return true;
+  const hasChangeLink = (links ?? []).some((row) => {
+    const at = row.annual_targets as { strategy_program_id: string | null } | null;
+    return Boolean(at?.strategy_program_id);
+  });
+  if (hasChangeLink) return true;
 
   const { count: exCount } = await supabase
     .schema("app")

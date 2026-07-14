@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { getPhase0Context, getPlanningCycleAtLevel } from "@/lib/phase0/queries";
+import {
+  resolveAnnualPlanningCycle,
+  resolveStrategyPlanningCycle,
+} from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -24,7 +28,12 @@ async function getWorkspaceContextOrRedirect(
   if (!context) redirect("/no-access");
   const access = await getSidebarAccessContext(itemId);
   if (access.state !== "ok" || !access.canWrite) redirect("/no-access");
-  const cycle = await getActivePlanningCycle(context.organizationId);
+  const cycle =
+    itemId === "organization" || itemId === "strategic-directions"
+      ? await resolveStrategyPlanningCycle(context.organizationId)
+      : itemId === "annual-targets"
+        ? await getPlanningCycleAtLevel(context.organizationId, 2)
+        : await resolveAnnualPlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
   return {
     organizationId: context.organizationId,
@@ -446,7 +455,7 @@ export async function linkAnnualTargetToIndustry(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const industryId = String(formData.get("industry_id") ?? "");
-  if (!annualTargetId || !industryId) done("/reviews?tab=overview&error=missing-link");
+  if (!annualTargetId || !industryId) done("/reviews?tab=lagebild&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_industries").upsert(
     {
@@ -457,14 +466,14 @@ export async function linkAnnualTargetToIndustry(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,industry_id" }
   );
-  done("/reviews?tab=overview&success=linked");
+  done("/reviews?tab=lagebild&success=linked");
 }
 
 export async function linkAnnualTargetToBusinessModel(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const businessModelId = String(formData.get("business_model_id") ?? "");
-  if (!annualTargetId || !businessModelId) done("/reviews?tab=overview&error=missing-link");
+  if (!annualTargetId || !businessModelId) done("/reviews?tab=lagebild&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_business_models").upsert(
     {
@@ -475,14 +484,14 @@ export async function linkAnnualTargetToBusinessModel(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,business_model_id" }
   );
-  done("/reviews?tab=overview&success=linked");
+  done("/reviews?tab=lagebild&success=linked");
 }
 
 export async function linkAnnualTargetToOperatingModel(formData: FormData) {
   const context = await getWorkspaceContextOrRedirect("reviews");
   const annualTargetId = String(formData.get("annual_target_id") ?? "");
   const operatingModelId = String(formData.get("operating_model_id") ?? "");
-  if (!annualTargetId || !operatingModelId) done("/reviews?tab=overview&error=missing-link");
+  if (!annualTargetId || !operatingModelId) done("/reviews?tab=lagebild&error=missing-link");
   const supabase = await createSupabaseServerClient();
   await supabase.schema("app").from("annual_target_operating_models").upsert(
     {
@@ -493,7 +502,7 @@ export async function linkAnnualTargetToOperatingModel(formData: FormData) {
     },
     { onConflict: "planning_cycle_id,annual_target_id,operating_model_id" }
   );
-  done("/reviews?tab=overview&success=linked");
+  done("/reviews?tab=lagebild&success=linked");
 }
 
 export async function linkInitiativeToIndustry(formData: FormData) {

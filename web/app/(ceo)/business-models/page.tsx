@@ -9,7 +9,8 @@ import {
 } from "@/app/(ceo)/strategy-dimensions/actions";
 import { OrganizationGraphPanel } from "@/components/ceo/OrganizationGraphPanel";
 import { OrganizationTabs } from "@/components/ceo/OrganizationTabs";
-import { getActivePlanningCycle, getOrganizationUnits, getPhase0Context } from "@/lib/phase0/queries";
+import { getOrganizationUnits, getPhase0Context } from "@/lib/phase0/queries";
+import { resolveStrategyPlanningCycle } from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import {
   getBusinessModels,
@@ -49,7 +50,7 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const cycle = await getActivePlanningCycle(context.organizationId);
+  const cycle = await resolveStrategyPlanningCycle(context.organizationId);
   if (!cycle) redirect("/planning-cycles");
 
   const [models, industries, links] = await Promise.all([
@@ -239,54 +240,38 @@ export default async function BusinessModelsPage({ searchParams }: BusinessModel
                         })}
                       </div>
                     </div>
-                    <form action={linkBusinessModelToOrganizationUnit} className="flex gap-2">
-                      <input type="hidden" name="business_model_id" value={model.id} />
-                      <select
-                        name="organization_unit_id"
-                        defaultValue=""
-                        className="min-w-[220px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-                      >
-                        <option value="">Organisationseinheit verknüpfen</option>
-                        {orgUnits.map((unit) => (
-                          <option key={unit.id} value={unit.id}>
-                            {unit.code} - {unit.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        disabled={!canWrite}
-                        className="brand-btn-secondary px-3 py-1.5 text-xs"
-                      >
-                        
-                        Verknüpfen
-                      </button>
-                    </form>
-                    <div className="flex flex-wrap gap-2">
-                      {orgUnits
-                        .filter((unit) =>
-                          (linkedUnitIdsByBusinessModel.get(model.id) ?? []).includes(unit.id)
-                        )
-                        .map((unit) => (
-                          <ConfirmBeforeSubmitForm
-                            key={`${model.id}-${unit.id}`}
-                            action={unlinkBusinessModelFromOrganizationUnit}
-                            className="inline-flex"
-                            title="Organisationseinheit entfernen?"
-                            description={`Die Verknüpfung zu „${unit.code}“ wird aufgehoben.`}
-                            confirmLabel="Entfernen"
-                          >
-                            <input type="hidden" name="business_model_id" value={model.id} />
-                            <input type="hidden" name="organization_unit_id" value={unit.id} />
-                            <button
-                              type="submit"
-                              disabled={!canWrite}
-                              className="rounded-md border border-red-300 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase tracking-wide text-zinc-500">Organisationseinheiten verknüpfen/entfernen</p>
+                      <div className="flex flex-wrap gap-2">
+                        {orgUnits.map((unit) => {
+                          const isLinked = (linkedUnitIdsByBusinessModel.get(model.id) ?? []).includes(unit.id);
+                          return (
+                            <ConfirmBeforeSubmitForm
+                              key={`${model.id}-${unit.id}`}
+                              action={isLinked ? unlinkBusinessModelFromOrganizationUnit : linkBusinessModelToOrganizationUnit}
+                              className="inline-flex"
+                              requireConfirm={isLinked}
+                              title="Organisationseinheit entfernen?"
+                              description={`Die Verknüpfung zu „${unit.code}“ wird aufgehoben.`}
+                              confirmLabel="Entfernen"
                             >
-                              Entfernen: {unit.code}
-                            </button>
-                          </ConfirmBeforeSubmitForm>
-                        ))}
+                              <input type="hidden" name="business_model_id" value={model.id} />
+                              <input type="hidden" name="organization_unit_id" value={unit.id} />
+                              <button
+                                type="submit"
+                                disabled={!canWrite}
+                                className={`rounded-full border px-3 py-1 text-xs transition disabled:opacity-50 ${
+                                  isLinked
+                                    ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+                                    : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400"
+                                }`}
+                              >
+                                {isLinked ? `Entfernen: ${unit.code}` : `${unit.code} - ${unit.name}`}
+                              </button>
+                            </ConfirmBeforeSubmitForm>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );

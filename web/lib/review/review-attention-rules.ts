@@ -6,6 +6,7 @@
  */
 import { deriveInitiativeHealth } from "./initiative-health";
 import { isActiveExecutionInitiativeStatus } from "./initiative-review-fields";
+import type { DirectionOperationalCoverage } from "./review-direction-status";
 import type { ReviewCycleInitiativeInput, StrategicDirectionReviewSummary } from "./review-cycle-view-model";
 
 export const REVIEW_ATTENTION_RULES = {
@@ -36,7 +37,8 @@ const PRIORITY_THRESHOLD = 2;
 export function buildAttentionItems(
   initiativeRows: ReviewCycleInitiativeInput[],
   directionSummaries: StrategicDirectionReviewSummary[],
-  directions: Array<{ id: string; title: string; status: string; priority: number }>
+  directions: Array<{ id: string; title: string; status: string; priority: number }>,
+  coverageByDirectionId?: Map<string, DirectionOperationalCoverage>
 ): ReviewAttentionItem[] {
   const items: ReviewAttentionItem[] = [];
   const now = new Date();
@@ -64,8 +66,20 @@ export function buildAttentionItems(
         issueType: "unassigned_direction",
         severity: "low",
         title: "Keine Stoßrichtung zuordenbar",
-        detail: `Initiative „${row.title}“ hat weder Programm-Richtung noch genau ein Jahresziel mit Richtung.`,
+        detail: `Initiative „${row.title}“ hat kein Programm mit Stoßrichtung.`,
         directionId: null,
+        initiativeId: row.id,
+      });
+    }
+
+    if (row.legacyNachpflege) {
+      items.push({
+        id: `legacy-nachpflege-${row.id}`,
+        issueType: "legacy_initiative_nachpflege",
+        severity: "medium",
+        title: "Change-Nachpflege: Programm fehlt",
+        detail: `Initiative „${row.title}“ nutzt noch einen Legacy-Jahresziel-Link — bitte Programm zuweisen.`,
+        directionId: row.directionId,
         initiativeId: row.id,
       });
     }
@@ -147,14 +161,18 @@ export function buildAttentionItems(
   if (REVIEW_ATTENTION_RULES.priorityDirectionWithoutActiveExecution) {
     for (const d of directions) {
       if (d.status !== "active" || d.priority > PRIORITY_THRESHOLD) continue;
-      const s = summaryByDirectionId.get(d.id);
-      if (s && s.activeInitiativeCount === 0) {
+      const coverage = coverageByDirectionId?.get(d.id);
+      const noCoverage =
+        coverage != null
+          ? !coverage.hasAnyCoverage
+          : (summaryByDirectionId.get(d.id)?.activeInitiativeCount ?? 0) === 0;
+      if (noCoverage) {
         items.push({
           id: `prio-dir-${d.id}`,
           issueType: "priority_direction_no_execution",
           severity: "medium",
-          title: "Priorisierte Richtung ohne aktive Umsetzung",
-          detail: `Stoßrichtung „${d.title}“ ist aktiv und hoch priorisiert, aber ohne aktive Initiativen (geplant/aktiv/auffällig).`,
+          title: "Priorisierte Richtung ohne operative Abdeckung",
+          detail: `Stoßrichtung „${d.title}“ ist aktiv und hoch priorisiert, aber ohne operative Abdeckung (Jahresziel, Programm, Initiative oder OKR/KR).`,
           directionId: d.id,
           initiativeId: null,
         });

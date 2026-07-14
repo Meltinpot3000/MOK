@@ -49,6 +49,7 @@ export function buildCompanyProfileInput(
     company_size: (kennzahlen.unternehmensgroesse ?? "").trim(),
     industry: industryOther ? `${industry} (${industryOther})` : industry,
     core_value_creation: (kennzahlen.kern_wertschoepfung ?? "").trim(),
+    key_product_or_service: (kennzahlen.wichtigstes_produkt_oder_dienstleistung ?? "").trim(),
     regions: Array.isArray(kennzahlen.marktregionen) ? kennzahlen.marktregionen : [],
     revenue_current: (kennzahlen.umsatz_heute ?? "").trim(),
     revenue_target: (kennzahlen.umsatz_ziel ?? "").trim(),
@@ -87,6 +88,12 @@ export async function getOrBuildStrategicContext(input: {
   provider?: string;
   model?: string;
   promptVersion?: string;
+  usage?: {
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    usageMissing?: boolean;
+  } | null;
 }> {
   const { data: cached } = await input.supabase
     .schema("app")
@@ -156,6 +163,9 @@ export async function getOrBuildStrategicContext(input: {
     context,
     contextJson,
     fromCache: false,
+    provider: response.provider,
+    model: response.model,
     promptVersion: STRATEGIC_CONTEXT_PROMPT_VERSION,
+    usage: response.usage,
   };
 }

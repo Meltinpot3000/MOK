@@ -261,7 +261,7 @@ export default function UserManualPage() {
               <NavLink href="/okr/planning">Planung</NavLink>,{" "}
               <NavLink href="/okr/tracking">Tracking</NavLink>,{" "}
               <NavLink href="/okr/review">Review</NavLink> und bei Bedarf{" "}
-              <NavLink href="/okr/strategy-review">Strategy Review</NavLink>. Typischer Ablauf: Objectives anlegen
+              <NavLink href="/reviews/strategy-review">Strategie-Review</NavLink>. Typischer Ablauf: Objectives anlegen
               oder übernehmen, Key Results mit messbaren Zielgrößen versehen, im Tracking den Ist-Stand pflegen und im
               Review Abweichungen und nächste Schritte festhalten.
             </p>

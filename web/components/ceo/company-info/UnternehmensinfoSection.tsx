@@ -34,6 +34,7 @@ type UnternehmensinfoSectionProps = {
   companyKennzahlen: CompanyKennzahlen;
   strategyReferenceFields: StrategyReferenceFields;
   strategicContextCache: UnternehmensinfoStrategicContextCache;
+  strategicContextRebuildActive: boolean;
 };
 
 export function UnternehmensinfoSection({
@@ -42,6 +43,7 @@ export function UnternehmensinfoSection({
   companyKennzahlen,
   strategyReferenceFields,
   strategicContextCache,
+  strategicContextRebuildActive,
 }: UnternehmensinfoSectionProps) {
   return (
     <>
@@ -97,7 +99,7 @@ export function UnternehmensinfoSection({
               <label className="block text-sm text-zinc-700">
                 <span className="mb-1 block font-medium">Unternehmensgröße (Mitarbeitende)</span>
                 <select
-                  name="company_info_unternehmensgr\u00F6\u00DFe"
+                  name="company_info_unternehmensgroesse"
                   defaultValue={companyKennzahlen.unternehmensgroesse}
                   className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
                 >
@@ -135,7 +137,7 @@ export function UnternehmensinfoSection({
               <label className="block text-sm text-zinc-700 md:col-span-2">
                 <span className="mb-1 block font-medium">Kern-Wertschöpfung</span>
                 <select
-                  name="company_info_kern_wertsch\u00F6pfung"
+                  name="company_info_kern_wertschoepfung"
                   defaultValue={companyKennzahlen.kern_wertschoepfung}
                   className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
                 >
@@ -335,17 +337,22 @@ export function UnternehmensinfoSection({
               Aus Kennwerten und Strategiereferenz für Sentinel✨ Ziel-Bewertungen aufbereiteter strategischer Kontext
               (Cache in der Datenbank).
             </p>
-            {!strategicContextCache ? (
-              <p className="mt-4 text-sm text-zinc-600">
-                Noch kein Eintrag. Die Zusammenfassung wird angelegt, sobald die Ziel-Bewertung den strategischen Kontext
-                erstmalig erzeugt.
+            {strategicContextRebuildActive ? (
+              <p className="mt-4 text-sm text-sky-800">
+                Sentinel✨ erzeugt die Zusammenfassung gerade neu …
               </p>
-            ) : !strategicContextCache.parsed ? (
+            ) : null}
+            {!strategicContextRebuildActive && !strategicContextCache ? (
+              <p className="mt-4 text-sm text-zinc-600">
+                Noch kein Eintrag. Die Zusammenfassung wird angelegt, sobald Unternehmensinfo gespeichert wird und
+                Sentinel✨ den strategischen Kontext erzeugt hat (oder wenn die Ziel-Bewertung ihn erstmalig anstösst).
+              </p>
+            ) : !strategicContextRebuildActive && !strategicContextCache?.parsed ? (
               <p className="mt-4 text-sm text-amber-800">
                 Gespeicherter Kontext konnte nicht gelesen werden. Bitte Ziel-Bewertung erneut anstossen oder Support
                 kontaktieren.
               </p>
-            ) : (
+            ) : strategicContextCache?.parsed ? (
               <>
                 {![
                   strategicContextCache.parsed.company_type,
@@ -403,7 +410,7 @@ export function UnternehmensinfoSection({
                     .join(" · ") || "Keine Metadaten (Erstellzeit unbekannt)"}
                 </p>
               </>
-            )}
+            ) : null}
           </article>
         ) : null}
       </section>

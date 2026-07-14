@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchLeadingStrategicDirectionIdForOkr } from "@/lib/okr/leading-strategic-direction";
 
 type Supabase = SupabaseClient;
 
@@ -62,14 +63,12 @@ export async function buildKrInitiativeMatchingContext(input: {
 
   let strategicDirection: KrInitiativeMatchingContext["strategicDirection"] = null;
   if (objective?.id) {
-    const { data: objRow } = await supabase
-      .schema("app")
-      .from("okr_objectives")
-      .select("leading_strategic_direction_id")
-      .eq("organization_id", organizationId)
-      .eq("id", objective.id)
-      .maybeSingle();
-    const directionId = objRow?.leading_strategic_direction_id as string | null | undefined;
+    const directionId = await fetchLeadingStrategicDirectionIdForOkr(
+      supabase,
+      organizationId,
+      cycleInstanceId,
+      objective.id
+    );
     if (directionId) {
       const { data: dir } = await supabase
         .schema("app")
@@ -96,6 +95,7 @@ export async function buildKrInitiativeMatchingContext(input: {
       .select("id, title, description, status, program_id")
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", cycleInstanceId)
+      .not("program_id", "is", null)
       .order("priority", { ascending: true })
       .order("created_at", { ascending: true }),
     supabase

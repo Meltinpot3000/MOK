@@ -22,6 +22,8 @@ export function computeOkrCycleContentProgress(
 export function computeReviewCycleContentProgress(
   initiatives: Array<{ progress_percent: number; weight: number; status: string }>
 ): CycleContentProgress {
+  // TODO(review-coverage): Wenn Jahresziele als operative Abdeckung gelten,
+  // Fortschritts-KPI um aktiven JZ-Fortschritt erweitern (nicht nur Initiativen).
   const active = initiatives.filter((row) => isActiveExecutionInitiativeStatus(row.status));
   const weightSum = active.reduce((sum, row) => sum + Number(row.weight || 0), 0);
   if (active.length === 0 || weightSum <= 0) {

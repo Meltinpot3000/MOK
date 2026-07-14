@@ -19,7 +19,7 @@ export function ReviewAttentionRequired({
         <>
           <h2 className="text-lg font-semibold text-zinc-900">Handlungsbedarf</h2>
           <p className="mt-1 text-sm text-zinc-600">
-            Ausnahmebasierte Signale — nicht durch niedrigen Fortschritt allein.
+            Regelbasierte Auffälligkeiten — nicht durch niedrigen Fortschritt allein.
           </p>
         </>
       ) : null}

@@ -186,7 +186,7 @@ export function ProgramMappingMatrix({ model, canWrite }: ProgramMappingMatrixPr
   return (
     <article className="brand-card p-6">
       <div className="flex flex-col gap-2">
-        <h3 className="text-base font-semibold text-zinc-900">Programm-Matrix</h3>
+        <h3 className="text-base font-semibold text-zinc-900">Strategische Verkn&uuml;pfungsmatrix</h3>
         <div
           className="flex flex-wrap items-center gap-2 text-[11px] leading-snug text-zinc-800"
           aria-label="Legende Matrix-Darstellung"

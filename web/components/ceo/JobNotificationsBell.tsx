@@ -62,10 +62,9 @@ export function JobNotificationsBell() {
         setOpen(false);
       }
     }
-    if (open) {
-      document.addEventListener("click", handleClickOutside);
-      return () => document.removeEventListener("click", handleClickOutside);
-    }
+    if (!open) return;
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, [open]);
 
   const unreadJobs = jobs.filter((j) => !seenIds.has(j.id));

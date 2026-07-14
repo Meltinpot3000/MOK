@@ -1,5 +1,6 @@
 import type { ReviewStatus } from "@/lib/review/key-result-progress";
 import type { ResolvedDirectionSource } from "@/lib/review/review-cycle-view-model";
+import type { DirectionReviewStatus } from "@/lib/review/review-direction-status";
 import {
   STRATEGIC_DIRECTION_STATUS_LABELS_DE,
   isStrategicDirectionStatus,
@@ -12,6 +13,28 @@ export function healthBadgeClass(status: ReviewStatus): string {
     off_track: "bg-red-100 text-red-800",
   };
   return styles[status] ?? "bg-zinc-100 text-zinc-700";
+}
+
+export function directionReviewStatusBadgeClass(status: DirectionReviewStatus): string {
+  const styles: Record<DirectionReviewStatus, string> = {
+    on_track: "bg-emerald-100 text-emerald-800",
+    at_risk: "bg-amber-100 text-amber-800",
+    off_track: "bg-red-100 text-red-800",
+    no_coverage: "bg-zinc-200 text-zinc-700",
+    unclear: "bg-zinc-100 text-zinc-600",
+  };
+  return styles[status] ?? "bg-zinc-100 text-zinc-700";
+}
+
+export function directionReviewStatusLabelDe(status: DirectionReviewStatus): string {
+  const labels: Record<DirectionReviewStatus, string> = {
+    on_track: "Auf Kurs",
+    at_risk: "Gefährdet",
+    off_track: "Kritisch",
+    no_coverage: "Keine operative Abdeckung",
+    unclear: "Unklar",
+  };
+  return labels[status] ?? status;
 }
 
 export function healthLabelDe(status: ReviewStatus): string {
@@ -39,7 +62,7 @@ export function initiativeStatusLabelDe(status: string): string {
 export function directionSourceLabelDe(source: ResolvedDirectionSource): string {
   const map: Record<ResolvedDirectionSource, string> = {
     program: "Programm",
-    annual_target: "Jahresziel",
+    legacy_annual_target: "Legacy (JZ-Link)",
     unresolved: "Mehrdeutig",
     unassigned: "Nicht zugeordnet",
   };

@@ -1,19 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
 import { InitiativeCreateForm } from "@/components/ceo/InitiativeCreateForm";
 import { InitiativesTable, type InitiativeRow } from "@/components/ceo/InitiativesTable";
-import type { PipKeyResultOption } from "@/lib/strategy-cycle/queries";
+import type { InitiativeProgramOption } from "@/lib/strategy-cycle/initiative-program-budget";
 
 type InitiativePipWorkspaceProps = {
   canWrite: boolean;
   createInitiativeAction: (formData: FormData) => void | Promise<void>;
   updateInitiativeAction: (formData: FormData) => void | Promise<void>;
-  programsOpenForInitiatives: Array<{ id: string; title: string }>;
-  programsAll: Array<{ id: string; title: string; status: string }>;
+  programsOpenForInitiatives: InitiativeProgramOption[];
+  programsAll: InitiativeProgramOption[];
   ownerOptions: Array<{ id: string; label: string }>;
-  annualTargets: Array<{ id: string; title: string }>;
-  keyResultOptions: PipKeyResultOption[];
   initiativeRows: InitiativeRow[];
   programTitleById: Record<string, string>;
   ownerLabelByMembershipId: Record<string, string>;
@@ -26,25 +23,17 @@ export function InitiativePipWorkspace({
   programsOpenForInitiatives,
   programsAll,
   ownerOptions,
-  annualTargets,
-  keyResultOptions,
   initiativeRows,
   programTitleById,
   ownerLabelByMembershipId,
 }: InitiativePipWorkspaceProps) {
-  const targetTitleById = useMemo(
-    () => Object.fromEntries(annualTargets.map((t) => [t.id, t.title])),
-    [annualTargets]
-  );
-
   return (
     <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Initiative erfassen</h2>
         <p className="mt-1 text-[11px] text-zinc-500">
-          
-          Neue Initiativen hier anlegen. Bestehende Initiativen in der Tabelle rechts aufklappen und dort bearbeiten
-          (wie bei strategischen Stoßrichtungen).
+          Neue Initiativen hier anlegen. Bestehende Initiativen in der Tabelle rechts aufklappen und dort
+          bearbeiten (wie bei strategischen Stoßrichtungen).
         </p>
         <InitiativeCreateForm
           canWrite={canWrite}
@@ -52,11 +41,7 @@ export function InitiativePipWorkspace({
           updateAction={updateInitiativeAction}
           programs={programsOpenForInitiatives}
           ownerOptions={ownerOptions}
-          annualTargets={annualTargets}
-          keyResultOptions={keyResultOptions}
           selectedInitiative={null}
-          targetTitleById={targetTitleById}
-          krContextsByKrId={{}}
           onClearSelection={() => {}}
         />
       </article>
@@ -73,8 +58,6 @@ export function InitiativePipWorkspace({
             programsOpenForInitiatives={programsOpenForInitiatives}
             programsAll={programsAll}
             ownerOptions={ownerOptions}
-            annualTargets={annualTargets}
-            keyResultOptions={keyResultOptions}
           />
         </div>
       </article>

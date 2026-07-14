@@ -30,7 +30,7 @@ export function ReviewHeaderTrigger({ cycleInstanceId, trigger }: Props) {
     sp.set("instance", cycleInstanceId);
     if (trigger?.review_id) sp.set("review", trigger.review_id);
     sp.set("focus", focusParam(trigger?.state));
-    return `/okr/strategy-review?${sp.toString()}`;
+    return `/reviews/strategy-review?${sp.toString()}`;
   }, [cycleInstanceId, trigger?.review_id, trigger?.state]);
 
   if (!trigger?.visible) return null;
@@ -46,7 +46,13 @@ export function ReviewHeaderTrigger({ cycleInstanceId, trigger }: Props) {
     trigger.procedure_status === "released"
       ? "Review freigegeben"
       : trigger.label ||
-        (isPrep ? "Strategy Review" : isReady ? "Review abhalten" : isRunning ? "Review läuft" : "Strategy Review");
+        (isPrep
+          ? "Strategie-Review"
+          : isReady
+            ? "Review abhalten"
+            : isRunning
+              ? "Review läuft"
+              : "Strategie-Review");
 
   const variantClass = isReady
     ? "border-emerald-300/80 bg-emerald-50/90 text-emerald-950 shadow-sm hover:bg-emerald-100/90"
@@ -61,7 +67,7 @@ export function ReviewHeaderTrigger({ cycleInstanceId, trigger }: Props) {
       <span>{label}</span>
       {trigger.is_override && (isReady || isPrep) ? (
         <span className="rounded bg-zinc-800/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-700">
-          forciert
+          erzwungen
         </span>
       ) : null}
     </span>

@@ -42,7 +42,7 @@ export type AnnualTargetType = (typeof ANNUAL_TARGET_TYPES)[number];
 export const PROGRESS_CALCULATION_MODES = [
   "manual",
   "key_result_based",
-  "initiative_based",
+  "program_based",
   "hybrid",
 ] as const;
 
@@ -117,7 +117,7 @@ export type AnnualTargetPlanningRow = AnnualTargetRow & {
 
 export type AnnualTargetWorkspaceContext = {
   directions: { id: string; title: string; versioning?: StrategyObjectVersioningMeta | null }[];
-  programs: { id: string; title: string }[];
+  programs: { id: string; title: string; status?: string }[];
   strategicObjectives: { id: string; title: string; versioning?: StrategyObjectVersioningMeta | null }[];
   ownerOptions: { membershipId: string; fullName: string }[];
   /** Team-Tab: nur Unterstellte (rekursiv), unabhängig von write.all. */
@@ -149,8 +149,8 @@ export type AnnualTargetsFilters = {
 export const PROGRESS_CALCULATION_MODE_LABELS_DE: Record<ProgressCalculationMode, string> = {
   manual: "Manuell am Jahresziel",
   key_result_based: "Aus verknüpften OKR-Key Results",
-  initiative_based: "Aus verknüpften Initiativen",
-  hybrid: "Kombination (manuell + OKR/Initiativen)",
+  program_based: "Aus verknüpften Programm-Initiativen",
+  hybrid: "Kombination (manuell + OKR/Programm)",
 };
 
 /** Erläuterung: was «Anker» im Dashboard/Strategieprofil meint — messbare Umsetzungsquellen. */
@@ -158,11 +158,11 @@ export const PROGRESS_CALCULATION_MODE_HINTS_DE: Record<ProgressCalculationMode,
   manual:
     "Sie pflegen den Fortschritt (%) direkt am Jahresziel — unabhängig von OKRs und Initiativen.",
   key_result_based:
-    "Fortschritt soll aus OKR-Key Results stammen, die per Traceability mit diesem Jahresziel verknüpft sind.",
-  initiative_based:
-    "Fortschritt soll aus Initiativen stammen, die zur Stoßrichtung bzw. zum Programm des Jahresziels gehören.",
+    "Fortschritt soll aus OKR-Key Results stammen, die per Traceability mit diesem Change-Jahresziel verknüpft sind.",
+  program_based:
+    "Fortschritt soll aus Initiativen des zugehörigen Change-Programms abgeleitet werden.",
   hybrid:
-    "Teils manuell am Jahresziel, teils aus verknüpften OKR-Key Results und/oder Initiativen (gewichteter Mix in Auswertungen).",
+    "Teils manuell am Jahresziel, teils aus verknüpften OKR-Key Results und/oder Programm-Initiativen.",
 };
 
 /** Freitext: wie das Jahresziel aus Strategieelementen folgt (Feld derivation_note). */

@@ -39,44 +39,44 @@ begin
     values
       -- environment incl. optional PESTEL refinement
       ('environment','political','EU-Nachhaltigkeitsregulierung erhoeht Nachweisaufwand',
-        'Neue Vorgaben zu Lieferketten und Produktdokumentation erhoehen den Compliance-Aufwand in Engineering und Fertigung.', 4, 3),
+        'Die CabTec Group muss fuer OEM-Kunden Lieferketten- und Produkt-CO2-Nachweise in AV und Serienbegleitung liefern. Fehlende Standardprozesse verzoegern Freigaben und erhoehen Audit-Risiken in Maschinenbau und Nutzfahrzeug.', 4, 3),
       ('environment','economic','Anhaltender Kostendruck bei OEMs',
-        'Kunden fordern mehr Entwicklungsleistung bei sinkenden Budgets; Preis- und Margendruck nimmt zu.', 5, 3),
+        'OEM-Einkauf fordert Preisreduktionen bei gleichbleibender Komplexitaet. Standardnahe Konfektion wird zum Commodity; CabTec verliert Verhandlungsspielraum, wenn Differenzierung nicht ueber Co-Engineering und OTIF belegt wird.', 5, 3),
       ('environment','social','Fachkraeftemangel in Entwicklungsteams',
-        'Der Wettbewerb um qualifizierte Engineering-Profile verlangsamt Projekte und verteuert Kapazitaeten.', 4, 4),
+        'Offene Rollen in Arbeitsvorbereitung und Serienanlauf verlaengern Durchlaufzeiten. Ueberstunden in Spitzen und Abhaengigkeit von Einzelpersonen gefaehrden Qualitaet und Liefertermine in Intralogistik-Projekten.', 4, 4),
       ('environment','technological','KI-gestuetzte Entwicklung wird Branchenstandard',
-        'Toolchains mit KI beschleunigen Konzept- und Variantenentwicklung deutlich; ohne Adaption droht Wettbewerbsnachteil.', 4, 3),
+        'Wettbewerber nutzen KI fuer Varianten- und Fehleranalysen in der AV. Ohne eigene Toolchain faellt CabTec bei Time-to-Quote und Erstfreigabe gegenueber digitalisierten Konkurrenten zurueck.', 4, 3),
       ('environment','ecological','Dekarbonisierung beeinflusst Material- und Designentscheidungen',
-        'Kunden priorisieren CO2-Reduktion und Zirkularitaet in Entwicklungsprojekten.', 4, 3),
+        'Kunden verlangen recyclingfaehige Isolationsmaterialien und optimierte Verlegewege. CabTec muss Materialalternativen frueh in Co-Engineering-Sessions bewerten, ohne UL- und Temperaturanforderungen zu verletzen.', 4, 3),
       ('environment','legal','Produkthaftungsrisiken bei Embedded-Software steigen',
-        'Mit wachsender Softwaretiefe steigen Anforderungen an Testabdeckung, Traceability und Haftungsdokumentation.', 5, 4),
+        'Mit wachsender Softwaretiefe in Kabelbaeumen und Steuerungen steigen Anforderungen an Testabdeckung, Traceability und Haftungsdokumentation. Luecken gefaehrden Serienfreigaben bei Premium-OEMs.', 5, 4),
       -- company
       ('company','effizienz','Durchlaufzeiten in Angebots- und Projektuebergabe zu hoch',
-        'Medienbrueche zwischen Vertrieb, Engineering und PM verursachen Wartezeiten und Nacharbeiten.', 4, 2),
+        'Medienbrueche zwischen Vertrieb, AV und Produktionsplanung verursachen Nacharbeiten. Kunden erleben lange Wartezeiten von Anfrage bis bestaetigter AV-Freigabe — ein Wettbewerbsnachteil gegenueber schnelleren Anbietern.', 4, 2),
       ('company','faehigkeiten','Hohe Engineering-Kompetenz in komplexen Nischen',
-        'CabTec loest anspruchsvolle Entwicklungsaufgaben schneller als viele Wettbewerber und ist beim Kunden frueh eingebunden.', 4, 2),
+        'CabTec loest anspruchsvolle Konfektionsaufgaben in raue Umgebungen und enge Bauraeme schneller als viele Wettbewerber. Fruehe Einbindung beim Kunden ist eine echte Staerke, die skaliert werden muss.', 4, 2),
       ('company','prozesse','Unklare Priorisierung im Portfolio',
-        'Zu viele parallele Initiativen ohne klare strategische Priorisierung binden kritische Ressourcen.', 4, 3),
+        'Zu viele parallele Kundenprojekte ohne strategische Gewichtung binden AV-Kapazitaet. Kritische Rahmenvertraege konkurrieren mit Einmalauftraegen — Prioritaeten sind nicht fuer alle Teams transparent.', 4, 3),
       -- competitor
       ('competitor','positionierung','Asiatische Anbieter greifen mit aggressiven Preisen an',
-        'Preisfuehrerschaft kombiniert mit kuerzeren Time-to-Quote erhoeht den Wettbewerbsdruck in standardnahen Leistungen.', 4, 3),
+        'Preisfuehrerschaft und kurze Time-to-Quote bei Standardleitungen erhoehen den Druck auf CabTecs Margen. Differenzierung muss ueber Qualitaet, Co-Engineering und Lieferzuverlaessigkeit statt Preis allein gelingen.', 4, 3),
       ('competitor','innovation','Wettbewerber investieren in digitale Serviceplattformen',
-        'Digitale Kundenportale und datenbasierte Services verbessern Bindung und After-Sales-Umsaetze der Konkurrenz.', 4, 4),
+        'Konkurrenten bieten Kundenportal mit Auftragsstatus, AV-Versionen und Reklamationshistorie. CabTec fehlt eine integrierte Sicht von Angebot bis Auslieferung fuer Key Accounts.', 4, 4),
       -- swot
       ('swot','weakness','Abhaengigkeit von Schluesselkunden in einzelnen Segmenten',
-        'Ein hoher Umsatzanteil bei wenigen Accounts erhoeht Volatilitaet und Verhandlungsdruck.', 4, 3),
+        'Ein hoher Umsatzanteil bei wenigen OEMs erhoeht Verhandlungsdruck und Planungsvolatilitaet. Ausfaelle oder Budgetstreichungen einzelner Kunden wirken sich unmittelbar auf Auslastung aus.', 4, 3),
       ('swot','threat','Beschleunigte Technologiewechsel koennen bestehende Kompetenzen entwerten',
-        'Wenn Plattformen und Standards schneller drehen, verliert bestehendes Loesungswissen an Differenzierung.', 5, 4),
+        'Neue Bussysteme und Steckerplattformen koennen bestehendes Baugruppen-Know-how obsolet machen. CabTec muss Kompetenzaufbau und Standardisierung aktiv steuern.', 5, 4),
       -- workshop
       ('workshop','hypothesis','Cross-funktionale Teams koennen Time-to-Market messbar senken',
-        'Pilotansatz: fruehe Kopplung von Vertrieb, Engineering und Operations mit verbindlichen Sprintzielen.', 4, 3),
+        'Pilot mit gemeinsamen Sprintzielen aus Vertrieb, AV und Shopfloor zeigt Potenzial: fruehere Klaerung offener Punkte und weniger Rueckfragen in der Serienanlaufphase.', 4, 3),
       ('workshop','decision','Fokussegmente fuer 2026 priorisieren',
-        'Segmentpriorisierung auf Basis von Margenpotenzial, Differenzierung und Umsetzbarkeit im Operating Model.', 4, 2),
+        'Workshop-Ergebnis: Intralogistik und Nutzfahrzeug mit hohem Co-Engineering-Anteil priorisieren; Standardkonfektion nur mit klarer Margenschwelle.', 4, 2),
       -- other
       ('other','risk','Wissensinseln in Spezialthemen',
-        'Kritisches Know-how ist auf wenige Personen konzentriert; Ausfallrisiko und Skalierungsgrenzen steigen.', 4, 3),
+        'UL-Pruefungen, Hochvolt-Isolation und kundenspezifische Crimp-Technologien liegen auf wenigen Experten. Ausfall oder Fluktuation fuehrt zu Freigabeverzoegerungen.', 4, 3),
       ('other','opportunity','Aufbau eines modularen Serviceportfolios',
-        'Standardisierte Servicebausteine erhoehen Wiederverwendbarkeit, Geschwindigkeit und Margenqualitaet.', 4, 2)
+        'Standardisierte Servicebausteine (Express-AV, Serienbegleitung, After-Sales-Kits) koennten Wiederverwendung und Margen verbessern — setzt klare Paketdefinition und Preislogik voraus.', 4, 2)
   )
   insert into app.analysis_entries (
     organization_id,
@@ -108,6 +108,15 @@ begin
       and lower(ae.analysis_type) = lower(s.analysis_type)
       and lower(ae.title) = lower(s.title)
   );
+
+  -- Bestehende Eintraege: Beschreibungen auf aktuellen Stand bringen
+  update app.analysis_entries ae
+  set description = s.description, updated_at = now()
+  from seed_rows s
+  where ae.organization_id = v_org_id
+    and ae.planning_cycle_id = v_cycle_id
+    and lower(ae.analysis_type) = lower(s.analysis_type)
+    and lower(ae.title) = lower(s.title);
 end
 $$;
 

@@ -214,7 +214,6 @@ export async function createOkrObjectiveAction(input: {
   okrCycleId: string;
   title: string;
   description?: string | null;
-  strategicDirectionId: string;
   ownerMembershipId?: string | null;
 }) {
   const auth = await requireOkrWrite();
@@ -224,7 +223,6 @@ export async function createOkrObjectiveAction(input: {
   if (!title) return { error: "Titel fehlt." };
   const description = (input.description ?? "").trim();
   if (!description) return { error: "Beschreibung fehlt." };
-  if (!input.strategicDirectionId) return { error: "Stoßrichtung fehlt." };
 
   const supabase = await createSupabaseServerClient();
   const ok = await assertOkrCycle(
@@ -234,14 +232,6 @@ export async function createOkrObjectiveAction(input: {
     input.okrCycleId
   );
   if (!ok) return { error: "Ungültiger OKR-Zeitraum." };
-
-  const dirOk = await assertStrategicDirectionInCycle(
-    supabase,
-    auth.context.organizationId,
-    input.cycleInstanceId,
-    input.strategicDirectionId
-  );
-  if (!dirOk) return { error: "Ungültige Stoßrichtung für diesen Zyklus." };
 
   const ownerRaw = (input.ownerMembershipId ?? "").trim();
   if (!ownerRaw) return { error: "OKR-Objective-Owner fehlt." };
@@ -317,7 +307,6 @@ export async function createOkrObjectiveAction(input: {
       organization_id: auth.context.organizationId,
       cycle_instance_id: input.cycleInstanceId,
       okr_cycle_id: input.okrCycleId,
-      leading_strategic_direction_id: input.strategicDirectionId,
       title,
       description,
       status: "draft",
@@ -362,7 +351,6 @@ export async function updateOkrObjectiveAction(input: {
   objectiveId: string;
   title: string;
   description?: string | null;
-  strategicDirectionId: string;
   status?: string;
   ownerMembershipId?: string | null;
   deputyMembershipId?: string | null;
@@ -374,16 +362,8 @@ export async function updateOkrObjectiveAction(input: {
   if (!title) return { error: "Titel fehlt." };
   const description = (input.description ?? "").trim();
   if (!description) return { error: "Beschreibung fehlt." };
-  if (!input.strategicDirectionId) return { error: "Stoßrichtung fehlt." };
 
   const supabase = await createSupabaseServerClient();
-  const dirOk = await assertStrategicDirectionInCycle(
-    supabase,
-    auth.context.organizationId,
-    input.cycleInstanceId,
-    input.strategicDirectionId
-  );
-  if (!dirOk) return { error: "Ungültige Stoßrichtung für diesen Zyklus." };
 
   const { data: existingObj } = await supabase
     .schema("app")
@@ -456,7 +436,6 @@ export async function updateOkrObjectiveAction(input: {
   const patch: Record<string, unknown> = {
     title,
     description,
-    leading_strategic_direction_id: input.strategicDirectionId,
   };
   if (input.status !== undefined) {
     patch.status = input.status?.trim() || "draft";
@@ -1864,16 +1843,11 @@ export async function saveOkrPlanningPanelAction(formData: FormData) {
   const deputyRaw = String(formData.get("deputy_membership_id") ?? "").trim();
 
   if (canEditObj) {
-    const strategicDirectionId = String(formData.get("strategic_direction_id") ?? "").trim();
-    if (!strategicDirectionId) {
-      return { error: "Stoßrichtung fehlt." };
-    }
     const objRes = await updateOkrObjectiveAction({
       cycleInstanceId,
       objectiveId,
       title: String(formData.get("title") ?? ""),
       description: String(formData.get("description") ?? ""),
-      strategicDirectionId,
       ownerMembershipId: ownerRaw,
       deputyMembershipId: deputyRaw || null,
     });

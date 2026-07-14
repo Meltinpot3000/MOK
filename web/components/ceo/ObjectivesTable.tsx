@@ -21,11 +21,24 @@ import {
   type StrategyObjectVersioningMeta,
 } from "@/lib/strategy-objects";
 import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
-import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import { StrategyObjectRevisionFooter } from "@/components/ceo/strategy-objects/StrategyObjectRevisionFooter";
 import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
 import { ObjectiveAiPanel } from "./ObjectiveAiPanel";
+import type {
+  DescriptionQualityFilterValue,
+  DescriptionQualityViewModel,
+} from "@/lib/strategy-cycle/description-quality-view";
+import { DescriptionQualityBadge } from "@/components/ceo/strategy-objects/DescriptionQualityBadge";
+import { DescriptionQualityHintBox } from "@/components/ceo/strategy-objects/DescriptionQualityHintBox";
+import {
+  DESCRIPTION_QUALITY_FILTER_OPTIONS,
+  filterRowsByDescriptionQuality,
+  mergeExpandedRowIds,
+  resolveInitialDescriptionQualityFilter,
+  useDescriptionQualityTableFocus,
+} from "@/components/ceo/strategy-objects/description-quality-table-utils";
 
 type Objective = {
   id: string;
@@ -61,6 +74,10 @@ type ObjectivesTableProps = {
   canWrite: boolean;
   openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
   returnPath?: string;
+  descriptionQualityById?: Record<string, DescriptionQualityViewModel>;
+  initialQualityFilter?: DescriptionQualityFilterValue;
+  focusObjectId?: string | null;
+  descriptionQualityReview?: boolean;
   revisionActions?: {
     proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
     updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
@@ -133,11 +150,20 @@ export function ObjectivesTable({
   canWrite,
   openDraftByIdentityId = {},
   returnPath = "/strategy-cycle?l1=objectives",
+  descriptionQualityById,
+  initialQualityFilter,
+  focusObjectId = null,
+  descriptionQualityReview = false,
   revisionActions,
   actions,
 }: ObjectivesTableProps) {
   const [filterLifecycle, setFilterLifecycle] = useState("");
   const [searchTitle, setSearchTitle] = useState("");
+  const [filterDescriptionQuality, setFilterDescriptionQuality] = useState(
+    () => resolveInitialDescriptionQualityFilter(initialQualityFilter, descriptionQualityReview)
+  );
+
+  useDescriptionQualityTableFocus(focusObjectId, "objective-");
 
   const lifecycleFilterOptions = useMemo(() => {
     const states = [
@@ -156,12 +182,17 @@ export function ObjectivesTable({
   }, [objectives]);
 
   const filteredObjectives = useMemo(() => {
-    return objectives.filter((o) => {
+    const bySearch = objectives.filter((o) => {
       if (filterLifecycle && o.versioning?.identity_lifecycle_state !== filterLifecycle) return false;
       if (!matchesTableTitleSearch(o.title, searchTitle)) return false;
       return true;
     });
-  }, [objectives, filterLifecycle, searchTitle]);
+    return filterRowsByDescriptionQuality(
+      bySearch,
+      descriptionQualityById,
+      filterDescriptionQuality
+    );
+  }, [objectives, filterLifecycle, searchTitle, descriptionQualityById, filterDescriptionQuality]);
 
   const draftExpandedRowIds = useMemo(
     () =>
@@ -169,6 +200,15 @@ export function ObjectivesTable({
         .filter((o) => resolveOpenDraftForVersioning(o.versioning, openDraftByIdentityId))
         .map((o) => o.id),
     [filteredObjectives, openDraftByIdentityId]
+  );
+
+  const expandedRowIds = useMemo(
+    () =>
+      mergeExpandedRowIds(
+        draftExpandedRowIds,
+        focusObjectId ? [focusObjectId] : undefined
+      ),
+    [draftExpandedRowIds, focusObjectId]
   );
 
   const columns = [
@@ -239,6 +279,17 @@ export function ObjectivesTable({
       defaultVisible: true,
       sortValue: (o: Objective) => o.versioning?.latest_review_decision ?? null,
       render: (o: Objective) => getReviewDecisionLabelDe(o.versioning?.latest_review_decision),
+    },
+    {
+      id: "description_quality",
+      label: "Beschreibung / Prüfqualität",
+      defaultVisible: true,
+      sortValue: (o: Objective) => descriptionQualityById?.[o.id]?.sortRank ?? 99,
+      render: (o: Objective) => {
+        const quality = descriptionQualityById?.[o.id];
+        if (!quality) return <span className="text-zinc-400">Keine Daten</span>;
+        return <DescriptionQualityBadge status={quality.displayStatus} />;
+      },
     },
     {
       id: "ai_objective_score",
@@ -346,6 +397,13 @@ export function ObjectivesTable({
   return (
     <div className="w-full min-w-0 max-w-full space-y-3">
       <TableFilterBar>
+        <TableFilterSelect
+          label="Beschreibung / Prüfqualität"
+          value={filterDescriptionQuality}
+          onChange={setFilterDescriptionQuality}
+          className="min-w-[160px] flex-1"
+          options={DESCRIPTION_QUALITY_FILTER_OPTIONS}
+        />
         {lifecycleFilterOptions.length > 0 ? (
           <TableFilterSelect
             label="Lifecycle"
@@ -361,7 +419,9 @@ export function ObjectivesTable({
       columns={columns}
       rows={filteredObjectives}
       getRowId={(o) => o.id}
-      initialExpandedIds={draftExpandedRowIds}
+      rowIdPrefix="objective-"
+      selectedRowId={focusObjectId}
+      initialExpandedIds={expandedRowIds}
       expandLabel="Details"
       emptyMessage={
         objectives.length === 0
@@ -377,6 +437,7 @@ export function ObjectivesTable({
         );
 
         const editFormId = `objective-edit-${objective.id}`;
+        const draftFormId = `strategy-objective-draft-${objective.id}`;
         const definitionLocked = isStrategyObjectDefinitionLocked({
           objectType: "strategic_objective",
           versioning: objective.versioning,
@@ -446,6 +507,9 @@ export function ObjectivesTable({
 
         return (
           <div className="space-y-4">
+            {descriptionQualityById?.[objective.id] ? (
+              <DescriptionQualityHintBox quality={descriptionQualityById[objective.id]} />
+            ) : null}
             <div className="space-y-5 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
               <div className="border-b border-zinc-100 pb-4">
                 <h4 className="text-sm font-semibold text-zinc-900">Ziel bearbeiten</h4>
@@ -469,7 +533,9 @@ export function ObjectivesTable({
                   draft={openDraft}
                   returnPath={returnPath}
                   canWrite={canWrite}
+                  draftFormId={draftFormId}
                   actions={revisionActions}
+                  externalActions
                 />
               ) : null}
 
@@ -595,23 +661,28 @@ export function ObjectivesTable({
               ) : null}
 
               {revisionActions ? (
-                <div className="border-t border-zinc-100 pt-4">
-                  <StrategyObjectActionBar
-                    objectType="strategic_objective"
-                    objectId={objective.id}
-                    identityId={identityId}
-                    lifecycleState={lifecycleState}
-                    baseRevisionId={baseRevisionId}
-                    hasOpenDraft={Boolean(openDraft)}
-                    canWrite={canWrite}
-                    returnPath={returnPath}
-                    objectNoun="Ziel"
-                    deleteAction={actions.deleteObjectiveInCycle}
-                    deleteIdField="objective_id"
-                    lifecycleAction={revisionActions.setStrategyObjectLifecycle}
-                    proposeAction={revisionActions.proposeStrategyObjectDraft}
-                  />
-                </div>
+                <StrategyObjectRevisionFooter
+                  openDraft={openDraft ?? null}
+                  draftFormId={draftFormId}
+                  canWrite={canWrite}
+                  returnPath={returnPath}
+                  revisionActions={revisionActions}
+                  actionBarProps={{
+                    objectType: "strategic_objective",
+                    objectId: objective.id,
+                    identityId,
+                    lifecycleState,
+                    baseRevisionId,
+                    hasOpenDraft: Boolean(openDraft),
+                    canWrite,
+                    returnPath,
+                    objectNoun: "Ziel",
+                    deleteAction: actions.deleteObjectiveInCycle,
+                    deleteIdField: "objective_id",
+                    lifecycleAction: revisionActions.setStrategyObjectLifecycle,
+                    proposeAction: revisionActions.proposeStrategyObjectDraft,
+                  }}
+                />
               ) : null}
             </div>
 

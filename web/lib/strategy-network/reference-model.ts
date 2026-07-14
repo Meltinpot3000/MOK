@@ -56,7 +56,7 @@ export const REFERENCE_FAQ: ReferenceFaqItem[] = [
     answer:
       "Jahresziele operationalisieren Stoßrichtungen für ein Planungsjahr. Programme und Initiativen " +
       "setzen die Umsetzung um; OKR-Objectives und Key Results messen Fortschritt in kurzen Zyklen. " +
-      "Verknüpfungstabellen (z. B. objective_target_links, initiative_target_links) halten die Brücken nachvollziehbar.",
+      "Verknüpfungstabellen (z. B. objective_target_links, annual_target_okr_objective_links) halten die Brücken nachvollziehbar.",
   },
 ];
 
@@ -341,16 +341,28 @@ const EDGES: ReferenceNetworkEdge[] = [
     description: "Initiative gehört zu einem Programm.",
   },
   {
+    id: "program_to_annual_target",
+    sourceId: "program",
+    targetId: "annual_target",
+    label: "verankert",
+    cardinality: "1:n",
+    optional: true,
+    ruleKey: "change_annual_target.program_required",
+    dbTables: ["annual_targets.strategy_program_id"],
+    uiSurfaces: ["Jahresziele (Change)"],
+    description: "Change-Jahresziel hängt an einem Programm; Run-Jahresziele haben kein Programm.",
+  },
+  {
     id: "initiative_to_annual_target",
     sourceId: "initiative",
     targetId: "annual_target",
-    label: "trägt bei",
+    label: "trägt bei (Legacy)",
     cardinality: "n:m",
     optional: true,
-    ruleKey: "initiative_target.enabled",
+    ruleKey: "initiative_target.deprecated",
     dbTables: ["initiative_target_links"],
-    uiSurfaces: ["Initiative ↔ Jahresziel"],
-    description: "Beitrag einer Initiative zu einem Jahresziel.",
+    uiSurfaces: ["Legacy-Traceability"],
+    description: "Deprecated: Initiativen hängen am Programm, nicht mehr am Jahresziel.",
   },
   {
     id: "objective_to_annual_target",
@@ -392,13 +404,18 @@ const EDGES: ReferenceNetworkEdge[] = [
     id: "direction_to_okr_objective",
     sourceId: "direction",
     targetId: "okr_objective",
-    label: "führt",
+    label: "führt (abgeleitet)",
     cardinality: "1:n",
     optional: false,
-    ruleKey: null,
-    dbTables: ["okr_objectives.leading_strategic_direction_id"],
-    uiSurfaces: ["OKR-Planung → führende Stoßrichtung"],
-    description: "Jedes OKR-Objective gehört zu einer führenden Stoßrichtung (direkt, ohne Umweg über strategische Ziele).",
+    ruleKey: "okr.direction.derived",
+    dbTables: [
+      "annual_target_okr_objective_links",
+      "initiative_key_result_links",
+      "okr_objectives.leading_strategic_direction_id",
+    ],
+    uiSurfaces: ["OKR-Planung → abgeleitete Stoßrichtung"],
+    description:
+      "Stoßrichtung wird über Change-Jahresziel oder Initiative/Programm abgeleitet; kein direktes Setzen mehr.",
   },
   {
     id: "okr_objective_to_annual_target",

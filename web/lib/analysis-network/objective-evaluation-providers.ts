@@ -1,7 +1,7 @@
 import type { LlmScoreResponse, LlmUsage } from "./providers";
 import { invokeLlmForJson } from "./providers";
 
-export const STRATEGIC_CONTEXT_PROMPT_VERSION = "objective-context-v2-de";
+export const STRATEGIC_CONTEXT_PROMPT_VERSION = "objective-context-v3-de-detailed";
 export const OBJECTIVE_EVAL_PROMPT_VERSION = "objective-eval-v2-de";
 export const PORTFOLIO_EVAL_PROMPT_VERSION = "objective-portfolio-v2-de";
 
@@ -10,6 +10,7 @@ export type CompanyProfileInput = {
   company_size: string;
   industry: string;
   core_value_creation: string;
+  key_product_or_service: string;
   regions: string[];
   revenue_current: string;
   revenue_target: string;
@@ -62,17 +63,17 @@ function clampScore(value: number, min = 1, max = 5): number {
 
 function strategicContextFromRecord(json: Record<string, unknown>): StrategicContextOutput {
   const implications = Array.isArray(json.strategic_implications)
-    ? (json.strategic_implications as unknown[]).map(String).filter(Boolean)
+    ? (json.strategic_implications as unknown[]).map((item) => String(item ?? "").trim()).filter(Boolean)
     : [];
   return {
-    company_type: String(json.company_type ?? "").trim().slice(0, 200),
-    scale: String(json.scale ?? "").trim().slice(0, 100),
-    industry_context: String(json.industry_context ?? "").trim().slice(0, 400),
-    value_creation_logic: String(json.value_creation_logic ?? "").trim().slice(0, 400),
-    market_scope: String(json.market_scope ?? "").trim().slice(0, 200),
-    growth_ambition: String(json.growth_ambition ?? "").trim().slice(0, 200),
-    transformation_pressure: String(json.transformation_pressure ?? "").trim().slice(0, 200),
-    strategic_implications: implications.slice(0, 10),
+    company_type: String(json.company_type ?? "").trim().slice(0, 500),
+    scale: String(json.scale ?? "").trim().slice(0, 300),
+    industry_context: String(json.industry_context ?? "").trim().slice(0, 800),
+    value_creation_logic: String(json.value_creation_logic ?? "").trim().slice(0, 800),
+    market_scope: String(json.market_scope ?? "").trim().slice(0, 500),
+    growth_ambition: String(json.growth_ambition ?? "").trim().slice(0, 500),
+    transformation_pressure: String(json.transformation_pressure ?? "").trim().slice(0, 500),
+    strategic_implications: implications.map((line) => line.slice(0, 600)).slice(0, 18),
   };
 }
 
@@ -153,17 +154,19 @@ function parsePortfolioEvaluationJson(raw: string): PortfolioEvaluationOutput | 
 }
 
 function buildStrategicContextPrompt(profile: CompanyProfileInput): string {
-  return `Unternehmensdaten (Rohinput):
+  return `Unternehmensdaten (vollstaendiger Rohinput — alle Felder fuer die Synthese nutzen):
 
 Organisationstyp: ${profile.organization_type}
-Groesse: ${profile.company_size}
-Branche: ${profile.industry}
+Unternehmensgroesse (Mitarbeitende): ${profile.company_size}
+Branche / Industriekontext: ${profile.industry}
 Kern-Wertschoepfung: ${profile.core_value_creation}
-Regionen: ${profile.regions.join(", ") || "—"}
+Wichtigstes Produkt oder Dienstleistung: ${profile.key_product_or_service || "—"}
+Marktregionen: ${profile.regions.join(", ") || "—"}
 Umsatz heute: ${profile.revenue_current}
-Umsatz-Ziel: ${profile.revenue_target}
+Umsatz-Ziel (Ende Strategiezyklus): ${profile.revenue_target}
 Transformationsstatus: ${profile.transformation_status}
 
+Strategiereferenz:
 Mission: ${profile.mission || "—"}
 Vision: ${profile.vision || "—"}
 Werte: ${profile.values || "—"}
@@ -172,9 +175,21 @@ Leadership: ${profile.leadership || "—"}
 
 ---
 
-Antworte ausschliesslich mit validem JSON. Alle Textinhalte (alle String-Felder und Listeneintraege) auf Deutsch, praezise und kompakt, ohne die Eingaben woertlich zu wiederholen.
-Schema (Schluessel exakt so): {"company_type":"...","scale":"...","industry_context":"...","value_creation_logic":"...","market_scope":"...","growth_ambition":"...","transformation_pressure":"...","strategic_implications":["..."]}`;
+Erstelle eine **ausfuehrliche** strategische Kontext-Zusammenfassung fuer Sentinel-Ziel-Bewertungen.
+Antworte ausschliesslich mit validem JSON. Alle Textinhalte auf Deutsch.
+
+Anforderungen an Tiefe und Umfang (mindestens einhalten):
+- Jedes String-Feld: **2–4 vollstaendige Saetze** mit strategischer Interpretation (nicht nur Stichworte, nicht nur Eingaben umformulieren).
+- Synthese aus **allen** Kennwerten **und** der Strategiereferenz (Mission, Vision, Werte, Kultur, Leadership) — auch wenn einzelne Texte kurz sind, Bedeutung ableiten.
+- **strategic_implications**: **8–14** Eintraege; jeder Eintrag **1–2 Saetze** mit konkreter strategischer Konsequenz fuer Zielsetzung, Portfolio und Umsetzung.
+- Keine leeren Felder. Keine generischen Floskeln ohne Bezug zum Unternehmen.
+
+Schema (Schluessel exakt so):
+{"company_type":"...","scale":"...","industry_context":"...","value_creation_logic":"...","market_scope":"...","growth_ambition":"...","transformation_pressure":"...","strategic_implications":["...","..."]}`;
 }
+
+/** Strategische Kontext-Zusammenfassung braucht deutlich mehr Output-Tokens als Einzelbewertungen. */
+const STRATEGIC_CONTEXT_MIN_OUTPUT_TOKENS = 1600;
 
 function buildObjectiveEvalPrompt(contextJson: string, objectiveTitle: string, objectiveDescription: string): string {
   return `Strategischer Kontext (JSON):
@@ -216,10 +231,11 @@ export async function buildStrategicContextWithLlm(
   maxOutputTokens?: number
 ): Promise<LlmScoreResponse<StrategicContextOutput> & { provider?: string; model?: string }> {
   const systemPrompt =
-    "You are a senior strategy consultant. Translate structured company information into a concise strategic context profile. Focus on growth ambition, transformation pressure, strategic implications, business model logic. Do NOT repeat inputs. Infer meaning. Be precise and structured. Return only valid JSON.";
+    "You are a senior strategy consultant. Synthesize ALL provided company data and strategy reference texts into a detailed, comprehensive strategic context profile for downstream objective evaluation. Be substantive and specific to this company. Infer strategic meaning; do not merely compress inputs into short labels. Return only valid JSON.";
   const userPrompt = buildStrategicContextPrompt(profile);
   const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-  const result = await invokeLlmForJson(fullPrompt, maxOutputTokens);
+  const outputTokenBudget = Math.max(maxOutputTokens ?? 600, STRATEGIC_CONTEXT_MIN_OUTPUT_TOKENS);
+  const result = await invokeLlmForJson(fullPrompt, outputTokenBudget);
   if (!result) return { result: null, usage: null };
   const parsed = parseStrategicContextJson(result.text);
   if (!parsed) return { result: null, usage: result.usage };

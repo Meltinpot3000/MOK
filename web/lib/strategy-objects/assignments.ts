@@ -6,12 +6,28 @@ import type { StrategyObjectType } from "./types";
  * Zuordnungsänderungen den Definition-Hash (und damit die AI-Bewertung) nicht als
  * veraltet markieren.
  */
-export type StrategyObjectAssignmentKind = "industry" | "business_model";
+export type StrategyObjectAssignmentKind = "industry" | "business_model" | "analysis_entry";
 
 export const STRATEGY_OBJECT_ASSIGNMENT_KINDS: StrategyObjectAssignmentKind[] = [
   "industry",
   "business_model",
 ];
+
+/** Nur Herausforderungen: Analyse-Einträge revisionsgebunden wie Industrien/BM. */
+export const STRATEGIC_CHALLENGE_ASSIGNMENT_KINDS: StrategyObjectAssignmentKind[] = [
+  ...STRATEGY_OBJECT_ASSIGNMENT_KINDS,
+  "analysis_entry",
+];
+
+export function assignmentKindsForObjectType(
+  objectType: StrategyObjectType
+): StrategyObjectAssignmentKind[] {
+  return objectType === "strategic_challenge"
+    ? STRATEGIC_CHALLENGE_ASSIGNMENT_KINDS
+    : STRATEGY_OBJECT_ASSIGNMENT_KINDS;
+}
+
+type AssignmentTableConfig = { table: string; valueColumn: string };
 
 type PayloadRecord = Record<string, unknown>;
 
@@ -21,6 +37,7 @@ const ASSIGNMENTS_KEY = "assignments";
 const KIND_TO_PAYLOAD_FIELD: Record<StrategyObjectAssignmentKind, string> = {
   industry: "industry_ids",
   business_model: "business_model_ids",
+  analysis_entry: "analysis_entry_ids",
 };
 
 /** Link-Tabellen je Objekttyp (Spaltennamen exakt wie in den Live-Link-Actions). */
@@ -28,7 +45,8 @@ export const STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG: Record<
   StrategyObjectType,
   {
     idColumn: string;
-    tables: Record<StrategyObjectAssignmentKind, { table: string; valueColumn: string }>;
+    tables: Partial<Record<StrategyObjectAssignmentKind, AssignmentTableConfig>> &
+      Record<"industry" | "business_model", AssignmentTableConfig>;
   }
 > = {
   strategic_objective: {
@@ -43,6 +61,10 @@ export const STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG: Record<
     tables: {
       industry: { table: "strategic_challenge_industries", valueColumn: "industry_id" },
       business_model: { table: "strategic_challenge_business_models", valueColumn: "business_model_id" },
+      analysis_entry: {
+        table: "strategic_challenge_analysis_entries",
+        valueColumn: "analysis_entry_id",
+      },
     },
   },
   strategic_direction: {
@@ -55,7 +77,17 @@ export const STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG: Record<
 };
 
 export function normalizeAssignmentKind(value: unknown): StrategyObjectAssignmentKind | null {
-  return value === "industry" || value === "business_model" ? value : null;
+  return value === "industry" || value === "business_model" || value === "analysis_entry"
+    ? value
+    : null;
+}
+
+function assignmentTableConfig(
+  objectType: StrategyObjectType,
+  kind: StrategyObjectAssignmentKind
+): AssignmentTableConfig | null {
+  const cfg = STRATEGY_OBJECT_ASSIGNMENT_LINK_CONFIG[objectType].tables[kind];
+  return cfg ?? null;
 }
 
 function readHashExcluded(payload: PayloadRecord | null | undefined): PayloadRecord {

@@ -10,7 +10,8 @@ type LlmFeatureKey =
   | "matrix_program_proposal"
   | "okr_contribution_assessment"
   | "kr_initiative_matching"
-  | "annual_target_smart_formulation";
+  | "annual_target_smart_formulation"
+  | "design_field_suggestions";
 
 export type AnalysisNetworkLlmPolicy = {
   llmEnabled: boolean;
@@ -81,6 +82,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     okr_contribution_assessment: readBoolean(featureFlagsRaw.okr_contribution_assessment, false),
     kr_initiative_matching: readBoolean(featureFlagsRaw.kr_initiative_matching, false),
     annual_target_smart_formulation: readBoolean(featureFlagsRaw.annual_target_smart_formulation, false),
+    design_field_suggestions: readBoolean(featureFlagsRaw.design_field_suggestions, true),
   };
 
   const maxOutputTokensByFeature: Record<LlmFeatureKey, number> = {
@@ -101,6 +103,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
       64,
       4096
     ),
+    design_field_suggestions: readNumber(outputByFeatureRaw.design_field_suggestions, 1200, 64, 4096),
   };
 
   return {

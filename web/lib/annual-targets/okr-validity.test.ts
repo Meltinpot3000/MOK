@@ -7,6 +7,7 @@ describe("isAnnualTargetOkrValid", () => {
     targetYear: 2026,
     ownerMembershipId: "owner-1",
     signatureStatus: "signed",
+    strategyProgramId: "prog-1",
   };
 
   it("ist gültig wenn active, Jahr, Owner und Signatur passen", () => {
@@ -22,11 +23,22 @@ describe("isAnnualTargetOkrValid", () => {
 
   it("ist ungültig ohne Signatur bei Pflicht", () => {
     expect(
-      isAnnualTargetOkrValid({ ...row, signatureStatus: "sent" }, "owner-1", 2026, {
+      isAnnualTargetOkrValid({ ...row, signatureStatus: "sent", strategyProgramId: "prog-1" }, "owner-1", 2026, {
         requireSignature: true,
         signatureMode: "internal_acknowledgement",
         activationRequiresSignedStatus: true,
       })
+    ).toBe(false);
+  });
+
+  it("ist ungültig für Run-Jahresziele ohne Programm", () => {
+    expect(
+      isAnnualTargetOkrValid(
+        { ...row, strategyProgramId: null },
+        "owner-1",
+        2026,
+        { requireSignature: false, signatureMode: "none", activationRequiresSignedStatus: false }
+      )
     ).toBe(false);
   });
 });

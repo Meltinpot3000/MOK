@@ -4,6 +4,8 @@ import {
   adaptOperationalRowToDirectionLegacy,
   adaptOperationalRowToObjectiveLegacy,
 } from "./adapters";
+import { strategyObjectDefinitionHash } from "./definition-hash";
+import { fetchOpenDraftsForCycle } from "./revision-queries";
 import type {
   StrategyChallengeLegacyRow,
   StrategyDirectionLegacyRow,
@@ -371,7 +373,14 @@ export async function fetchChallengesForCycle(
     "strategic_challenge",
     options
   );
-  return rows.map((row) => adaptOperationalRowToChallengeLegacy(row));
+  const adapted = rows.map((row) => adaptOperationalRowToChallengeLegacy(row));
+  return overlayLiveStrategyObjectCopy(
+    adapted,
+    organizationId,
+    cycleInstanceId,
+    "strategic_challenge",
+    options
+  );
 }
 
 export async function fetchDirectionsForCycle(
@@ -385,7 +394,15 @@ export async function fetchDirectionsForCycle(
     "strategic_direction",
     options
   );
-  return rows.map((row) => adaptOperationalRowToDirectionLegacy(row));
+  const adapted = rows.map((row) => adaptOperationalRowToDirectionLegacy(row));
+  const withCopy = await overlayLiveStrategyObjectCopy(
+    adapted,
+    organizationId,
+    cycleInstanceId,
+    "strategic_direction",
+    options
+  );
+  return overlayLiveDirectionGrouping(withCopy, organizationId, cycleInstanceId, options);
 }
 
 const LIVE_OBJECTIVE_AI_FIELDS = [
@@ -407,6 +424,85 @@ const LIVE_OBJECTIVE_AI_FIELDS = [
   "ai_manual_override",
   "ai_manual_comment",
 ] as const;
+
+type StrategyObjectCopyOverlayRow = {
+  id: string | null;
+  title: string;
+  description: string | null;
+  versioning?: import("./types").StrategyObjectVersioningMeta;
+};
+
+/**
+ * Seeds und Legacy-Schreibpfade aktualisieren oft `strategic_*` / `strategy_objectives`,
+ * waehrend die UI aus `v_current_strategy_objects` (Revisions-Snapshot) liest.
+ * Offene Entwuerfe haben Vorrang; sonst legen wir Titel und Beschreibung aus der
+ * Legacy-Tabelle darueber (gleiche ID wie revision_id).
+ */
+async function overlayLiveStrategyObjectCopy<T extends StrategyObjectCopyOverlayRow>(
+  rows: T[],
+  organizationId: string,
+  cycleInstanceId: string,
+  objectType: StrategyObjectType,
+  options: QueryOptions
+): Promise<T[]> {
+  const ids = rows.map((row) => row.id).filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return rows;
+
+  const legacyTable =
+    objectType === "strategic_challenge"
+      ? "strategic_challenges"
+      : objectType === "strategic_direction"
+        ? "strategic_directions"
+        : "strategy_objectives";
+
+  const supabase = options.supabase ?? (await createSupabaseServerClient());
+  const [{ data: legacyRows, error: legacyError }, openDrafts] = await Promise.all([
+    supabase
+      .schema("app")
+      .from(legacyTable)
+      .select("id, title, description")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .in("id", ids),
+    fetchOpenDraftsForCycle(organizationId, cycleInstanceId, { supabase }),
+  ]);
+
+  if (legacyError) {
+    console.error("[strategy-objects] overlay live strategy object copy", legacyError.message);
+  }
+
+  const legacyById = new Map<string, { title: string; description: string | null }>();
+  for (const row of legacyRows ?? []) {
+    const rec = row as { id: string; title?: string; description?: string | null };
+    legacyById.set(rec.id, {
+      title: typeof rec.title === "string" ? rec.title : "",
+      description: typeof rec.description === "string" ? rec.description : null,
+    });
+  }
+
+  const draftByIdentity = new Map<string, { title: string; description: string | null }>();
+  for (const draft of Object.values(openDrafts)) {
+    if (draft.object_type !== objectType) continue;
+    draftByIdentity.set(draft.object_identity_id, {
+      title: draft.title,
+      description: draft.description,
+    });
+  }
+
+  return rows.map((row) => {
+    const identityId = row.versioning?.object_identity_id;
+    const draftCopy = identityId ? draftByIdentity.get(identityId) : undefined;
+    if (draftCopy) {
+      if (draftCopy.title === row.title && draftCopy.description === row.description) return row;
+      return { ...row, title: draftCopy.title, description: draftCopy.description };
+    }
+
+    const legacy = row.id ? legacyById.get(row.id) : undefined;
+    if (!legacy) return row;
+    if (legacy.title === row.title && legacy.description === row.description) return row;
+    return { ...row, title: legacy.title, description: legacy.description };
+  });
+}
 
 /**
  * Die Sentinel-Bewertung wird in `strategy_objectives` geschrieben, waehrend die
@@ -453,6 +549,65 @@ async function overlayLiveObjectiveEvaluations(
   });
 }
 
+/**
+ * Die Treemap liest grouping aus der aktuellen Revisions-View (`definition_payload`).
+ * Gruppierungs-Updates landen teils in `strategic_directions` oder in offenen Entwürfen —
+ * ohne Overlay bleibt die Anzeige leer, obwohl die Übernahme erfolgreich war.
+ */
+async function overlayLiveDirectionGrouping(
+  rows: StrategyDirectionLegacyRow[],
+  organizationId: string,
+  cycleInstanceId: string,
+  options: QueryOptions
+): Promise<StrategyDirectionLegacyRow[]> {
+  const ids = rows.map((row) => row.id).filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return rows;
+
+  const supabase = options.supabase ?? (await createSupabaseServerClient());
+  const [{ data: legacyRows, error: legacyError }, openDrafts] = await Promise.all([
+    supabase
+      .schema("app")
+      .from("strategic_directions")
+      .select("id, grouping")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId)
+      .in("id", ids),
+    fetchOpenDraftsForCycle(organizationId, cycleInstanceId, { supabase }),
+  ]);
+
+  if (legacyError) {
+    console.error("[strategy-objects] overlay live direction grouping", legacyError.message);
+  }
+
+  const groupingByLegacyId = new Map<string, string | null>();
+  for (const row of legacyRows ?? []) {
+    const rec = row as { id: string; grouping?: string | null };
+    groupingByLegacyId.set(rec.id, typeof rec.grouping === "string" ? rec.grouping : null);
+  }
+
+  const groupingByIdentityFromDraft = new Map<string, string>();
+  for (const draft of Object.values(openDrafts)) {
+    if (draft.object_type !== "strategic_direction") continue;
+    const grouping = draft.definition_payload.grouping;
+    if (typeof grouping === "string" && grouping.trim()) {
+      groupingByIdentityFromDraft.set(draft.object_identity_id, grouping.trim());
+    }
+  }
+
+  return rows.map((row) => {
+    const identityId = row.versioning?.object_identity_id;
+    const draftGrouping = identityId ? groupingByIdentityFromDraft.get(identityId) : undefined;
+    const legacyGrouping = row.id ? groupingByLegacyId.get(row.id) : undefined;
+    const resolved =
+      draftGrouping ??
+      (legacyGrouping?.trim() ? legacyGrouping.trim() : null) ??
+      (row.grouping?.trim() ? row.grouping.trim() : null);
+
+    if (resolved === row.grouping) return row;
+    return { ...row, grouping: resolved };
+  });
+}
+
 export async function fetchObjectivesForCycle(
   organizationId: string,
   cycleInstanceId: string,
@@ -465,7 +620,14 @@ export async function fetchObjectivesForCycle(
     options
   );
   const adapted = rows.map((row) => adaptOperationalRowToObjectiveLegacy(row));
-  return overlayLiveObjectiveEvaluations(adapted, organizationId, cycleInstanceId, options);
+  const withCopy = await overlayLiveStrategyObjectCopy(
+    adapted,
+    organizationId,
+    cycleInstanceId,
+    "strategic_objective",
+    options
+  );
+  return overlayLiveObjectiveEvaluations(withCopy, organizationId, cycleInstanceId, options);
 }
 
 function operationalRowToVersioningMeta(

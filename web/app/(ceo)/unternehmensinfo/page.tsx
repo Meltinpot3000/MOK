@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { RefreshOnSuccess } from "@/components/ceo/RefreshOnSuccess";
+import { StrategicContextRebuildBanner } from "@/components/ceo/company-info/StrategicContextRebuildBanner";
 import { UnternehmensinfoSection } from "@/components/ceo/company-info/UnternehmensinfoSection";
 import { coerceStrategicContextOutput } from "@/lib/analysis-network/objective-evaluation-providers";
 import { getTenantBranding } from "@/lib/ceo/queries";
@@ -41,7 +41,8 @@ export default async function UnternehmensinfoPage({ searchParams }: Unternehmen
 
   const context = await getPhase0Context();
   if (!context) redirect("/no-access");
-  const hasActiveCycle = Boolean(await getActivePlanningCycle(context.organizationId));
+  const activeCycle = await getActivePlanningCycle(context.organizationId);
+  const hasActiveCycle = Boolean(activeCycle);
 
   if (!hasActiveCycle) {
     return (
@@ -78,6 +79,19 @@ export default async function UnternehmensinfoPage({ searchParams }: Unternehmen
       }
     : null;
 
+  const { data: strategicContextRebuildJob } = await supabase
+    .schema("app")
+    .from("analysis_background_jobs")
+    .select("id, status")
+    .eq("organization_id", context.organizationId)
+    .eq("job_type", "strategic_context_rebuild")
+    .in("status", ["pending", "running"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const strategicContextRebuildActive = Boolean(strategicContextRebuildJob?.id);
+
   const statusMessage = getUnternehmensinfoStatusMessage(resolvedSearchParams.success);
 
   return (
@@ -91,7 +105,7 @@ export default async function UnternehmensinfoPage({ searchParams }: Unternehmen
       </header>
 
       <Suspense fallback={null}>
-        <RefreshOnSuccess />
+        <StrategicContextRebuildBanner initialRebuildActive={strategicContextRebuildActive} />
       </Suspense>
       {!canWrite ? (
         <p className="brand-surface p-3 text-sm text-zinc-600">
@@ -110,6 +124,7 @@ export default async function UnternehmensinfoPage({ searchParams }: Unternehmen
         companyKennzahlen={companyKennzahlen}
         strategyReferenceFields={strategyReferenceFields}
         strategicContextCache={strategicContextCache}
+        strategicContextRebuildActive={strategicContextRebuildActive}
       />
     </div>
   );

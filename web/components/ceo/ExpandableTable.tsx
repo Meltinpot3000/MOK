@@ -187,7 +187,7 @@ export function ExpandableTable<T>({
       ) : null}
       <TableHorizontalScroll
         onViewportWidthChange={setViewportWidth}
-        layoutKey={`${rows.length}:${expandedIds.size}:${visibleCols.size}:${columnPickerOpen ? 1 : 0}`}
+        layoutKey={`${rows.length}:${expandedIds.size}:${visibleCols.length}:${columnPickerOpen ? 1 : 0}`}
       >
         <table className="w-max min-w-full border-collapse">
           <thead>

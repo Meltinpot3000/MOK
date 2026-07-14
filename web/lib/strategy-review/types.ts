@@ -27,4 +27,5 @@ export type StrategyReviewRow = {
   released_at: string | null;
   announcement_sent_at: string | null;
   announcement_payload: Record<string, unknown>;
+  meeting_notes: string;
 };

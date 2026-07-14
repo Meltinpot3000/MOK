@@ -99,12 +99,20 @@ export function readCompanyKennzahlenFromBrandingConfig(brandingConfig: unknown)
   const regionen = root.company_info_marktregionen;
   const regionenArr = Array.isArray(regionen) ? regionen : typeof regionen === "string" ? (regionen ? [regionen] : []) : [];
   const kernWert =
-    root.company_info_kern_wertschoepfung ||
-    (root.company_info_produkt_oder_service === "service" ? "Services" : root.company_info_produkt_oder_service === "produkt" ? "Manufacturing" : "");
+    root.company_info_kern_wertschoepfung ??
+    root["company_info_kern_wertsch\u00F6pfung"] ??
+    (root.company_info_produkt_oder_service === "service"
+      ? "Services"
+      : root.company_info_produkt_oder_service === "produkt"
+        ? "Manufacturing"
+        : "");
   return {
     organizationsform: normalizeStr(root.company_info_organizationsform, 80),
     organizationsform_other: normalizeStr(root.company_info_organizationsform_other, 200),
-    unternehmensgroesse: normalizeStr(root.company_info_unternehmensgroesse, 50),
+    unternehmensgroesse: normalizeStr(
+      root.company_info_unternehmensgroesse ?? root["company_info_unternehmensgr\u00F6\u00DFe"],
+      50
+    ),
     industriekontext: normalizeStr(root.company_info_industriekontext, 80),
     industriekontext_other: normalizeStr(root.company_info_industriekontext_other, 200),
     kern_wertschoepfung: normalizeStr(kernWert, 50),

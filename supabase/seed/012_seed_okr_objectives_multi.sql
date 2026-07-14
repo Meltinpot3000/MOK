@@ -391,7 +391,29 @@ begin
       v_pc,
       v_ci,
       '[OKR-Multi-Seed] ' || r.strat_title,
-      'Automatisches Demo-Strategieziel (012_seed_okr_objectives_multi). Verknuepft mit Stossrichtung und OKR-Ziel.',
+      case r.seq
+        when 1 then 'OTIF und Reklamationsquote in Top-OEM-Konten verbessern; CabTec als verlaesslicher Co-Engineering-Partner wahrnehmen. KPI bis 2028: OTIF 96 %, Reklamationsquote -30 %, NPS Top-Accounts messbar.'
+        when 2 then 'Durchlaufzeit AV bis Serienfreigabe und FTQ im Anlauf senken; Standard-Arbeitsfolgen flaechendeckend. KPI bis 2028: Durchlaufzeit -20 %, FTQ +15 %, Erstpacket-Qualitaet gruen.'
+        when 3 then 'Poka-Yoke und FTQ-Ziele im Serienanlauf; Nacharbeitkosten unter Budget durch fruehe Fehlervermeidung in AV. KPI bis 2028: Nacharbeitkosten -25 %, schwere Fehler im Anlauf -40 %.'
+        when 4 then 'Class-A-Materialien mit Zweitwerk und validierter Liefertreue; Engpaesse duerfen OTIF nicht gefaehrden. KPI bis 2028: Liefertreue 98 %, Altbestand kritische Teile -30 %.'
+        when 5 then 'Shopfloor-Terminals und Ticket-Workflows; Echtzeit-Sicht fuer Kunden und Steuerung. KPI bis 2028: digitale Statusabdeckung Key Accounts 100 %, Rueckfragen-Durchlauf -35 %.'
+        when 6 then 'Baukasten-Anteil im Neugeschaeft erhoehen; Wiederverwendungsscores in AV messbar. KPI bis 2028: Baukasten-Anteil +15 Prozentpunkte, AV-Neuentwicklungszeit -20 %.'
+        when 7 then 'Energie pro Einheit und recyclingfaehige Verpackung senken; ESG-Nachweise fuer OEMs. KPI bis 2028: Energieindex -10 %, recyclingfaehige Verpackung 62 % Gewicht.'
+        when 8 then 'Time-to-Productivity in Produktion und QS verbessern; kritische Rollen schneller besetzen. KPI bis 2028: Vakanz < 60 Tage, Onboarding-Index +25 %.'
+        when 9 then 'Exportdokumente und Zoll mit First-Pass-Qualitaet; Klaerzeiten minimieren. KPI bis 2028: First-Pass Export 92 %, Klaerzeit Abweichungen < 3 Tage.'
+        when 10 then 'MES/AV mit nachgewiesener Recovery; Security-Findings zeitnah schliessen. KPI bis 2028: RTO-Tests 4x/Jahr bestanden, kritische Findings < 30 Tage.'
+        when 11 then 'Pipeline nach Deckungsbeitrag und Win-Rate steuern — kein Volumen um jeden Preis. KPI bis 2028: gewichtete Pipeline DB +40 %, Win-Rate +5 Prozentpunkte.'
+        when 12 then 'Lager- und Forderungsoptimierung mit OTIF-Schutz. KPI bis 2028: NWC -9 Tage, Altbestand > 180 Tage -40 %.'
+        when 13 then 'Pruefplatz-Engpaesse beseitigen; Rueckstau vor Freigabe reduzieren. KPI bis 2028: Peak-Auslastung Pruefplaetze 82 %, Rueckstau -65 %.'
+        when 14 then 'Werkzeugverfuegbarkeit und Lebenszyklusplanung verbessern. KPI bis 2028: ungeplante Stillstandsminuten Werkzeug -50 %.'
+        when 15 then 'UL-Produktfamilien zertifizieren und audit-sicher pflegen. KPI bis 2028: 92 % UL-Familien aktuell, Audit-Findings ueberfaellig = 0.'
+        when 16 then 'Meldekultur staerken; CAPA bei Near-Miss zeitnah. KPI bis 2028: 45 Vorschlaege/Quartal, schwere Near-Miss ohne CAPA = 0.'
+        when 17 then 'Stammdatenqualitaetsindex erhoehen; abweichende AV-Saetze ohne Ticket reduzieren. KPI bis 2028: Index 90 %, Abweichungen -65 %.'
+        when 18 then 'Materialkostenindex Neu-Teile senken; Substitution nur mit QS-Sign-off. KPI bis 2028: Index -6 %, FTQ stabil.'
+        when 19 then 'Top-Initiativen im gruenen Zustand halten; Meilensteine termingerecht. KPI bis 2028: 11 von 12 Top-Initiativen gruen, kritische Meilensteine -50 % ueberfaellig.'
+        when 20 then 'Pilotdauer Erstmuster bis validierte Serie verkuerzen. KPI bis 2028: Median 9,5 Wochen, Lessons Learned 90 %.'
+        else 'Strategisches Ziel der CabTec Group: Hybrid-Konfektion und Co-Engineering fuer OEMs in DACH — messbar bis 2028.'
+      end,
       'active',
       v_owner,
       r.imp,

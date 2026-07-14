@@ -15,6 +15,7 @@ import {
   type ReviewStatus,
   type Trend,
 } from "@/lib/review/key-result-progress";
+export type { ReviewStatus } from "@/lib/review/key-result-progress";
 import type { OkrPlanningKeyResultRow, OkrPlanningObjectiveRow } from "@/lib/okr/planning-data";
 
 export const OKR_STALE_CHECKIN_DAYS = 30;
@@ -54,6 +55,7 @@ export function deriveReviewStatusLinearOkrCycle(
 
 export type OkrWarningKind =
   | "no_direction"
+  | "no_change_anchor"
   | "kr_no_initiative"
   | "initiative_no_kr"
   | "no_checkin_stale"
@@ -255,7 +257,11 @@ export function buildOkrObjectiveView(
   const lastActivityAt = computeCheckInFirstLastActivityAt(objective.keyResults, lastCheckInByKrId);
 
   const warnings: OkrWarningKind[] = [];
-  if (!objective.leadingStrategicDirectionId) warnings.push("no_direction");
+  if (!objective.leadingStrategicDirectionId) {
+    warnings.push(objective.warningNoChangeAnchor ? "no_change_anchor" : "no_direction");
+  } else if (objective.warningNoChangeAnchor) {
+    warnings.push("no_change_anchor");
+  }
   if (
     objective.keyResults.length > 0 &&
     objective.keyResults.every((kr) => kr.warningNoInitiativeLink)

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { InitiativeKrLinkContext, PipKeyResultOption } from "@/lib/strategy-cycle/queries";
+import {
+  formatChfAmount,
+  parseInitiativeBudgetInput,
+  remainingProgramBudget,
+  validateInitiativeBudgetAgainstProgram,
+  type InitiativeProgramOption,
+} from "@/lib/strategy-cycle/initiative-program-budget";
 
 const FORM_STATUSES = [
   "draft",
@@ -23,8 +29,6 @@ const STATUS_LABELS: Record<(typeof FORM_STATUSES)[number], string> = {
   archived: "Archiviert",
 };
 
-const EXTRA_STATUS_LABELS: Record<string, string> = {};
-
 export type InitiativeFormSelection = {
   id: string;
   title: string;
@@ -34,8 +38,7 @@ export type InitiativeFormSelection = {
   owner_membership_id: string | null;
   progress_percent: number;
   description: string | null;
-  annualTargetIds: string[];
-  keyResultIds: string[];
+  budget: number | null;
   start_date: string | null;
   end_date: string | null;
 };
@@ -44,28 +47,22 @@ type InitiativeCreateFormProps = {
   canWrite: boolean;
   createAction: (formData: FormData) => void | Promise<void>;
   updateAction: (formData: FormData) => void | Promise<void>;
-  programs: Array<{ id: string; title: string }>;
+  programs: InitiativeProgramOption[];
   ownerOptions: Array<{ id: string; label: string }>;
-  annualTargets: Array<{ id: string; title: string }>;
-  keyResultOptions: PipKeyResultOption[];
   selectedInitiative: InitiativeFormSelection | null;
-  targetTitleById: Record<string, string>;
-  krContextsByKrId: Record<string, InitiativeKrLinkContext>;
   onClearSelection: () => void;
   showClearButton?: boolean;
 };
 
 function statusOptionsFor(current: string): string[] {
   const base: string[] = [...FORM_STATUSES];
-  if (current && !base.includes(current)) {
-    base.push(current);
-  }
+  if (current && !base.includes(current)) base.push(current);
   return base;
 }
 
 function labelForStatus(s: string): string {
   if (s in STATUS_LABELS) return STATUS_LABELS[s as (typeof FORM_STATUSES)[number]];
-  return EXTRA_STATUS_LABELS[s] ?? s;
+  return s;
 }
 
 export function InitiativeCreateForm({
@@ -74,11 +71,7 @@ export function InitiativeCreateForm({
   updateAction,
   programs,
   ownerOptions,
-  annualTargets,
-  keyResultOptions,
   selectedInitiative,
-  targetTitleById,
-  krContextsByKrId,
   onClearSelection,
   showClearButton = true,
 }: InitiativeCreateFormProps) {
@@ -89,12 +82,9 @@ export function InitiativeCreateForm({
   const [ownerId, setOwnerId] = useState("");
   const [progressStr, setProgressStr] = useState("0");
   const [description, setDescription] = useState("");
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [krIds, setKrIds] = useState<string[]>([]);
+  const [budgetStr, setBudgetStr] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [pickTarget, setPickTarget] = useState("");
-  const [pickKr, setPickKr] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
 
   const isEdit = Boolean(selectedInitiative);
@@ -109,12 +99,9 @@ export function InitiativeCreateForm({
       setOwnerId("");
       setProgressStr("0");
       setDescription("");
-      setTargetIds([]);
-      setKrIds([]);
+      setBudgetStr("");
       setStartDate("");
       setEndDate("");
-      setPickTarget("");
-      setPickKr("");
       return;
     }
     setTitle(selectedInitiative.title);
@@ -124,29 +111,64 @@ export function InitiativeCreateForm({
     setOwnerId(selectedInitiative.owner_membership_id ?? "");
     setProgressStr(String(Math.round(selectedInitiative.progress_percent ?? 0)));
     setDescription(selectedInitiative.description ?? "");
-    setTargetIds([...selectedInitiative.annualTargetIds]);
-    setKrIds([...selectedInitiative.keyResultIds]);
+    setBudgetStr(
+      selectedInitiative.budget != null && Number.isFinite(selectedInitiative.budget)
+        ? String(selectedInitiative.budget)
+        : ""
+    );
+    setStartDate(selectedInitiative.start_date ?? "");
+    setEndDate(selectedInitiative.end_date ?? "");
   }, [selectedInitiative]);
+
+  const selectedProgram = useMemo(
+    () => programs.find((p) => p.id === programId) ?? null,
+    [programs, programId]
+  );
+
+  const programBudgetContext: Pick<InitiativeProgramOption, "budgetTotal" | "allocatedBudget"> | null =
+    selectedProgram
+      ? {
+          budgetTotal: selectedProgram.budgetTotal,
+          allocatedBudget: selectedProgram.allocatedBudget,
+        }
+      : null;
+
+  const currentInitiativeBudget = selectedInitiative?.budget ?? 0;
+  const remainingBudget = programBudgetContext
+    ? remainingProgramBudget(programBudgetContext, currentInitiativeBudget)
+    : null;
 
   const statusSelectOptions = useMemo(() => {
     if (!selectedInitiative) return [...FORM_STATUSES];
     return statusOptionsFor(selectedInitiative.status);
   }, [selectedInitiative]);
 
-  const canSubmit = useMemo(() => {
-    return title.trim().length > 0 && programId.length > 0;
-  }, [title, programId]);
+  const canSubmit = useMemo(() => title.trim().length > 0 && programId.length > 0, [title, programId]);
 
   const validate = (): string | null => {
     if (!title.trim()) return "Bitte einen Titel angeben.";
-    if (!programId) return "Bitte ein Programm waehlen.";
+    if (!programId) return "Bitte ein Change-Programm wählen.";
     const p = Number(progressStr);
     if (!Number.isFinite(p) || p < 0 || p > 100) {
       return "Fortschritt muss eine Zahl zwischen 0 und 100 sein.";
     }
-    if (priority < 1 || priority > 5) return "Priorit\u00E4t muss zwischen 1 und 5 liegen.";
+    if (priority < 1 || priority > 5) return "Priorität muss zwischen 1 und 5 liegen.";
     if (startDate && endDate && startDate > endDate) {
       return "Das Enddatum darf nicht vor dem Startdatum liegen.";
+    }
+    const requestedBudget = parseInitiativeBudgetInput(budgetStr);
+    if (budgetStr.trim() && requestedBudget == null) {
+      return "Budget muss eine gültige Zahl ≥ 0 sein.";
+    }
+    if (selectedProgram && requestedBudget != null) {
+      const otherAllocated =
+        selectedProgram.allocatedBudget -
+        (isEdit && selectedInitiative?.program_id === programId ? currentInitiativeBudget : 0);
+      return validateInitiativeBudgetAgainstProgram({
+        programBudgetTotal: selectedProgram.budgetTotal,
+        otherInitiativesAllocated: Math.max(0, otherAllocated),
+        requestedBudget,
+      });
     }
     return null;
   };
@@ -158,30 +180,12 @@ export function InitiativeCreateForm({
       return;
     }
     setClientError(null);
-    if (isEdit) {
-      await updateAction(formData);
-    } else {
-      await createAction(formData);
-    }
+    if (isEdit) await updateAction(formData);
+    else await createAction(formData);
   };
 
   const progressNum = Math.min(100, Math.max(0, Math.round(Number(progressStr) || 0)));
-
-  const addTarget = () => {
-    if (!pickTarget || targetIds.includes(pickTarget)) return;
-    setTargetIds((s) => [...s, pickTarget]);
-    setPickTarget("");
-  };
-
-  const removeTarget = (id: string) => setTargetIds((s) => s.filter((x) => x !== id));
-
-  const addKr = () => {
-    if (!pickKr || krIds.includes(pickKr)) return;
-    setKrIds((s) => [...s, pickKr]);
-    setPickKr("");
-  };
-
-  const removeKr = (id: string) => setKrIds((s) => s.filter((x) => x !== id));
+  const parsedBudget = parseInitiativeBudgetInput(budgetStr);
 
   return (
     <form action={handleSave} className="mt-4 space-y-3">
@@ -196,18 +200,18 @@ export function InitiativeCreateForm({
       <input type="hidden" name="description" value={description} />
       <input type="hidden" name="start_date" value={startDate} />
       <input type="hidden" name="end_date" value={endDate} />
-      {targetIds.map((id) => (
-        <input key={id} type="hidden" name="annual_target_id" value={id} />
-      ))}
-      {krIds.map((id) => (
-        <input key={id} type="hidden" name="key_result_id" value={id} />
-      ))}
+      <input type="hidden" name="budget" value={parsedBudget != null ? String(parsedBudget) : ""} />
 
       {clientError ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
           {clientError}
         </p>
       ) : null}
+
+      <p className="rounded-md border border-sky-100 bg-sky-50/80 px-3 py-2 text-[11px] text-sky-950">
+        Change-Initiativen hängen am Programm. OKR-Key Results und Jahresziele werden an anderer Stelle
+        verknüpft (OKR-Workspace bzw. Change-Jahresziel).
+      </p>
 
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-700">Titel</label>
@@ -220,23 +224,71 @@ export function InitiativeCreateForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-zinc-700">Programm</label>
+        <label className="mb-1 block text-xs font-medium text-zinc-700">Change-Programm *</label>
         <p className="mb-1.5 text-[11px] text-zinc-500">
-          Nur offene Programme sind zur Auswahl vorgeschlagen; bestehende Zuordnungen zu abgeschlossenen
-          Programmen bleiben beim Bearbeiten sichtbar.
+          Draft/planned Initiativen dürfen an Draft-, On-Hold- oder Active-Programmen hängen. Active Initiativen
+          benötigen ein freigegebenes (active) Programm.
         </p>
         <select
           value={programId}
           onChange={(e) => setProgramId(e.target.value)}
           className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
         >
-          <option value="">Programm waehlen</option>
+          <option value="">Programm wählen</option>
           {programs.map((program) => (
             <option key={program.id} value={program.id}>
               {program.title}
+              {program.status && program.status !== "active" ? ` (${program.status})` : ""}
             </option>
           ))}
         </select>
+      </div>
+
+      {selectedProgram ? (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50/80 p-3 text-[11px] text-zinc-700">
+          <p>
+            Programm-Budget:{" "}
+            <span className="font-medium tabular-nums">
+              {formatChfAmount(selectedProgram.budgetTotal)}
+            </span>
+          </p>
+          {selectedProgram.budgetTotal != null ? (
+            <>
+              <p className="mt-1">
+                Bereits lokalisiert:{" "}
+                <span className="tabular-nums">{formatChfAmount(selectedProgram.allocatedBudget)}</span>
+              </p>
+              <p className="mt-1">
+                Verfügbar für diese Initiative:{" "}
+                <span className="font-medium tabular-nums">{formatChfAmount(remainingBudget)}</span>
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-amber-800">
+              Kein Programm-Budget hinterlegt — Budget-Lokalisierung erst nach Festlegung am Programm möglich.
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-zinc-700">
+          Budget aus Programm lokalisieren (CHF)
+        </label>
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          value={budgetStr}
+          onChange={(e) => setBudgetStr(e.target.value)}
+          disabled={!selectedProgram?.budgetTotal}
+          placeholder={
+            selectedProgram?.budgetTotal
+              ? `max. ${formatChfAmount(remainingBudget)}`
+              : "Zuerst Programm-Budget festlegen"
+          }
+          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:bg-zinc-100"
+        />
       </div>
 
       <div>
@@ -263,7 +315,7 @@ export function InitiativeCreateForm({
         >
           {[1, 2, 3, 4, 5].map((n) => (
             <option key={n} value={n}>
-              {n} {n === 1 ? "(hoechste)" : n === 5 ? "(niedrigste)" : ""}
+              {n} {n === 1 ? "(höchste)" : n === 5 ? "(niedrigste)" : ""}
             </option>
           ))}
         </select>
@@ -330,106 +382,6 @@ export function InitiativeCreateForm({
         />
       </div>
 
-      <div className="rounded-md border border-zinc-200 bg-zinc-50/50 p-3">
-        <p className="mb-2 text-xs font-semibold text-zinc-800">Jahresziele verknüpfen</p>
-        <div className="flex flex-wrap gap-2">
-          <select
-            value={pickTarget}
-            onChange={(e) => setPickTarget(e.target.value)}
-            className="min-w-[200px] flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Jahresziel waehlen</option>
-            {annualTargets.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={addTarget}
-            disabled={!pickTarget}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-50"
-          >
-            Hinzufuegen
-          </button>
-        </div>
-        {targetIds.length > 0 ? (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {targetIds.map((id) => (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-700"
-              >
-                {targetTitleById[id] ?? id}
-                <button
-                  type="button"
-                  className="text-red-600 hover:underline"
-                  onClick={() => removeTarget(id)}
-                >
-                  x
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Jahresziele verknüpft.</p>
-        )}
-      </div>
-
-      <div className="rounded-md border border-zinc-200 bg-zinc-50/50 p-3">
-        <p className="mb-2 text-xs font-semibold text-zinc-800">Key Results verknüpfen</p>
-        <div className="flex flex-wrap gap-2">
-          <select
-            value={pickKr}
-            onChange={(e) => setPickKr(e.target.value)}
-            className="min-w-[200px] flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
-          >
-            <option value="">Key Result waehlen</option>
-            {keyResultOptions.map((kr) => (
-              <option key={kr.id} value={kr.id}>
-                {kr.objective_title}: {kr.title}
-                {kr.okr_cycle_label ? ` — ${kr.okr_cycle_label}` : ""}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={addKr}
-            disabled={!pickKr}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-50"
-          >
-            Hinzufuegen
-          </button>
-        </div>
-        {krIds.length > 0 ? (
-          <div className="mt-2 flex flex-col gap-1.5">
-            {krIds.map((id) => {
-              const ctx = krContextsByKrId[id];
-              const opt = keyResultOptions.find((k) => k.id === id);
-              const line = ctx
-                ? `${ctx.key_result_title} · ${ctx.objective_title}`
-                : opt
-                  ? `${opt.title} · ${opt.objective_title}`
-                  : id;
-              return (
-                <div
-                  key={id}
-                  className="flex items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[11px] text-zinc-700"
-                >
-                  <span>{line}</span>
-                  <button type="button" className="shrink-0 text-red-600" onClick={() => removeKr(id)}>
-                    x
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="mt-2 text-[11px] text-zinc-500">Noch keine Key Results verknüpft.</p>
-        )}
-      </div>
-
       <button
         type="submit"
         disabled={!canWrite || !canSubmit}
@@ -447,7 +399,6 @@ export function InitiativeCreateForm({
           }}
           className="w-full rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 hover:bg-zinc-50"
         >
-          
           Neu anlegen oder Zurücksetzen
         </button>
       ) : null}

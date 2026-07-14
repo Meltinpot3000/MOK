@@ -1,5 +1,12 @@
-import type { AnnualTargetLifecycleStatus, AnnualTargetType, ProgressCalculationMode } from "@/lib/annual-targets/types";
-import type { OrgAnnualTargetSignatureSettings } from "@/lib/annual-targets/types";
+import {
+  classifyAnnualTargetExecutionMode,
+} from "@/lib/change-run/change-run-model";
+import type {
+  AnnualTargetLifecycleStatus,
+  AnnualTargetType,
+  OrgAnnualTargetSignatureSettings,
+  ProgressCalculationMode,
+} from "@/lib/annual-targets/types";
 
 export type AnnualTargetFormPayload = {
   title: string;
@@ -43,6 +50,23 @@ export function validateAnnualTargetDraft(payload: AnnualTargetFormPayload): Val
       severity: "warning",
     });
   }
+
+  const mode = classifyAnnualTargetExecutionMode(payload.strategyProgramId);
+  if (mode === "run" && payload.progressCalculationMode === "key_result_based") {
+    issues.push({
+      field: "progressCalculationMode",
+      message: "Run-Jahresziele dürfen nicht OKR-basiert fortgeschrieben werden.",
+      severity: "error",
+    });
+  }
+  if (mode === "change" && !payload.strategyProgramId?.trim()) {
+    issues.push({
+      field: "strategyProgramId",
+      message: "Change-Jahresziele benötigen ein Programm.",
+      severity: "error",
+    });
+  }
+
   return issues;
 }
 
@@ -75,6 +99,17 @@ export function validateAnnualTargetActivation(
       field: "signature_status",
       message: "Signatur muss abgeschlossen sein, bevor das Jahresziel aktiv werden kann.",
       severity: "error",
+    });
+  }
+  if (
+    classifyAnnualTargetExecutionMode(payload.strategyProgramId) === "change" &&
+    payload.status === "active"
+  ) {
+    issues.push({
+      field: "strategyProgramId",
+      message:
+        "Aktive Change-Jahresziele benötigen ein freigegebenes (active) Programm — bitte zuerst Programm aktivieren.",
+      severity: "warning",
     });
   }
   return issues;

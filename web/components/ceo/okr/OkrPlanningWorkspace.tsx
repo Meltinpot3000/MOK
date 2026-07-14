@@ -1589,7 +1589,6 @@ function CreateOkrObjectiveForm(props: {
       action={(fd) => {
         startTransition(async () => {
           const title = String(fd.get("title") ?? "").trim();
-          const strategicDirectionId = String(fd.get("strategic_direction_id") ?? "").trim();
           const description = String(fd.get("description") ?? "").trim();
           const ownerRaw = String(fd.get("owner_membership_id") ?? "").trim();
           const r = await createOkrObjectiveAction({
@@ -1597,14 +1596,12 @@ function CreateOkrObjectiveForm(props: {
             okrCycleId,
             title,
             description,
-            strategicDirectionId,
             ownerMembershipId: ownerRaw || null,
           });
           if ("error" in r && r.error) window.alert(r.error);
           else if ("id" in r && r.id) {
             setNewObjectiveTitle("");
             setNewObjectiveDescription("");
-            setNewObjectiveDirectionId("");
             await onSuccess(r.id);
           }
         });
@@ -1613,7 +1610,8 @@ function CreateOkrObjectiveForm(props: {
       <p className="text-sm font-medium text-zinc-800">Neues OKR-Objective</p>
       <p className="mt-1 text-xs text-zinc-500">
         Initiativen werden pro Key Result verknüpft: Objective-Zeile rechts aufklappen, Key Result anlegen oder
-        aufklappen, Initiativen-Pills wählen.
+        aufklappen, Initiativen-Pills wählen. Die Stoßrichtung wird automatisch über Change-Jahresziel oder
+        Initiative/Programm abgeleitet.
       </p>
       <input type="hidden" name="okr_cycle_id" value={okrCycleId} />
       <label className="block text-xs text-zinc-600">
@@ -1627,23 +1625,10 @@ function CreateOkrObjectiveForm(props: {
         />
       </label>
       <label className="block text-xs text-zinc-600">
-        Führende Stoßrichtung *
-        <select
-          name="strategic_direction_id"
-          required
-          value={newObjectiveDirectionId}
-          onChange={(e) => setNewObjectiveDirectionId(e.target.value)}
-          className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-        >
-          <option value="" disabled>
-            Bitte wählen…
-          </option>
-          {directions.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title}
-            </option>
-          ))}
-        </select>
+        Stoßrichtung (abgeleitet)
+        <p className="mt-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-600">
+          Wird nach Verknüpfung mit Change-Jahresziel oder Initiative/Programm automatisch ermittelt.
+        </p>
       </label>
       <label className="block text-xs text-zinc-600">
         Beschreibung *
@@ -1872,25 +1857,14 @@ function OkrObjectiveExpandedPanel(props: {
               className={OKR_FORM_CONTROL}
             />
           </label>
-          <label className={OKR_FORM_LABEL}>
-            Führende Stoßrichtung
-            <select
-              name="strategic_direction_id"
-              defaultValue={objective.leadingStrategicDirectionId ?? ""}
-              required={canEditObjective}
-              disabled={!canEditObjective}
-              className={OKR_FORM_CONTROL}
-            >
-              <option value="" disabled>
-                Bitte wählen…
-              </option>
-              {directions.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.title}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className={OKR_FORM_LABEL}>
+            Stoßrichtung (abgeleitet, read-only)
+            <p className={`${OKR_FORM_CONTROL} bg-zinc-50 text-zinc-700`}>
+              {objective.leadingStrategicDirectionTitle ?? (
+                <span className="text-amber-700">Kein Change-Anker — bitte Change-JZ oder Initiative verknüpfen</span>
+              )}
+            </p>
+          </div>
           <label className={OKR_FORM_LABEL}>
             Beschreibung *
             <textarea

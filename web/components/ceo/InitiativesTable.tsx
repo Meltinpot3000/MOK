@@ -7,7 +7,10 @@ import {
   TableFilterSearch,
   TableFilterSelect,
 } from "@/components/table/TableFilterBar";
-import type { InitiativeKrLinkContext, PipKeyResultOption } from "@/lib/strategy-cycle/queries";
+import {
+  formatChfAmount,
+  type InitiativeProgramOption,
+} from "@/lib/strategy-cycle/initiative-program-budget";
 import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import { ExpandableTable } from "./ExpandableTable";
 
@@ -20,14 +23,9 @@ export type InitiativeRow = {
   progress_percent: number | null;
   owner_membership_id: string | null;
   description: string | null;
+  budget: number | null;
   start_date: string | null;
   end_date: string | null;
-  kr_link_contexts: InitiativeKrLinkContext[];
-  annual_target_ids: string[];
-  key_result_ids: string[];
-  annual_target_titles: string[];
-  legacy_linked_okrs: string[] | null;
-  legacy_deliverables: string[] | null;
 };
 
 /** Gleiche Bezeichner wie in der Programm-Tabelle (PIPs UX konsistent). */
@@ -106,8 +104,7 @@ function initiativeRowToSelection(row: InitiativeRow): InitiativeFormSelection {
     owner_membership_id: row.owner_membership_id,
     progress_percent: row.progress_percent ?? 0,
     description: row.description,
-    annualTargetIds: row.annual_target_ids,
-    keyResultIds: row.key_result_ids,
+    budget: row.budget,
     start_date: row.start_date,
     end_date: row.end_date,
   };
@@ -115,51 +112,17 @@ function initiativeRowToSelection(row: InitiativeRow): InitiativeFormSelection {
 
 function programsForInitiativeRow(
   row: InitiativeRow,
-  open: Array<{ id: string; title: string }>,
-  all: Array<{ id: string; title: string; status: string }>
-): Array<{ id: string; title: string }> {
+  open: InitiativeProgramOption[],
+  all: InitiativeProgramOption[]
+): InitiativeProgramOption[] {
   const pid = row.program_id;
   const base = open;
   if (!pid || base.some((p) => p.id === pid)) return base;
   const extra = all.find((p) => p.id === pid);
   if (!extra) return base;
-  return [
-    ...base,
-    {
-      id: extra.id,
-      title: `${extra.title} (Programm: ${extra.status === "closed" ? "Abgeschlossen" : extra.status})`,
-    },
-  ];
-}
-
-function keyResultOptionsForInitiativeRow(
-  base: PipKeyResultOption[],
-  row: InitiativeRow
-): PipKeyResultOption[] {
-  const byId = new Map(base.map((k) => [k.id, k] as const));
-  for (const c of row.kr_link_contexts) {
-    if (byId.has(c.key_result_id)) continue;
-    byId.set(c.key_result_id, {
-      id: c.key_result_id,
-      title: c.key_result_title,
-      objective_id: c.objective_id,
-      objective_title: c.objective_title,
-      okr_cycle_label: c.okr_cycle_label,
-    });
-  }
-  return [...byId.values()].sort((a, b) => {
-    const ot = a.objective_title.localeCompare(b.objective_title, "de");
-    if (ot !== 0) return ot;
-    return a.title.localeCompare(b.title, "de");
-  });
-}
-
-function krContextsRecord(row: InitiativeRow): Record<string, InitiativeKrLinkContext> {
-  const m: Record<string, InitiativeKrLinkContext> = {};
-  for (const c of row.kr_link_contexts) {
-    m[c.key_result_id] = c;
-  }
-  return m;
+  const statusLabel =
+    extra.status === "closed" ? "Abgeschlossen" : extra.status ?? "unbekannt";
+  return [...base, { ...extra, title: `${extra.title} (Programm: ${statusLabel})` }];
 }
 
 type InitiativesTableProps = {
@@ -169,11 +132,9 @@ type InitiativesTableProps = {
   canWrite: boolean;
   createInitiativeAction: (formData: FormData) => void | Promise<void>;
   updateInitiativeAction: (formData: FormData) => void | Promise<void>;
-  programsOpenForInitiatives: Array<{ id: string; title: string }>;
-  programsAll: Array<{ id: string; title: string; status: string }>;
+  programsOpenForInitiatives: InitiativeProgramOption[];
+  programsAll: InitiativeProgramOption[];
   ownerOptions: Array<{ id: string; label: string }>;
-  annualTargets: Array<{ id: string; title: string }>;
-  keyResultOptions: PipKeyResultOption[];
 };
 
 export function InitiativesTable({
@@ -186,14 +147,7 @@ export function InitiativesTable({
   programsOpenForInitiatives,
   programsAll,
   ownerOptions,
-  annualTargets,
-  keyResultOptions,
 }: InitiativesTableProps) {
-  const targetTitleById = useMemo(
-    () => Object.fromEntries(annualTargets.map((t) => [t.id, t.title])),
-    [annualTargets]
-  );
-
   const [filterProgramId, setFilterProgramId] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterOwnerMembershipId, setFilterOwnerMembershipId] = useState("");
@@ -274,17 +228,12 @@ export function InitiativesTable({
       },
     },
     {
-      id: "contributions",
-      label: "Beitraege",
-      sortValue: (i: InitiativeRow) => i.annual_target_ids.length + i.key_result_ids.length,
-      render: (i: InitiativeRow) => {
-        const j = i.annual_target_ids.length;
-        const k = i.key_result_ids.length;
-        const parts: string[] = [];
-        parts.push(`${j} Jahresziel${j === 1 ? "" : "e"}`);
-        parts.push(`${k} KR${k === 1 ? "" : "s"}`);
-        return <span className="text-xs text-zinc-600">{parts.join(" · ")}</span>;
-      },
+      id: "budget",
+      label: "Budget",
+      sortValue: (i: InitiativeRow) => i.budget ?? null,
+      render: (i: InitiativeRow) => (
+        <span className="tabular-nums text-xs text-zinc-700">{formatChfAmount(i.budget)}</span>
+      ),
     },
     {
       id: "owner",
@@ -383,31 +332,10 @@ export function InitiativesTable({
                 programsAll
               )}
               ownerOptions={ownerOptions}
-              annualTargets={annualTargets}
-              keyResultOptions={keyResultOptionsForInitiativeRow(keyResultOptions, initiative)}
               selectedInitiative={initiativeRowToSelection(initiative)}
-              targetTitleById={targetTitleById}
-              krContextsByKrId={krContextsRecord(initiative)}
               onClearSelection={() => {}}
               showClearButton={false}
             />
-            {(initiative.legacy_linked_okrs?.length || initiative.legacy_deliverables?.length) ? (
-              <details className="rounded border border-zinc-200 bg-zinc-50/80 p-2">
-                <summary className="cursor-pointer text-[11px] font-medium text-zinc-600">
-                  Legacy-Daten (Admin)
-                </summary>
-                {initiative.legacy_linked_okrs && initiative.legacy_linked_okrs.length > 0 ? (
-                  <p className="mt-2 text-[11px] text-zinc-500">
-                    Linked OKRs (JSON): {initiative.legacy_linked_okrs.join(", ")}
-                  </p>
-                ) : null}
-                {initiative.legacy_deliverables && initiative.legacy_deliverables.length > 0 ? (
-                  <p className="mt-1 text-[11px] text-zinc-500">
-                    Deliverables: {initiative.legacy_deliverables.join(", ")}
-                  </p>
-                ) : null}
-              </details>
-            ) : null}
           </div>
         )}
       />

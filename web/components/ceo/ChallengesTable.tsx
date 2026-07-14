@@ -7,6 +7,17 @@ import {
   TableFilterSelect,
 } from "@/components/table/TableFilterBar";
 import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
+import type { DescriptionQualityViewModel } from "@/lib/strategy-cycle/description-quality-view";
+import type { DescriptionQualityFilterValue } from "@/lib/strategy-cycle/description-quality-view";
+import { DescriptionQualityBadge } from "@/components/ceo/strategy-objects/DescriptionQualityBadge";
+import { DescriptionQualityHintBox } from "@/components/ceo/strategy-objects/DescriptionQualityHintBox";
+import {
+  DESCRIPTION_QUALITY_FILTER_OPTIONS,
+  filterRowsByDescriptionQuality,
+  mergeExpandedRowIds,
+  resolveInitialDescriptionQualityFilter,
+  useDescriptionQualityTableFocus,
+} from "@/components/ceo/strategy-objects/description-quality-table-utils";
 import {
   definitionFieldInputClass,
   getOperationalSignalLabelDe,
@@ -19,7 +30,7 @@ import {
   type StrategyObjectVersioningMeta,
 } from "@/lib/strategy-objects";
 import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
-import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import { StrategyObjectRevisionFooter } from "@/components/ceo/strategy-objects/StrategyObjectRevisionFooter";
 import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
@@ -58,6 +69,10 @@ type ChallengesTableProps = {
   canWrite: boolean;
   openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
   returnPath?: string;
+  descriptionQualityById?: Record<string, DescriptionQualityViewModel>;
+  initialQualityFilter?: DescriptionQualityFilterValue;
+  focusObjectId?: string | null;
+  descriptionQualityReview?: boolean;
   revisionActions?: {
     proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
     updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
@@ -119,12 +134,21 @@ export function ChallengesTable({
   canWrite,
   openDraftByIdentityId = {},
   returnPath = "/strategy-cycle?l1=strategic-directions&l2=challenges",
+  descriptionQualityById,
+  initialQualityFilter,
+  focusObjectId = null,
+  descriptionQualityReview = false,
   revisionActions,
   actions,
 }: ChallengesTableProps) {
   const [filterIndustryId, setFilterIndustryId] = useState("");
   const [filterBusinessModelId, setFilterBusinessModelId] = useState("");
   const [searchTitle, setSearchTitle] = useState("");
+  const [filterDescriptionQuality, setFilterDescriptionQuality] = useState(
+    () => resolveInitialDescriptionQualityFilter(initialQualityFilter, descriptionQualityReview)
+  );
+
+  useDescriptionQualityTableFocus(focusObjectId, "challenge-");
 
   const industryFilterOptions = useMemo(
     () =>
@@ -143,7 +167,7 @@ export function ChallengesTable({
   );
 
   const filteredChallenges = useMemo(() => {
-    return challenges.filter((c) => {
+    const byDimensions = challenges.filter((c) => {
       if (!matchesTableTitleSearch(c.title, searchTitle)) return false;
       if (filterIndustryId) {
         const ids = industryIdsByChallenge[c.id] ?? [];
@@ -155,6 +179,11 @@ export function ChallengesTable({
       }
       return true;
     });
+    return filterRowsByDescriptionQuality(
+      byDimensions,
+      descriptionQualityById,
+      filterDescriptionQuality
+    );
   }, [
     challenges,
     searchTitle,
@@ -162,6 +191,8 @@ export function ChallengesTable({
     filterBusinessModelId,
     industryIdsByChallenge,
     businessModelIdsByChallenge,
+    descriptionQualityById,
+    filterDescriptionQuality,
   ]);
 
   const draftExpandedRowIds = useMemo(
@@ -170,6 +201,15 @@ export function ChallengesTable({
         .filter((c) => resolveOpenDraftForVersioning(c.versioning, openDraftByIdentityId))
         .map((c) => c.id),
     [filteredChallenges, openDraftByIdentityId]
+  );
+
+  const expandedRowIds = useMemo(
+    () =>
+      mergeExpandedRowIds(
+        draftExpandedRowIds,
+        focusObjectId ? [focusObjectId] : undefined
+      ),
+    [draftExpandedRowIds, focusObjectId]
   );
 
   const columns = [
@@ -222,6 +262,18 @@ export function ChallengesTable({
       defaultVisible: true,
       sortValue: (c: Challenge) => c.versioning?.latest_review_decision ?? null,
       render: (c: Challenge) => getReviewDecisionLabelDe(c.versioning?.latest_review_decision),
+    },
+    {
+      id: "description_quality",
+      label: "Beschreibung / Prüfqualität",
+      defaultVisible: true,
+      sortValue: (c: Challenge) =>
+        descriptionQualityById?.[c.id]?.sortRank ?? 99,
+      render: (c: Challenge) => {
+        const quality = descriptionQualityById?.[c.id];
+        if (!quality) return <span className="text-zinc-400">Keine Daten</span>;
+        return <DescriptionQualityBadge status={quality.displayStatus} />;
+      },
     },
     {
       id: "directions",
@@ -311,6 +363,13 @@ export function ChallengesTable({
     <div className="w-full min-w-0 max-w-full space-y-3">
       <TableFilterBar>
         <TableFilterSelect
+          label="Beschreibung / Prüfqualität"
+          value={filterDescriptionQuality}
+          onChange={setFilterDescriptionQuality}
+          className="min-w-[160px] flex-1"
+          options={DESCRIPTION_QUALITY_FILTER_OPTIONS}
+        />
+        <TableFilterSelect
           label="Industrie"
           value={filterIndustryId}
           onChange={setFilterIndustryId}
@@ -331,7 +390,9 @@ export function ChallengesTable({
       columns={columns}
       rows={filteredChallenges}
       getRowId={(c) => c.id}
-      initialExpandedIds={draftExpandedRowIds}
+      rowIdPrefix="challenge-"
+      selectedRowId={focusObjectId}
+      initialExpandedIds={expandedRowIds}
       expandLabel="Details"
       emptyMessage={
         challenges.length === 0
@@ -363,6 +424,10 @@ export function ChallengesTable({
         const draftBusinessModelIds = new Set(
           openDraft ? readAssignmentIds(openDraft.definition_payload, "business_model") : []
         );
+        const draftAnalysisEntryIds = new Set(
+          openDraft ? readAssignmentIds(openDraft.definition_payload, "analysis_entry") : []
+        );
+        const draftFormId = `strategy-challenge-draft-${challenge.id}`;
         const showUpdateButton = !definitionLocked && !openDraft;
 
         const renderAssignmentPill = (
@@ -415,6 +480,9 @@ export function ChallengesTable({
 
         return (
           <div className="space-y-4">
+            {descriptionQualityById?.[challenge.id] ? (
+              <DescriptionQualityHintBox quality={descriptionQualityById[challenge.id]} />
+            ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
                 Verknüpfte Stoßrichtungen:{" "}
@@ -431,7 +499,9 @@ export function ChallengesTable({
                 draft={openDraft}
                 returnPath={returnPath}
                 canWrite={canWrite}
+                draftFormId={draftFormId}
                 actions={revisionActions}
+                externalActions
               />
             ) : null}
 
@@ -551,34 +621,6 @@ export function ChallengesTable({
               </form>
             ) : null}
 
-            <PillSection title="Analyse-Einträge">
-              {analysisEntries.map((entry) => {
-                const isLinkedHere = linkedAnalysisEntryIds.has(entry.id);
-                const ownerId = challengeIdByAnalysisEntryId[entry.id];
-                const stealHint =
-                  !isLinkedHere && ownerId && ownerId !== challenge.id
-                    ? "Andere Herausforderung zugeordnet — Klick übernimmt die Verknüpfung hierher."
-                    : `${entry.title} (${entry.analysis_type})`;
-                return (
-                  <EntityPillButton
-                    key={entry.id}
-                    entityKey="strategic_challenge_id"
-                    entityValue={challenge.id}
-                    extraFields={{ analysis_entry_id: entry.id }}
-                    isLinked={isLinkedHere}
-                    linkAction={actions.linkStrategicChallengeToAnalysisEntryInCycle}
-                    unlinkAction={actions.unlinkStrategicChallengeFromAnalysisEntryInCycle}
-                    canWrite={canWrite}
-                    title={stealHint}
-                    linkedClassName={pillLinked()}
-                    unlinkedClassName={pillNeutral()}
-                  >
-                    {shortEntryTitle(entry.title)} ({entry.analysis_type})
-                  </EntityPillButton>
-                );
-              })}
-            </PillSection>
-
             <div className="space-y-2">
               {assignmentsReadOnly ? (
                 <p className="text-[11px] text-zinc-500">
@@ -589,6 +631,72 @@ export function ChallengesTable({
                   Zuordnungen des Entwurfs — werden mit «Revision übernehmen» aktiv.
                 </p>
               ) : null}
+
+              <PillSection
+                title={
+                  assignmentsReadOnly
+                    ? "Analyse-Einträge (in Revision fixiert)"
+                    : draftMode
+                      ? "Analyse-Einträge (Entwurf)"
+                      : "Analyse-Einträge"
+                }
+              >
+                {analysisEntries.map((entry) => {
+                  const isLinkedLive = linkedAnalysisEntryIds.has(entry.id);
+                  const isLinkedDraft = draftAnalysisEntryIds.has(entry.id);
+                  const ownerId = challengeIdByAnalysisEntryId[entry.id];
+                  const stealHint =
+                    !draftMode &&
+                    !isLinkedLive &&
+                    ownerId &&
+                    ownerId !== challenge.id
+                      ? "Andere Herausforderung zugeordnet — Klick übernimmt die Verknüpfung hierher."
+                      : `${entry.title} (${entry.analysis_type})`;
+
+                  if (draftMode && openDraft && revisionActions) {
+                    return (
+                      <EntityPillButton
+                        key={entry.id}
+                        entityKey="revision_id"
+                        entityValue={openDraft.id}
+                        extraFields={{
+                          assignment_kind: "analysis_entry",
+                          assignment_id: entry.id,
+                          return_path: returnPath,
+                        }}
+                        isLinked={isLinkedDraft}
+                        linkAction={revisionActions.linkStrategyObjectDraftAssignment}
+                        unlinkAction={revisionActions.unlinkStrategyObjectDraftAssignment}
+                        canWrite={canWrite}
+                        title={`${entry.title} (${entry.analysis_type})`}
+                        linkedClassName={pillLinked()}
+                        unlinkedClassName={pillNeutral()}
+                      >
+                        {shortEntryTitle(entry.title)} ({entry.analysis_type})
+                      </EntityPillButton>
+                    );
+                  }
+
+                  return (
+                    <EntityPillButton
+                      key={entry.id}
+                      entityKey="strategic_challenge_id"
+                      entityValue={challenge.id}
+                      extraFields={{ analysis_entry_id: entry.id }}
+                      isLinked={isLinkedLive}
+                      linkAction={actions.linkStrategicChallengeToAnalysisEntryInCycle}
+                      unlinkAction={actions.unlinkStrategicChallengeFromAnalysisEntryInCycle}
+                      canWrite={canWrite && !assignmentsReadOnly}
+                      title={stealHint}
+                      linkedClassName={pillLinked()}
+                      unlinkedClassName={pillNeutral()}
+                    >
+                      {shortEntryTitle(entry.title)} ({entry.analysis_type})
+                    </EntityPillButton>
+                  );
+                })}
+              </PillSection>
+
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <PillSection title="Industrien">
                   {industries.map((industry) =>
@@ -623,20 +731,27 @@ export function ChallengesTable({
             </div>
 
             {revisionActions ? (
-              <StrategyObjectActionBar
-                objectType="strategic_challenge"
-                objectId={challenge.id}
-                identityId={identityId}
-                lifecycleState={lifecycleState}
-                baseRevisionId={baseRevisionId}
-                hasOpenDraft={Boolean(openDraft)}
+              <StrategyObjectRevisionFooter
+                openDraft={openDraft ?? null}
+                draftFormId={draftFormId}
                 canWrite={canWrite}
                 returnPath={returnPath}
-                objectNoun="Herausforderung"
-                deleteAction={actions.deleteStrategicChallengeInCycle}
-                deleteIdField="strategic_challenge_id"
-                lifecycleAction={revisionActions.setStrategyObjectLifecycle}
-                proposeAction={revisionActions.proposeStrategyObjectDraft}
+                revisionActions={revisionActions}
+                actionBarProps={{
+                  objectType: "strategic_challenge",
+                  objectId: challenge.id,
+                  identityId,
+                  lifecycleState,
+                  baseRevisionId,
+                  hasOpenDraft: Boolean(openDraft),
+                  canWrite,
+                  returnPath,
+                  objectNoun: "Herausforderung",
+                  deleteAction: actions.deleteStrategicChallengeInCycle,
+                  deleteIdField: "strategic_challenge_id",
+                  lifecycleAction: revisionActions.setStrategyObjectLifecycle,
+                  proposeAction: revisionActions.proposeStrategyObjectDraft,
+                }}
               />
             ) : null}
           </div>

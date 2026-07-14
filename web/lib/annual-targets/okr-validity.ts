@@ -5,6 +5,8 @@ export type AnnualTargetOkrValidityInput = {
   targetYear: number | null;
   ownerMembershipId: string | null;
   signatureStatus: string;
+  /** Change-Jahresziele (strategy_program_id gesetzt) sind OKR-fähig; Run-JZ nicht. */
+  strategyProgramId: string | null;
 };
 
 /**
@@ -16,6 +18,7 @@ export function isAnnualTargetOkrValid(
   okrCycleTargetYear: number,
   signatureSettings: OrgAnnualTargetSignatureSettings
 ): boolean {
+  if (!row.strategyProgramId) return false;
   if (row.status !== "active") return false;
   if (row.targetYear !== okrCycleTargetYear) return false;
   if (!row.ownerMembershipId || row.ownerMembershipId !== objectiveOwnerMembershipId) {

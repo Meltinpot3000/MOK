@@ -58,10 +58,9 @@ export function MemberNotificationsBell() {
         setOpen(false);
       }
     }
-    if (open) {
-      document.addEventListener("click", handleClickOutside);
-      return () => document.removeEventListener("click", handleClickOutside);
-    }
+    if (!open) return;
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, [open]);
 
   const unread = items.filter((n) => !n.read_at);

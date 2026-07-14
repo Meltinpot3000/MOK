@@ -9,7 +9,6 @@ import {
 import type { ContributionLevel } from "@/lib/strategy-cycle/coverage-level";
 import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import {
-  definitionFieldInputClass,
   isStrategyObjectDefinitionLocked,
   getOperationalSignalLabelDe,
   getReviewDecisionLabelDe,
@@ -21,7 +20,7 @@ import {
   type StrategyObjectVersioningMeta,
 } from "@/lib/strategy-objects";
 import { StrategyObjectDraftPanel } from "@/components/ceo/strategy-objects/StrategyObjectDraftPanel";
-import { StrategyObjectActionBar } from "@/components/ceo/strategy-objects/StrategyObjectActionBar";
+import { StrategyObjectRevisionFooter } from "@/components/ceo/strategy-objects/StrategyObjectRevisionFooter";
 import type { StrategyObjectRevisionRow } from "@/lib/strategy-objects";
 import { COVERAGE_LEVEL_META } from "@/lib/strategy-cycle/coverage-level";
 import {
@@ -32,6 +31,19 @@ import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/object
 import { CoverageStrengthPillButton } from "./CoverageStrengthPillButton";
 import { EntityPillButton } from "./EntityPillButton";
 import { ExpandableTable, pillLinked, pillNeutral } from "./ExpandableTable";
+import type {
+  DescriptionQualityFilterValue,
+  DescriptionQualityViewModel,
+} from "@/lib/strategy-cycle/description-quality-view";
+import { DescriptionQualityBadge } from "@/components/ceo/strategy-objects/DescriptionQualityBadge";
+import { DescriptionQualityHintBox } from "@/components/ceo/strategy-objects/DescriptionQualityHintBox";
+import {
+  DESCRIPTION_QUALITY_FILTER_OPTIONS,
+  filterRowsByDescriptionQuality,
+  mergeExpandedRowIds,
+  resolveInitialDescriptionQualityFilter,
+  useDescriptionQualityTableFocus,
+} from "@/components/ceo/strategy-objects/description-quality-table-utils";
 
 type Direction = {
   id: string;
@@ -66,6 +78,10 @@ type StrategicDirectionsTableProps = {
   canWrite: boolean;
   openDraftByIdentityId?: Record<string, StrategyObjectRevisionRow>;
   returnPath?: string;
+  descriptionQualityById?: Record<string, DescriptionQualityViewModel>;
+  initialQualityFilter?: DescriptionQualityFilterValue;
+  focusObjectId?: string | null;
+  descriptionQualityReview?: boolean;
   revisionActions?: {
     proposeStrategyObjectDraft: (formData: FormData) => Promise<void>;
     updateStrategyObjectDraft: (formData: FormData) => Promise<void>;
@@ -76,7 +92,6 @@ type StrategicDirectionsTableProps = {
     setStrategyObjectLifecycle: (formData: FormData) => Promise<void>;
   };
   actions: {
-    updateStrategicDirectionAssessment: (formData: FormData) => Promise<void>;
     deleteStrategicDirectionInCycle: (formData: FormData) => Promise<void>;
     linkDirectionToChallengePredecessor: (formData: FormData) => Promise<void>;
     unlinkDirectionChallengePredecessor: (formData: FormData) => Promise<void>;
@@ -121,11 +136,20 @@ export function StrategicDirectionsTable({
   canWrite,
   openDraftByIdentityId = {},
   returnPath = "/strategy-cycle?l1=strategic-directions&l2=design",
+  descriptionQualityById,
+  initialQualityFilter,
+  focusObjectId = null,
+  descriptionQualityReview = false,
   revisionActions,
   actions,
 }: StrategicDirectionsTableProps) {
   const [filterLifecycle, setFilterLifecycle] = useState("");
   const [searchTitle, setSearchTitle] = useState("");
+  const [filterDescriptionQuality, setFilterDescriptionQuality] = useState(
+    () => resolveInitialDescriptionQualityFilter(initialQualityFilter, descriptionQualityReview)
+  );
+
+  useDescriptionQualityTableFocus(focusObjectId, "direction-");
 
   const lifecycleFilterOptions = useMemo(() => {
     const states = [
@@ -142,14 +166,19 @@ export function StrategicDirectionsTable({
   }, [directions]);
 
   const filteredDirections = useMemo(() => {
-    return directions.filter((d) => {
+    const bySearch = directions.filter((d) => {
       if (filterLifecycle && d.versioning?.identity_lifecycle_state !== filterLifecycle) {
         return false;
       }
       if (!matchesTableTitleSearch(d.title, searchTitle)) return false;
       return true;
     });
-  }, [directions, filterLifecycle, searchTitle]);
+    return filterRowsByDescriptionQuality(
+      bySearch,
+      descriptionQualityById,
+      filterDescriptionQuality
+    );
+  }, [directions, filterLifecycle, searchTitle, descriptionQualityById, filterDescriptionQuality]);
 
   const draftExpandedRowIds = useMemo(
     () =>
@@ -157,6 +186,15 @@ export function StrategicDirectionsTable({
         .filter((d) => resolveOpenDraftForVersioning(d.versioning, openDraftByIdentityId))
         .map((d) => d.id),
     [filteredDirections, openDraftByIdentityId]
+  );
+
+  const expandedRowIds = useMemo(
+    () =>
+      mergeExpandedRowIds(
+        draftExpandedRowIds,
+        focusObjectId ? [focusObjectId] : undefined
+      ),
+    [draftExpandedRowIds, focusObjectId]
   );
 
   const columns = [
@@ -214,6 +252,17 @@ export function StrategicDirectionsTable({
       defaultVisible: true,
       sortValue: (d: Direction) => d.versioning?.latest_review_decision ?? null,
       render: (d: Direction) => getReviewDecisionLabelDe(d.versioning?.latest_review_decision),
+    },
+    {
+      id: "description_quality",
+      label: "Beschreibung / Prüfqualität",
+      defaultVisible: true,
+      sortValue: (d: Direction) => descriptionQualityById?.[d.id]?.sortRank ?? 99,
+      render: (d: Direction) => {
+        const quality = descriptionQualityById?.[d.id];
+        if (!quality) return <span className="text-zinc-400">Keine Daten</span>;
+        return <DescriptionQualityBadge status={quality.displayStatus} />;
+      },
     },
     {
       id: "coverage",
@@ -410,6 +459,13 @@ export function StrategicDirectionsTable({
     <div className="w-full min-w-0 max-w-full space-y-3">
       <TableFilterBar>
         <TableFilterSelect
+          label="Beschreibung / Prüfqualität"
+          value={filterDescriptionQuality}
+          onChange={setFilterDescriptionQuality}
+          className="min-w-[160px] flex-1"
+          options={DESCRIPTION_QUALITY_FILTER_OPTIONS}
+        />
+        <TableFilterSelect
           label="Lifecycle"
           value={filterLifecycle}
           onChange={setFilterLifecycle}
@@ -422,7 +478,9 @@ export function StrategicDirectionsTable({
       columns={columns}
       rows={filteredDirections}
       getRowId={(d) => d.id}
-      initialExpandedIds={draftExpandedRowIds}
+      rowIdPrefix="direction-"
+      selectedRowId={focusObjectId}
+      initialExpandedIds={expandedRowIds}
       expandLabel="Details"
       emptyMessage={
         directions.length === 0
@@ -465,7 +523,8 @@ export function StrategicDirectionsTable({
         const draftBusinessModelIds = new Set(
           openDraft ? readAssignmentIds(openDraft.definition_payload, "business_model") : []
         );
-        const showUpdateButton = !definitionLocked && !openDraft;
+        const draftFormId = `strategy-direction-draft-${direction.id}`;
+        const matrixLinksReadOnly = assignmentsReadOnly || draftMode;
 
         const renderAssignmentPill = (
           kind: "industry" | "business_model",
@@ -517,10 +576,12 @@ export function StrategicDirectionsTable({
 
         return (
           <div className="space-y-4">
+            {descriptionQualityById?.[direction.id] ? (
+              <DescriptionQualityHintBox quality={descriptionQualityById[direction.id]} />
+            ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700">
-                Abdeckung {coverage.percent}% ({coverage.linked}/
-                {coverage.total || 0})
+                Abdeckung {coverage.percent}% ({coverage.linked}/{coverage.total || 0})
               </span>
               <span className="rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-900">
                 Priorität (Score):{" "}
@@ -535,260 +596,185 @@ export function StrategicDirectionsTable({
                 draft={openDraft}
                 returnPath={returnPath}
                 canWrite={canWrite}
+                draftFormId={draftFormId}
                 actions={revisionActions}
+                externalActions
               />
             ) : null}
 
-            {!openDraft ? (
-              <form
-                action={actions.updateStrategicDirectionAssessment}
-                className="grid grid-cols-1 gap-2 md:grid-cols-5"
-              >
-                <input
-                  type="hidden"
-                  name="strategic_direction_id"
-                  value={direction.id}
-                />
-                <label className="text-xs text-zinc-600 md:col-span-2">
-                  Titel
-                  <input
-                    name="title"
-                    defaultValue={direction.title}
-                    required
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Strategischer Wert
-                  <input
-                    type="number"
-                    name="strategic_value_score"
-                    defaultValue={direction.strategic_value_score ?? 3}
-                    min={1}
-                    max={5}
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Passung Kompetenzen
-                  <input
-                    type="number"
-                    name="capability_fit_score"
-                    defaultValue={direction.capability_fit_score ?? 3}
-                    min={1}
-                    max={5}
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Machbarkeit
-                  <input
-                    type="number"
-                    name="feasibility_score"
-                    defaultValue={direction.feasibility_score ?? 3}
-                    min={1}
-                    max={5}
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <label className="text-xs text-zinc-600">
-                  Risiko
-                  <input
-                    type="number"
-                    name="risk_score"
-                    defaultValue={direction.risk_level ?? 3}
-                    min={1}
-                    max={5}
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <label className="block text-xs text-zinc-600 md:col-span-5">
-                  Beschreibung
-                  <textarea
-                    name="description"
-                    defaultValue={direction.description ?? ""}
-                    rows={3}
-                    readOnly={definitionLocked}
-                    aria-readonly={definitionLocked}
-                    className={definitionFieldInputClass(
-                      definitionLocked,
-                      "mt-1 block w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    )}
-                  />
-                </label>
-                <p className="text-[11px] text-zinc-500 md:col-span-5">
-                  Priorität (1–5) und Stoßrichtungs-Score werden beim Speichern aus den vier Bewertungen berechnet.
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Verknüpfungen
                 </p>
-                {showUpdateButton ? (
-                  <div className="md:col-span-5">
-                    <button
-                      type="submit"
-                      disabled={!canWrite}
-                      className="brand-btn px-3 py-1.5 text-xs"
-                    >
-                      Stoßrichtung aktualisieren
-                    </button>
-                  </div>
-                ) : null}
-              </form>
-            ) : null}
+                  {matrixLinksReadOnly ? (
+                    <p className="mt-1 text-[11px] text-zinc-500">
+                      Herausforderungs- und Ziel-Verknüpfungen sind in der aktiven Revision fixiert
+                      {draftMode
+                        ? " — während des Entwurfs in der Verknüpfungsmatrix pflegen."
+                        : ". Für Änderungen «Neue Revision» oder Verknüpfungsmatrix nutzen."}
+                    </p>
+                  ) : null}
+                </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <PillSection title="Herausforderungen (Vorg\u00E4nger)">
-                {challenges.map((challenge) => {
-                  const isLinked = linkedChallengeIds.has(challenge.id);
-                  const level = challengeCoverageByDirection[direction.id]?.[challenge.id] ?? null;
-                  return (
-                    <CoverageStrengthPillButton
-                      key={challenge.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ strategic_challenge_id: challenge.id }}
-                      isLinked={isLinked}
-                      contributionLevel={isLinked ? level ?? "medium" : null}
-                      linkAction={actions.linkDirectionToChallengePredecessor}
-                      unlinkAction={actions.unlinkDirectionChallengePredecessor}
-                      canWrite={canWrite}
-                      title={challenge.title}
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {challenge.title}
-                    </CoverageStrengthPillButton>
-                  );
-                })}
-              </PillSection>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <PillSection title="Herausforderungen (Vorgänger)">
+                    {challenges.map((challenge) => {
+                      const isLinked = linkedChallengeIds.has(challenge.id);
+                      const level =
+                        challengeCoverageByDirection[direction.id]?.[challenge.id] ?? null;
+                      return (
+                        <CoverageStrengthPillButton
+                          key={challenge.id}
+                          entityKey="strategic_direction_id"
+                          entityValue={direction.id}
+                          extraFields={{ strategic_challenge_id: challenge.id }}
+                          isLinked={isLinked}
+                          contributionLevel={isLinked ? (level ?? "medium") : null}
+                          linkAction={actions.linkDirectionToChallengePredecessor}
+                          unlinkAction={actions.unlinkDirectionChallengePredecessor}
+                          canWrite={canWrite && !matrixLinksReadOnly}
+                          title={challenge.title}
+                          linkedClassName={pillLinked()}
+                          unlinkedClassName={pillNeutral()}
+                        >
+                          {challenge.title}
+                        </CoverageStrengthPillButton>
+                      );
+                    })}
+                  </PillSection>
 
-              <PillSection title="Strategische Ziele">
-                {objectives.map((objective) => {
-                  const isLinked = linkedObjectiveIds.has(objective.id);
-                  const level = objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
-                  const linkOk = isObjectiveEligibleForDirectionLink(objective.versioning);
-                  return (
-                    <CoverageStrengthPillButton
-                      key={objective.id}
-                      entityKey="strategic_direction_id"
-                      entityValue={direction.id}
-                      extraFields={{ objective_id: objective.id }}
-                      isLinked={isLinked}
-                      contributionLevel={isLinked ? level ?? "medium" : null}
-                      linkAction={actions.linkDirectionToObjectiveInCycle}
-                      unlinkAction={actions.unlinkDirectionFromObjectiveInCycle}
-                      canWrite={canWrite}
-                      linkSelectionDisabled={!linkOk}
-                      title={
-                        linkOk
-                          ? objective.title
-                          : `${objective.title} — Verknuepfen nur bei Status aktiv oder auffaellig (at_risk)`
-                      }
-                      linkedClassName={pillLinked()}
-                      unlinkedClassName={pillNeutral()}
-                    >
-                      {objective.title}
-                    </CoverageStrengthPillButton>
-                  );
-                })}
-              </PillSection>
+                  <PillSection title="Strategische Ziele">
+                    {objectives.map((objective) => {
+                      const isLinked = linkedObjectiveIds.has(objective.id);
+                      const level =
+                        objectiveCoverageByDirection[direction.id]?.[objective.id] ?? null;
+                      const linkOk = isObjectiveEligibleForDirectionLink(objective.versioning);
+                      return (
+                        <CoverageStrengthPillButton
+                          key={objective.id}
+                          entityKey="strategic_direction_id"
+                          entityValue={direction.id}
+                          extraFields={{ objective_id: objective.id }}
+                          isLinked={isLinked}
+                          contributionLevel={isLinked ? (level ?? "medium") : null}
+                          linkAction={actions.linkDirectionToObjectiveInCycle}
+                          unlinkAction={actions.unlinkDirectionFromObjectiveInCycle}
+                          canWrite={canWrite && !matrixLinksReadOnly}
+                          linkSelectionDisabled={!linkOk}
+                          title={
+                            linkOk
+                              ? objective.title
+                              : `${objective.title} — Verknüpfen nur bei Status aktiv oder auffällig (at_risk)`
+                          }
+                          linkedClassName={pillLinked()}
+                          unlinkedClassName={pillNeutral()}
+                        >
+                          {objective.title}
+                        </CoverageStrengthPillButton>
+                      );
+                    })}
+                  </PillSection>
+                </div>
 
-              <PillSection
-                title={
-                  assignmentsReadOnly
-                    ? "Industrien (in Revision fixiert)"
-                    : draftMode
-                    ? "Industrien (Entwurf)"
-                    : "Industrien"
-                }
-              >
-                {industries.map((industry) =>
-                  renderAssignmentPill(
-                    "industry",
-                    industry.id,
-                    industry.name,
-                    actions.linkStrategicDirectionToIndustryInCycle,
-                    actions.unlinkStrategicDirectionFromIndustryInCycle,
-                    "industry_id",
-                    linkedIndustryIds.has(industry.id),
-                    draftIndustryIds.has(industry.id)
-                  )
-                )}
-              </PillSection>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Dimensions-Zuordnungen
+                  </p>
+                  {assignmentsReadOnly ? (
+                    <p className="mt-1 text-[11px] text-zinc-500">
+                      Zuordnungen sind in der aktiven Revision fixiert. Für Änderungen «Neue Revision».
+                    </p>
+                  ) : draftMode ? (
+                    <p className="mt-1 text-[11px] text-sky-800">
+                      Zuordnungen des Entwurfs — werden mit «Revision übernehmen» aktiv.
+                    </p>
+                  ) : null}
+                </div>
 
-              <PillSection
-                title={
-                  assignmentsReadOnly
-                    ? "Geschäftsmodelle (in Revision fixiert)"
-                    : draftMode
-                    ? "Geschäftsmodelle (Entwurf)"
-                    : "Geschäftsmodelle"
-                }
-              >
-                {businessModels.map((model) =>
-                  renderAssignmentPill(
-                    "business_model",
-                    model.id,
-                    model.name,
-                    actions.linkStrategicDirectionToBusinessModelInCycle,
-                    actions.unlinkStrategicDirectionFromBusinessModelInCycle,
-                    "business_model_id",
-                    linkedBusinessModelIds.has(model.id),
-                    draftBusinessModelIds.has(model.id)
-                  )
-                )}
-              </PillSection>
-            </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <PillSection
+                    title={
+                      assignmentsReadOnly
+                        ? "Industrien (in Revision fixiert)"
+                        : draftMode
+                          ? "Industrien (Entwurf)"
+                          : "Industrien"
+                    }
+                  >
+                    {industries.map((industry) =>
+                      renderAssignmentPill(
+                        "industry",
+                        industry.id,
+                        industry.name,
+                        actions.linkStrategicDirectionToIndustryInCycle,
+                        actions.unlinkStrategicDirectionFromIndustryInCycle,
+                        "industry_id",
+                        linkedIndustryIds.has(industry.id),
+                        draftIndustryIds.has(industry.id)
+                      )
+                    )}
+                  </PillSection>
 
-            {(programsByDirectionId[direction.id] ?? []).length > 0 && (
-              <PillSection title="Programme">
-                {(programsByDirectionId[direction.id] ?? []).map((program) => (
-                  <span key={program.id} className={pillLinked()}>
-                    {program.title}
-                  </span>
-                ))}
-              </PillSection>
-            )}
+                  <PillSection
+                    title={
+                      assignmentsReadOnly
+                        ? "Geschäftsmodelle (in Revision fixiert)"
+                        : draftMode
+                          ? "Geschäftsmodelle (Entwurf)"
+                          : "Geschäftsmodelle"
+                    }
+                  >
+                    {businessModels.map((model) =>
+                      renderAssignmentPill(
+                        "business_model",
+                        model.id,
+                        model.name,
+                        actions.linkStrategicDirectionToBusinessModelInCycle,
+                        actions.unlinkStrategicDirectionFromBusinessModelInCycle,
+                        "business_model_id",
+                        linkedBusinessModelIds.has(model.id),
+                        draftBusinessModelIds.has(model.id)
+                      )
+                    )}
+                  </PillSection>
+                </div>
+              </div>
 
-            {revisionActions ? (
-              <StrategyObjectActionBar
-                objectType="strategic_direction"
-                objectId={direction.id}
-                identityId={identityId}
-                lifecycleState={lifecycleState}
-                baseRevisionId={baseRevisionId}
-                hasOpenDraft={Boolean(openDraft)}
-                canWrite={canWrite}
-                returnPath={returnPath}
-                objectNoun="Stoßrichtung"
-                deleteAction={actions.deleteStrategicDirectionInCycle}
-                deleteIdField="strategic_direction_id"
-                lifecycleAction={revisionActions.setStrategyObjectLifecycle}
-                proposeAction={revisionActions.proposeStrategyObjectDraft}
-              />
-            ) : null}
+              {(programsByDirectionId[direction.id] ?? []).length > 0 ? (
+                <PillSection title="Programme">
+                  {(programsByDirectionId[direction.id] ?? []).map((program) => (
+                    <span key={program.id} className={pillLinked()}>
+                      {program.title}
+                    </span>
+                  ))}
+                </PillSection>
+              ) : null}
+
+              {revisionActions ? (
+                <StrategyObjectRevisionFooter
+                  openDraft={openDraft ?? null}
+                  draftFormId={draftFormId}
+                  canWrite={canWrite}
+                  returnPath={returnPath}
+                  revisionActions={revisionActions}
+                  actionBarProps={{
+                    objectType: "strategic_direction",
+                    objectId: direction.id,
+                    identityId,
+                    lifecycleState,
+                    baseRevisionId,
+                    hasOpenDraft: Boolean(openDraft),
+                    canWrite,
+                    returnPath,
+                    objectNoun: "Stoßrichtung",
+                    deleteAction: actions.deleteStrategicDirectionInCycle,
+                    deleteIdField: "strategic_direction_id",
+                    lifecycleAction: revisionActions.setStrategyObjectLifecycle,
+                    proposeAction: revisionActions.proposeStrategyObjectDraft,
+                  }}
+                />
+              ) : null}
           </div>
         );
       }}

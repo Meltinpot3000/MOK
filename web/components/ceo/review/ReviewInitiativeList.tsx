@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ExpandableTable, type ColumnDef } from "@/components/ceo/ExpandableTable";
 import {
   TableFilterBar,
@@ -8,10 +9,13 @@ import {
 } from "@/components/table/TableFilterBar";
 import { deriveInitiativeHealth } from "@/lib/review/initiative-health";
 import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
+import type { ReviewAttentionItem } from "@/lib/review/review-attention-rules";
+import type { ReviewCycleData, ReviewCycleAnnualTargetBrief } from "@/lib/review/review-cycle-data";
 import type { ReviewStatus } from "@/lib/review/key-result-progress";
 import type { ReviewCycleInitiativeInput } from "@/lib/review/review-cycle-view-model";
-import { useMemo, useState } from "react";
 import { ReviewUpdatePanel } from "./ReviewUpdatePanel";
+import { ReviewMeasureDialog } from "./ReviewMeasureDialog";
+import { ReviewImpulseDialog } from "./ReviewImpulseDialog";
 import {
   directionSourceLabelDe,
   formatDateDe,
@@ -32,24 +36,46 @@ function directionSortLabel(
 ): string {
   if (
     row.directionId &&
-    (row.resolvedDirectionSource === "program" || row.resolvedDirectionSource === "annual_target")
+    (row.resolvedDirectionSource === "program" || row.resolvedDirectionSource === "legacy_annual_target")
   ) {
     return directionNameById[row.directionId] ?? row.directionId;
   }
   return directionSourceLabelDe(row.resolvedDirectionSource);
 }
 
+function programTargetLabel(row: ReviewCycleInitiativeInput): string {
+  if (row.program_title) return `PIP: ${row.program_title}`;
+  if (row.legacyNachpflege) return "Legacy — Programm fehlt";
+  return "—";
+}
+
+function openSignalForInitiative(
+  initiativeId: string,
+  attentionItems: ReviewAttentionItem[]
+): ReviewAttentionItem | undefined {
+  return attentionItems.find((a) => a.initiativeId === initiativeId);
+}
+
 type ReviewInitiativeListProps = {
   initiativeRows: ReviewCycleInitiativeInput[];
   directionNameById: Record<string, string>;
+  attentionItems: ReviewAttentionItem[];
+  programs: ReviewCycleData["programs"];
+  annualTargetsByDirectionId: Record<string, ReviewCycleAnnualTargetBrief[]>;
   ownerSelectOptions: Array<{ id: string; label: string }>;
+  cycleData: ReviewCycleData;
+  cycleInstanceId: string;
   canWrite: boolean;
 };
 
 export function ReviewInitiativeList({
   initiativeRows,
   directionNameById,
+  attentionItems,
+  annualTargetsByDirectionId,
   ownerSelectOptions,
+  cycleData,
+  cycleInstanceId,
   canWrite,
 }: ReviewInitiativeListProps) {
   const [directionFilter, setDirectionFilter] = useState<string>("");
@@ -57,6 +83,16 @@ export function ReviewInitiativeList({
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [programFilter, setProgramFilter] = useState<string>("");
   const [searchTitle, setSearchTitle] = useState("");
+  const [measureContext, setMeasureContext] = useState<{
+    directionId: string;
+    initiativeId?: string;
+    programId?: string;
+  } | null>(null);
+  const [impulseContext, setImpulseContext] = useState<{
+    directionId: string;
+    objectType: string;
+    objectId: string;
+  } | null>(null);
 
   const directionOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -103,51 +139,30 @@ export function ReviewInitiativeList({
       },
       {
         id: "direction",
-        label: "Sto\u00DFrichtung",
+        label: "Stoßrichtung",
         sortValue: (r) => directionSortLabel(r, directionNameById),
         render: (r) => (
           <span className="text-zinc-700">{directionSortLabel(r, directionNameById)}</span>
         ),
       },
       {
-        id: "owner",
-        label: "Owner",
-        sortValue: (r) => r.owner_display_name ?? "",
-        render: (r) => <span className="text-zinc-700">{r.owner_display_name ?? "—"}</span>,
-      },
-      {
-        id: "status",
-        label: "Status",
-        sortValue: (r) => r.status,
-        render: (r) => initiativeStatusLabelDe(r.status),
-      },
-      {
-        id: "priority",
-        label: "Prio",
-        sortValue: (r) => r.priority,
-        render: (r) => r.priority,
-      },
-      {
-        id: "weight",
-        label: "Gew.",
-        sortValue: (r) => r.weight,
-        render: (r) => r.weight,
-      },
-      {
-        id: "progress",
-        label: "Fortschritt",
-        sortValue: (r) => r.progress_percent,
-        render: (r) => `${r.progress_percent}%`,
-      },
-      {
-        id: "due",
-        label: "Fälligkeit",
-        sortValue: (r) => r.end_date ?? null,
-        render: (r) => formatDateDe(r.end_date),
+        id: "programTarget",
+        label: "Programm / Jahresziel",
+        sortValue: (r) => programTargetLabel(r),
+        render: (r) => (
+          <span className="text-xs text-zinc-700">
+            {programTargetLabel(r)}
+            {r.legacyNachpflege ? (
+              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
+                Nachpflege
+              </span>
+            ) : null}
+          </span>
+        ),
       },
       {
         id: "health",
-        label: "Risiko",
+        label: "Review-Status",
         sortValue: (r) => HEALTH_ORDER[deriveInitiativeHealth(r)],
         render: (r) => {
           const h = deriveInitiativeHealth(r);
@@ -159,35 +174,76 @@ export function ReviewInitiativeList({
         },
       },
       {
+        id: "weight",
+        label: "Beitrag",
+        sortValue: (r) => r.weight,
+        render: (r) => `Gew. ${r.weight}`,
+      },
+      {
+        id: "progress",
+        label: "Fortschritt",
+        sortValue: (r) => r.progress_percent,
+        render: (r) => `${r.progress_percent}%`,
+      },
+      {
         id: "review",
-        label: "Review",
+        label: "Letzter Review",
         sortValue: (r) => r.last_review_update_at ?? null,
         render: (r) => (
           <span className="text-zinc-600">{formatDateDe(r.last_review_update_at)}</span>
         ),
       },
       {
-        id: "source",
-        label: "Herkunft",
-        sortValue: (r) => r.resolvedDirectionSource,
-        render: (r) => (
-          <span className="text-xs text-zinc-500" title={r.resolvedDirectionSource}>
-            {directionSourceLabelDe(r.resolvedDirectionSource)}
-          </span>
-        ),
+        id: "signal",
+        label: "Offenes Signal",
+        sortValue: (r) => openSignalForInitiative(r.id, attentionItems)?.severity ?? "z",
+        render: (r) => {
+          const sig = openSignalForInitiative(r.id, attentionItems);
+          return sig ? (
+            <span className="text-xs text-amber-800">{sig.title}</span>
+          ) : (
+            <span className="text-zinc-400">—</span>
+          );
+        },
+      },
+      {
+        id: "actions",
+        label: "Aktionen",
+        sortValue: () => "",
+        render: (r) =>
+          canWrite ? (
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                className="text-xs underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMeasureContext({
+                    directionId: r.directionId ?? "",
+                    initiativeId: r.id,
+                    programId: r.program_id ?? undefined,
+                  });
+                }}
+              >
+                Maßnahme
+              </button>
+            </div>
+          ) : (
+            "—"
+          ),
       },
     ];
-  }, [directionNameById]);
+  }, [directionNameById, annualTargetsByDirectionId, attentionItems, canWrite]);
 
   return (
     <section className="brand-card p-6">
       <h2 className="text-lg font-semibold text-zinc-900">Initiativen</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        
-        Operative Liste mit Gewichtung, Fortschritt und Review-Aktualität.
+        Pflege- und Arbeitsansicht — die primäre Steuerung erfolgt im Umsetzungsnetzwerk.
       </p>
       <p className="mt-1 text-[11px] text-zinc-500">
-        Zeile mit «+» aufklappen und dort bearbeiten. Neue Initiativen werden im Strategiezyklus erfasst, nicht hier.
+        Zeile mit «+» aufklappen für Review aktualisieren. Neue Initiativen werden im Strategiezyklus
+        erfasst.
       </p>
 
       <div className="mt-4">
@@ -236,17 +292,58 @@ export function ReviewInitiativeList({
           columns={columns}
           rows={filtered}
           getRowId={(r) => r.id}
-          expandLabel="Details"
-          emptyMessage="Keine Initiativen f\u00FCr die gew\u00E4hlten Filter."
+          expandLabel="Review aktualisieren"
+          emptyMessage="Keine Initiativen für die gewählten Filter."
           renderExpandedContent={(row) => (
-            <ReviewUpdatePanel
-              initiative={row}
-              canWrite={canWrite}
-              ownerSelectOptions={ownerSelectOptions}
-            />
+            <div className="space-y-3">
+              <ReviewUpdatePanel
+                initiative={row}
+                canWrite={canWrite}
+                ownerSelectOptions={ownerSelectOptions}
+              />
+              {canWrite && row.directionId ? (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-zinc-600">
+                    Strategie-Impuls (sekundär)
+                  </summary>
+                  <button
+                    type="button"
+                    className="mt-2 text-xs underline"
+                    onClick={() =>
+                      setImpulseContext({
+                        directionId: row.directionId!,
+                        objectType: "initiative",
+                        objectId: row.id,
+                      })
+                    }
+                  >
+                    Impuls für diese Initiative
+                  </button>
+                </details>
+              ) : null}
+            </div>
           )}
         />
       </div>
+
+      {measureContext ? (
+        <ReviewMeasureDialog
+          open
+          context={measureContext}
+          cycleData={cycleData}
+          cycleInstanceId={cycleInstanceId}
+          onClose={() => setMeasureContext(null)}
+        />
+      ) : null}
+
+      {impulseContext ? (
+        <ReviewImpulseDialog
+          open
+          context={impulseContext}
+          cycleInstanceId={cycleInstanceId}
+          onClose={() => setImpulseContext(null)}
+        />
+      ) : null}
     </section>
   );
 }

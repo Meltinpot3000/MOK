@@ -3,11 +3,22 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { KPI_ACCENTS } from "@/components/ceo/KpiCards";
-import { TableHorizontalScroll } from "@/components/table/TableHorizontalScroll";
 import type { StrategicDesignKpis } from "@/lib/strategy-cycle/strategic-design-insights";
 import type { AnalysisEntryOverviewStats } from "@/lib/strategy-cycle/analysis-entry-overview";
 import type { OverviewDrillTable } from "@/lib/strategy-cycle/overview-drill-tables";
+import type {
+  InterpretedMetric,
+  StrategyCycleDashboardModel,
+} from "@/lib/strategy-cycle/strategy-cycle-dashboard-insights";
+import { metricStatusBadgeClass, metricStatusLabelDe } from "@/lib/strategy-cycle/strategy-cycle-dashboard-insights";
+import { StrategyCycleActionItems } from "@/components/ceo/strategy-cycle/StrategyCycleActionItems";
+import { StrategyCycleManagementSummary } from "@/components/ceo/strategy-cycle/StrategyCycleManagementSummary";
+import { StrategyCycleLinkDensityDonut } from "@/components/ceo/strategy-cycle/StrategyCycleLinkDensityDonut";
+import { LinkDensityDetailModal } from "@/components/ceo/strategy-cycle/LinkDensityDetailModal";
+import { DrillThroughModal } from "@/components/ceo/DrillThroughModal";
 import { useHoverScale } from "@/lib/ui/use-hover-scale";
+import type { LinkDensityBucket } from "@/lib/strategy-cycle/strategy-cycle-dashboard-insights";
+import { linkDensityModalTitle } from "@/lib/strategy-cycle/strategy-cycle-dashboard-insights";
 
 export type StrategyCycleOverviewProps = {
   analysisEntrySummary: AnalysisEntryOverviewStats;
@@ -31,6 +42,7 @@ export type StrategyCycleOverviewProps = {
   corporateStrategySummaryHref: string;
   objectiveAvgScore: number | null;
   portfolioBalanceScore: number | null;
+  dashboard: StrategyCycleDashboardModel;
 };
 
 type TileId =
@@ -91,121 +103,6 @@ function OverviewTileButton({
         Details anzeigen →
       </p>
     </button>
-  );
-}
-
-function DrillThroughModal({
-  open,
-  title,
-  drillTable,
-  emptyText,
-  href,
-  hrefLabel,
-  onClose,
-}: {
-  open: boolean;
-  title: string;
-  drillTable: OverviewDrillTable;
-  emptyText: string;
-  href: string;
-  hrefLabel: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [open]);
-
-  if (!open) return null;
-
-  const { columns, rows } = drillTable;
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-none bg-black/40 p-3 backdrop-blur-[2px] sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="strategy-cycle-drill-title"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[min(90vh,720px)] w-full max-w-4xl overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-2 border-b border-zinc-100 bg-gradient-to-r from-zinc-50 to-indigo-50/40 px-4 py-3">
-          <div>
-            <h2 id="strategy-cycle-drill-title" className="text-sm font-semibold text-zinc-900">
-              {title}
-            </h2>
-            <p className="mt-0.5 text-[11px] text-zinc-600">
-              {rows.length === 1 ? "1 Eintrag" : `${rows.length} Einträge`}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200/60"
-          >
-            Schließen
-          </button>
-        </div>
-
-        <div className="max-h-[min(62vh,520px)] overflow-y-auto px-4 py-4">
-          {rows.length === 0 ? (
-            <p className="text-sm text-zinc-500">{emptyText}</p>
-          ) : (
-            <TableHorizontalScroll bordered={false}>
-              <table className="w-max min-w-full border-collapse text-xs">
-                <thead>
-                  <tr>
-                    {columns.map((col) => (
-                      <th
-                        key={col.id}
-                        className="border border-zinc-200 bg-zinc-50 px-2 py-2 text-left font-semibold text-zinc-700"
-                      >
-                        {col.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-zinc-50/80">
-                      {columns.map((col) => (
-                        <td
-                          key={col.id}
-                          className={`border border-zinc-200 px-2 py-2 text-zinc-800 ${
-                            col.id === "title" ? "min-w-[10rem] max-w-[18rem] font-medium" : "whitespace-nowrap"
-                          }`}
-                        >
-                          <span className={col.id === "title" ? "line-clamp-2" : undefined}>
-                            {row.cells[col.id] ?? "—"}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableHorizontalScroll>
-          )}
-        </div>
-
-        <div className="border-t border-zinc-100 px-4 py-3">
-          <Link
-            href={href}
-            className="text-sm font-medium text-indigo-700 hover:underline"
-            onClick={onClose}
-          >
-            {hrefLabel} →
-          </Link>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -290,7 +187,7 @@ function StrategicDesignInfoModal({
         <div className="max-h-[min(72vh,520px)] overflow-y-auto px-4 py-4">
           <p className="mb-4 text-xs text-zinc-600">
             Kurzüberblick der wichtigsten Kennzahlen aus dem Bereich Strategisches Design. Für Tabellen,
-            Konflikte und Korrelationsmatrix siehe die vollständige Übersicht.
+            Konflikte und Passungsmatrix siehe die Design Summary.
           </p>
           <div className="space-y-3">
             {entries.map((entry) => (
@@ -311,6 +208,39 @@ function StrategicDesignInfoModal({
   );
 }
 
+function DesignKpiTile({
+  metric,
+  note,
+}: {
+  metric: InterpretedMetric;
+  note?: string;
+}) {
+  return (
+    <div className="flex h-auto min-h-[9rem] max-h-[12rem] flex-col rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">{metric.label}</p>
+        {metric.status !== "unknown" ? (
+          <span
+            className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${metricStatusBadgeClass(metric.status)}`}
+          >
+            {metricStatusLabelDe(metric.status)}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-xl font-semibold tabular-nums tracking-tight text-zinc-900">
+        {metric.displayValue}
+      </p>
+      <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-zinc-600">{metric.interpretation}</p>
+      {note ? <p className="mt-auto pt-1 text-[10px] leading-snug text-zinc-500">{note}</p> : null}
+    </div>
+  );
+}
+
+function countTileSubtitle(count: number): string {
+  if (count === 0) return "Noch im Aufbau";
+  return "im Strategiezyklus";
+}
+
 export function StrategyCycleOverview({
   analysisEntrySummary,
   counts,
@@ -319,11 +249,18 @@ export function StrategyCycleOverview({
   corporateStrategySummaryHref,
   objectiveAvgScore,
   portfolioBalanceScore,
+  dashboard,
 }: StrategyCycleOverviewProps) {
   const [activeTile, setActiveTile] = useState<TileId | null>(null);
   const [designInfoOpen, setDesignInfoOpen] = useState(false);
+  const [linkDensityModal, setLinkDensityModal] = useState<{
+    bucket: LinkDensityBucket;
+    objectType: "objective" | "challenge";
+    title: string;
+  } | null>(null);
 
   const closeDrill = useCallback(() => setActiveTile(null), []);
+  const closeLinkDensityModal = useCallback(() => setLinkDensityModal(null), []);
 
   const tiles: TileConfig[] = [
     {
@@ -384,35 +321,15 @@ export function StrategyCycleOverview({
 
   const activeConfig = tiles.find((t) => t.id === activeTile) ?? null;
 
-  const designKpiTiles: { label: string; value: string; note?: string; accentIndex: number }[] = [
-    {
-      label: "Herausforderungs-Verankerung",
-      value: kpis.coverageChallengeShare != null ? `${kpis.coverageChallengeShare}%` : "—",
-      accentIndex: 0,
-    },
-    {
-      label: "Kritische Lücken",
-      value: String(kpis.criticalGaps),
-      accentIndex: 1,
-    },
-    {
-      label: "Fokus-Konzentration",
-      value: kpis.focusIndex != null ? `${Math.round(kpis.focusIndex * 100)}%` : "—",
-      accentIndex: 2,
-    },
-    {
-      label: "Zielunterstützung (Reifegrad)",
-      value:
-        kpis.objectiveAlignmentMaturity != null
-          ? `${Math.round(kpis.objectiveAlignmentMaturity * 100)}%`
-          : "—",
-      note: `Korrelations-Overrides: ${kpis.correlationConflictCount}`,
-      accentIndex: 3,
-    },
-  ];
+  const { designKpis, objectiveReadiness, analysisMaturity } = dashboard;
 
   return (
     <div className="space-y-6">
+      <StrategyCycleManagementSummary
+        readiness={dashboard.readiness}
+        managementSummary={dashboard.managementSummary}
+      />
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:max-w-6xl xl:grid-cols-6">
         {tiles.map((tile) => {
           if (tile.id === "objectives") {
@@ -429,17 +346,18 @@ export function StrategyCycleOverview({
                 <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
                   {counts.objectives}
                 </p>
-                <p className="mt-1 text-[10px] leading-snug text-zinc-600">im Strategiezyklus</p>
-                <dl className="mt-2 space-y-0.5 text-[10px] leading-snug text-zinc-600">
+                <p className="mt-1 text-[10px] leading-snug text-zinc-600">{objectiveReadiness.label}</p>
+                <p className="mt-1 text-[10px] leading-snug text-zinc-500">{objectiveReadiness.portfolioLabel}</p>
+                <dl className="mt-2 space-y-0.5 text-[10px] leading-snug text-zinc-500">
                   <div className="flex items-baseline justify-between gap-1">
                     <dt>Ø Ziel-Score</dt>
-                    <dd className="font-semibold tabular-nums text-zinc-900">
+                    <dd className="font-semibold tabular-nums text-zinc-700">
                       {objectiveAvgScore != null ? `${objectiveAvgScore.toFixed(1)} / 5` : "—"}
                     </dd>
                   </div>
                   <div className="flex items-baseline justify-between gap-1">
                     <dt>Portfolio-Balance</dt>
-                    <dd className="font-semibold tabular-nums text-zinc-900">
+                    <dd className="font-semibold tabular-nums text-zinc-700">
                       {portfolioBalanceScore != null ? `${portfolioBalanceScore.toFixed(1)} / 5` : "—"}
                     </dd>
                   </div>
@@ -471,6 +389,9 @@ export function StrategyCycleOverview({
                 <p className="mt-1 text-[10px] font-medium leading-snug text-zinc-700">
                   mit Herausforderung verknüpft (direkte Quelle)
                 </p>
+                <p className="mt-1 text-[10px] font-medium leading-snug text-zinc-700">
+                  {analysisMaturity.label}
+                </p>
                 <p className="mt-1 text-[10px] leading-snug text-zinc-500">
                   Qualität: {analysisEntrySummary.qualityHigh} hoch · {analysisEntrySummary.qualityMedium}{" "}
                   mittel · {analysisEntrySummary.qualityLow} niedrig
@@ -490,10 +411,14 @@ export function StrategyCycleOverview({
 
           const subtitle =
             tile.id === "challenges"
-              ? "strategisch im Zyklus"
+              ? count === 0
+                ? "Noch im Aufbau"
+                : "strategisch im Zyklus"
               : tile.id === "directions"
-                ? "im Zyklus"
-                : "PIPs";
+                ? countTileSubtitle(count)
+                : count === 0
+                  ? "Noch im Aufbau"
+                  : "PIPs";
 
           return (
             <OverviewTileButton
@@ -521,6 +446,7 @@ export function StrategyCycleOverview({
           href={activeConfig.href}
           hrefLabel={activeConfig.hrefLabel}
           onClose={closeDrill}
+          titleId="strategy-cycle-drill-title"
         />
       ) : null}
 
@@ -538,32 +464,65 @@ export function StrategyCycleOverview({
           </button>
         </div>
         <p className="mt-1 text-sm text-zinc-600">
-          Kennzahlen wie in der Bereichs-Übersicht — für Details und Tabellen siehe Strategisches Design.
+          Kennzahlen wie in der Design Summary — für Details und Tabellen siehe Strategisches Design.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-4">
-          {designKpiTiles.map((tile) => (
-            <div key={tile.label} className={overviewTileClass(tile.accentIndex, false)}>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-600">
-                {tile.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 sm:text-3xl">
-                {tile.value}
-              </p>
-              {tile.note ? (
-                <p className="mt-1 text-[10px] leading-snug text-zinc-600">{tile.note}</p>
-              ) : null}
+        <div className="mt-4 grid gap-6 xl:grid-cols-[1fr_min(24rem,34%)]">
+          <div className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <DesignKpiTile metric={designKpis.challengeAnchoring} />
+              <DesignKpiTile metric={designKpis.criticalGaps} />
+              <DesignKpiTile metric={designKpis.focusConcentration} />
+              <DesignKpiTile
+                metric={designKpis.objectiveSupport}
+                note={`Korrelations-Overrides: ${kpis.correlationConflictCount}`}
+              />
             </div>
-          ))}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <StrategyCycleLinkDensityDonut
+                model={dashboard.linkDensity.objectivesToDirections}
+                centerLabel="Ziele"
+                onBucketClick={(bucket) =>
+                  setLinkDensityModal({
+                    bucket,
+                    objectType: "objective",
+                    title: linkDensityModalTitle("objective", bucket),
+                  })
+                }
+              />
+              <StrategyCycleLinkDensityDonut
+                model={dashboard.linkDensity.challengesToDirections}
+                centerLabel="Herausforderungen"
+                onBucketClick={(bucket) =>
+                  setLinkDensityModal({
+                    bucket,
+                    objectType: "challenge",
+                    title: linkDensityModalTitle("challenge", bucket),
+                  })
+                }
+              />
+            </div>
+
+            <p className="text-sm">
+              <Link
+                href="/strategy-cycle?l1=strategic-directions&l2=dashboard"
+                className="font-medium text-zinc-900 underline underline-offset-2"
+              >
+                Zur Design Summary (Strategisches Design)
+              </Link>
+            </p>
+          </div>
+          <StrategyCycleActionItems actionItems={dashboard.actionItems} />
         </div>
-        <p className="mt-4 text-sm">
-          <Link
-            href="/strategy-cycle?l1=strategic-directions&l2=dashboard"
-            className="font-medium text-zinc-900 underline underline-offset-2"
-          >
-            Zur vollständigen Übersicht (Strategisches Design)
-          </Link>
-        </p>
       </section>
+
+      <LinkDensityDetailModal
+        open={linkDensityModal != null}
+        onClose={closeLinkDensityModal}
+        title={linkDensityModal?.title ?? ""}
+        bucket={linkDensityModal?.bucket ?? null}
+        objectType={linkDensityModal?.objectType ?? "objective"}
+      />
 
       <StrategicDesignInfoModal
         open={designInfoOpen}

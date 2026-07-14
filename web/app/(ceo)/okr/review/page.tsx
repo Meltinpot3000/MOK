@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActivePlanningCycle, getPhase0Context } from "@/lib/phase0/queries";
+import { resolveAnnualPlanningCycle } from "@/lib/strategy-cycle/pick-strategy-planning-cycle";
 import { getSidebarAccessContext } from "@/lib/rbac/page-access";
 import { getOkrCycleContext } from "@/lib/okr/okr-cycle-context";
 import { updatesRecordForObjectiveViews } from "@/lib/okr/serialize-updates-for-views";
@@ -16,6 +17,7 @@ import { OkrReviewSessionWorkspace } from "@/components/ceo/okr/OkrReviewSession
 import { ReviewHeaderTrigger } from "@/components/ceo/strategy-review/ReviewHeaderTrigger";
 import { fetchReviewTriggerState } from "@/lib/strategy-review/queries";
 import type { ReviewTriggerState } from "@/lib/strategy-review/types";
+import { buildStrategyReviewHref } from "@/lib/review/review-cycle-pulse";
 
 type PageProps = {
   searchParams: Promise<{ okrCycle?: string; session?: string }>;
@@ -78,7 +80,6 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
 
   const activeOkrCycleId = ctx.workspace.selectedOkrCycleId;
   if (selectedSession && activeOkrCycleId && selectedSession.status === "scheduled") {
-    /** Kein scheduled_at: das ist oft der zukünftige Meeting-Termin und schließt frühere Check-ins fälschlich aus. */
     const baselineRaw =
       selectedSession.check_in_tracking_baseline_at?.trim() ||
       selectedSession.updated_at ||
@@ -103,12 +104,20 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
   if (okrCycleParam) searchParamsObj.okrCycle = okrCycleParam;
   const searchQuery = new URLSearchParams(searchParamsObj).toString();
 
+  /** Strategy Review hängt am L2-Reviewzyklus, nicht am OKR-/L3-Zyklus. */
+  const annualCycle = await resolveAnnualPlanningCycle(context.organizationId);
   let trigger: ReviewTriggerState | null = null;
-  if (pageAccess.canWrite) {
+  if (pageAccess.canWrite && annualCycle) {
     const supabase = await createSupabaseServerClient();
-    await supabase.schema("app").rpc("ensure_strategy_review", { p_cycle_instance_id: cycle.id });
-    trigger = await fetchReviewTriggerState(cycle.id);
+    await supabase.schema("app").rpc("ensure_strategy_review", {
+      p_cycle_instance_id: annualCycle.id,
+    });
+    trigger = await fetchReviewTriggerState(annualCycle.id);
   }
+
+  const strategyReviewHref = annualCycle
+    ? buildStrategyReviewHref(annualCycle.id, trigger)
+    : "/reviews/strategy-review";
 
   return (
     <section className="space-y-4">
@@ -118,15 +127,22 @@ export default async function OkrReviewPage({ searchParams }: PageProps) {
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">OKR-Zyklus</p>
             <h1 className="mt-2 text-2xl font-semibold text-zinc-900">OKR-Review-Workspace</h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Review-Sessions pro OKR-Zeitraum: Planung, Meeting-Artefakte und Abschluss — getrennt vom Tracking.
+              Review-Sessions pro OKR-Zeitraum: Planung, Meeting-Artefakte und Abschluss — getrennt vom
+              formellen Strategy Review (L2).
             </p>
             <p className="mt-2 text-xs text-zinc-500">
-              <a className="text-zinc-700 underline hover:text-zinc-900" href={`/okr/strategy-review?instance=${cycle.id}`}>
-                Strategy Review Procedure (geführter Prozess)
+              <a className="text-zinc-700 underline hover:text-zinc-900" href={strategyReviewHref}>
+                Strategy Review Procedure (Reviewzyklus L2)
+              </a>
+              {" · "}
+              <a className="text-zinc-700 underline hover:text-zinc-900" href="/reviews?tab=lagebild">
+                Zum Lagebild
               </a>
             </p>
           </div>
-          {trigger ? <ReviewHeaderTrigger cycleInstanceId={cycle.id} trigger={trigger} /> : null}
+          {annualCycle && trigger ? (
+            <ReviewHeaderTrigger cycleInstanceId={annualCycle.id} trigger={trigger} />
+          ) : null}
         </div>
       </header>
 

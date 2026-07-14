@@ -44,6 +44,7 @@ export type StrategicDirectionInput = {
   id: string;
   title: string;
   priority?: number | string | null;
+  grouping?: string | null;
 };
 
 export type ChallengeDirectionLinkInput = {
@@ -153,10 +154,13 @@ type DirectionMetrics = {
   theoreticalMaxObjectiveAlignment: number;
   score: number;
   linkedChallengeTitles: string[];
+  linkedObjectiveTitles: string[];
   hasStrongObjectiveLink: boolean;
 };
 
-function buildDirectionMetrics(
+export type { DirectionMetrics };
+
+export function buildDirectionMetrics(
   directions: StrategicDirectionInput[],
   challenges: ChallengeInput[],
   objectives: ObjectiveInput[],
@@ -200,6 +204,8 @@ function buildDirectionMetrics(
     let objectiveAlignment = 0;
     let theoreticalMaxObjectiveAlignment = 0;
     let hasStrongObjectiveLink = false;
+    const seenObj = new Set<string>();
+    const linkedObjectiveTitles: string[] = [];
     for (const link of obLinks) {
       const o = objById.get(link.objective_id);
       if (!o) continue;
@@ -208,6 +214,10 @@ function buildDirectionMetrics(
       objectiveAlignment += imp * w;
       theoreticalMaxObjectiveAlignment += imp * 1;
       if (w >= T.topDirectionsStrongObjectiveLinkMinW) hasStrongObjectiveLink = true;
+      if (!seenObj.has(o.id)) {
+        seenObj.add(o.id);
+        linkedObjectiveTitles.push(o.title);
+      }
     }
 
     const base = challengeImpact * 0.7 + objectiveAlignment * 0.3;
@@ -222,6 +232,7 @@ function buildDirectionMetrics(
       theoreticalMaxObjectiveAlignment,
       score,
       linkedChallengeTitles,
+      linkedObjectiveTitles,
       hasStrongObjectiveLink,
     };
   });
@@ -330,8 +341,8 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
     const show = d.linkedChallengeTitles.slice(0, 3);
     const explain =
       d.objectiveAlignment > d.challengeImpact * 0.85
-        ? "Diese Sto\u00DFrichtung verbindet Ziele und Herausforderungen relativ ausgewogen; sie taucht in der Priorisierung oben auf."
-        : "Hohe Problemlast ueber Herausforderungen praegt diese Sto\u00DFrichtung im Modell; sie erscheint deshalb vorn in der Kurzliste.";
+        ? "Diese Stoßrichtung verbindet Ziele und Herausforderungen relativ ausgewogen; sie taucht in der Priorisierung oben auf."
+        : "Hohe Problemlast über Herausforderungen prägt diese Stoßrichtung im Modell; sie erscheint deshalb vorn in der Kurzliste.";
     return {
       directionId: d.directionId,
       title: d.title,
@@ -356,7 +367,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         coverage: cov,
         coverageBand: band,
         explanationDe:
-          "Priorisierte Herausforderung ohne stark verankerte Sto\u00DFrichtung im Modell \u2014 strategische Folgeabsch\u00E4tzung und Verkn\u00FCpfungen pr\u00FCfen.",
+          "Priorisierte Herausforderung ohne stark verankerte Stoßrichtung im Modell — strategische Folgeabschätzung und Verknüpfungen prüfen.",
       });
     }
   }
@@ -377,7 +388,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
       directionLinkageWeight,
       challengeBacking,
       explanationDe:
-        "Das Ziel ist ueber Sto\u00DFrichtungen im Modell stark angebunden; die verkn\u00FCpfte Herausforderungs-Basis bleibt niedrig \u2014 Datenlage und fehlende Links pr\u00FCfen, nicht die inhaltliche Priorit\u00E4t automatisch anzweifeln.",
+        "Das Ziel ist über Stoßrichtungen im Modell stark angebunden; die verknüpfte Herausforderungs-Basis bleibt niedrig — Datenlage und fehlende Links prüfen, nicht die inhaltliche Priorität automatisch anzweifeln.",
     });
   }
   limitedChallengeBackingObjectives.sort(
@@ -404,7 +415,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         challengeImpact: d.challengeImpact,
         objectiveAlignment: d.objectiveAlignment,
         explanationDe:
-          "Hohe Problemlast ueber Herausforderungen, aber geringe Anbindung an Ziele ueber diese Sto\u00DFrichtung \u2014 Alignment im Modell pr\u00FCfen.",
+          "Hohe Problemlast über Herausforderungen, aber geringe Anbindung an Ziele über diese Stoßrichtung — Zielverankerung im Modell prüfen.",
         explanationEn: "High challenge impact but low objective support along this direction — review model linkage.",
       });
     }
@@ -423,7 +434,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
         objectiveId: o.id,
         objectiveTitle: o.title,
         explanationDe:
-          "Wichtiges Ziel mit schwacher oder d\u00FCnner Anbindung an Sto\u00DFrichtungen im Modell \u2014 Unterst\u00FCtzung und Verkn\u00FCpfungen pr\u00FCfen.",
+          "Wichtiges Ziel mit schwacher oder dünner Anbindung an Stoßrichtungen im Modell — Unterstützung und Verknüpfungen prüfen.",
         explanationEn: "Important objective with limited directional backing in the model — review links.",
       });
     }
@@ -437,7 +448,7 @@ export function computeStrategicDesignInsights(input: ComputeStrategicDesignInsi
       challengeTitle: cell.challengeTitle,
       objectiveTitle: cell.objectiveTitle,
       score: cell.score,
-      explanationDe: `Korrelations-Hinweis (Paar Herausforderung / Ziel): schwache oder unsichere Uebereinstimmung im Modell (Score ${cell.score}).`,
+      explanationDe: `Passungshinweis (Herausforderung → Ziel): schwache oder unsichere Übereinstimmung im Modell (Score ${cell.score}).`,
       explanationEn: "Correlation view flags weak alignment for this challenge–objective pair.",
     });
   }

@@ -102,12 +102,6 @@ export function ProgramCreateForm({
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       return "Das Enddatum darf nicht vor dem Startdatum liegen.";
     }
-    if (form.status === "active") {
-      const activeCount = selectedProgram?.initiative_active_count ?? 0;
-      if (activeCount < 1) {
-        return "Ein Programm kann erst auf Aktiv gesetzt werden, wenn mindestens eine zugeh\u00F6rige Initiative aktiv ist.";
-      }
-    }
     return null;
   };
 
@@ -211,6 +205,13 @@ export function ProgramCreateForm({
             </option>
           ))}
         </select>
+        {form.status === "active" ? (
+          <p className="mt-1.5 text-xs text-emerald-800">
+            Status «Aktiv» = freigegebener Change-Rahmen. Voraussetzung: Stoßrichtung, Owner, Budget und
+            Zeitraum. Draft/planned Initiativen und Change-JZ in Vorbereitung dürfen auch an Draft-Programmen
+            hängen.
+          </p>
+        ) : null}
       </div>
 
       <div>

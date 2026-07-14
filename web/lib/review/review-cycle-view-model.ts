@@ -2,11 +2,12 @@ import { deriveInitiativeHealth, type InitiativeRow } from "./initiative-health"
 import type { ReviewStatus } from "./key-result-progress";
 import { isActiveExecutionInitiativeStatus } from "./initiative-review-fields";
 
-export type ResolvedDirectionSource = "program" | "annual_target" | "unresolved" | "unassigned";
+export type ResolvedDirectionSource = "program" | "legacy_annual_target" | "unresolved" | "unassigned";
 
 export type StrategicDirectionResolution = {
   directionId: string | null;
   resolvedDirectionSource: ResolvedDirectionSource;
+  legacyNachpflege?: boolean;
 };
 
 export type ReviewCycleProgramRow = {
@@ -25,7 +26,8 @@ export type ReviewCycleInitiativeTargetLinkRow = {
 };
 
 /**
- * Prioritaet: Programm mit strategic_direction_id, sonst genau eine Richtung ueber Jahresziel-Links, sonst unresolved/unassigned.
+ * Change-Pfad: Stoßrichtung nur über Programm.
+ * Legacy-Fallback über initiative_target_links (read-only, Nachpflege).
  */
 export function resolveStrategicDirectionForInitiative(
   initiative: { id: string; program_id: string | null },
@@ -41,6 +43,7 @@ export function resolveStrategicDirectionForInitiative(
         resolvedDirectionSource: "program",
       };
     }
+    return { directionId: null, resolvedDirectionSource: "unresolved" };
   }
 
   const linkedTargetIds = targetLinks
@@ -55,11 +58,12 @@ export function resolveStrategicDirectionForInitiative(
   if (directionIds.size === 1) {
     return {
       directionId: [...directionIds][0]!,
-      resolvedDirectionSource: "annual_target",
+      resolvedDirectionSource: "legacy_annual_target",
+      legacyNachpflege: true,
     };
   }
   if (directionIds.size > 1) {
-    return { directionId: null, resolvedDirectionSource: "unresolved" };
+    return { directionId: null, resolvedDirectionSource: "unresolved", legacyNachpflege: true };
   }
   return { directionId: null, resolvedDirectionSource: "unassigned" };
 }
@@ -144,7 +148,7 @@ export function buildStrategicDirectionReviewSummaries(
   const byDirection = new Map<string, ReviewCycleInitiativeInput[]>();
   for (const row of initiativeRows) {
     if (!row.directionId) continue;
-    if (row.resolvedDirectionSource !== "program" && row.resolvedDirectionSource !== "annual_target") continue;
+    if (row.resolvedDirectionSource !== "program" && row.resolvedDirectionSource !== "legacy_annual_target") continue;
     const list = byDirection.get(row.directionId) ?? [];
     list.push(row);
     byDirection.set(row.directionId, list);

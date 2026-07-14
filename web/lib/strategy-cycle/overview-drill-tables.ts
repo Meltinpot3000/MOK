@@ -5,9 +5,14 @@ import {
 } from "@/lib/strategy-objects";
 import type { StrategyObjectVersioningMeta } from "@/lib/strategy-objects";
 import type { ProgramOverviewViewRow } from "@/lib/strategy-cycle/queries";
+import {
+  descriptionQualityDisplayLabelDe,
+  descriptionQualityListHref,
+  type DescriptionQualityViewModel,
+} from "@/lib/strategy-cycle/description-quality-view";
 
 export type OverviewDrillColumn = { id: string; label: string };
-export type OverviewDrillRow = { id: string; cells: Record<string, string> };
+export type OverviewDrillRow = { id: string; cells: Record<string, string>; href?: string };
 export type OverviewDrillTable = { columns: OverviewDrillColumn[]; rows: OverviewDrillRow[] };
 
 const ANALYSIS_TYPE_LABELS: Record<string, string> = {
@@ -65,6 +70,11 @@ function formatChf(value: number | null | undefined): string {
     maximumFractionDigits: 0,
   }).format(Number(value));
 }
+
+const DESCRIPTION_QUALITY_COLUMN: OverviewDrillColumn = {
+  id: "description_quality",
+  label: "Beschreibung / Prüfqualität",
+};
 
 export const OVERVIEW_DRILL_COLUMNS = {
   objectives: [
@@ -182,6 +192,9 @@ type BuildOverviewDrillTablesInput = {
   programOverviewById: Map<string, ProgramOverviewViewRow>;
   programTitleById: Record<string, string>;
   ownerLabelByMembershipId: Record<string, string>;
+  descriptionQualityByChallengeId?: Record<string, DescriptionQualityViewModel>;
+  descriptionQualityByDirectionId?: Record<string, DescriptionQualityViewModel>;
+  descriptionQualityByObjectiveId?: Record<string, DescriptionQualityViewModel>;
 };
 
 function versioningCells(versioning?: StrategyObjectVersioningMeta): Record<string, string> {
@@ -190,6 +203,33 @@ function versioningCells(versioning?: StrategyObjectVersioningMeta): Record<stri
     versioning_signal: getOperationalSignalLabelDe(versioning?.latest_operational_signal),
     versioning_review: getReviewDecisionLabelDe(versioning?.latest_review_decision),
   };
+}
+
+function descriptionQualityCell(
+  quality: DescriptionQualityViewModel | undefined
+): string {
+  if (!quality) return "Keine Daten";
+  return descriptionQualityDisplayLabelDe(quality.displayStatus);
+}
+
+function descriptionQualityRowHref(
+  kind: "challenge" | "direction" | "objective",
+  id: string,
+  quality: DescriptionQualityViewModel | undefined
+): string | undefined {
+  if (!quality || quality.isAnalysable) return undefined;
+  const qualityFilter =
+    quality.displayStatus === "rework"
+      ? ("rework" as const)
+      : quality.displayStatus === "review"
+        ? ("needs_work" as const)
+        : undefined;
+  return descriptionQualityListHref({
+    l1: kind === "objective" ? "objectives" : "strategic-directions",
+    l2: kind === "challenge" ? "challenges" : kind === "direction" ? "design" : undefined,
+    objectId: id,
+    qualityFilter,
+  });
 }
 
 export function buildOverviewDrillTables(input: BuildOverviewDrillTablesInput): {
@@ -202,19 +242,24 @@ export function buildOverviewDrillTables(input: BuildOverviewDrillTablesInput): 
 } {
   const objectivesRows: OverviewDrillRow[] = [...input.objectives]
     .sort((a, b) => a.title.localeCompare(b.title, "de"))
-    .map((o) => ({
-      id: o.id,
-      cells: {
-        title: o.title,
-        time_horizon: cell(o.time_horizon),
-        importance_score: cell(o.importance_score),
-        ai_objective_score:
-          o.ai_objective_score != null && Number.isFinite(Number(o.ai_objective_score))
-            ? Number(o.ai_objective_score).toFixed(1)
-            : "—",
-        ...versioningCells(o.versioning),
-      },
-    }));
+    .map((o) => {
+      const quality = input.descriptionQualityByObjectiveId?.[o.id];
+      return {
+        id: o.id,
+        href: descriptionQualityRowHref("objective", o.id, quality),
+        cells: {
+          title: o.title,
+          time_horizon: cell(o.time_horizon),
+          importance_score: cell(o.importance_score),
+          ai_objective_score:
+            o.ai_objective_score != null && Number.isFinite(Number(o.ai_objective_score))
+              ? Number(o.ai_objective_score).toFixed(1)
+              : "—",
+          description_quality: descriptionQualityCell(quality),
+          ...versioningCells(o.versioning),
+        },
+      };
+    });
 
   const analysisRows: OverviewDrillRow[] = [...input.entries]
     .sort((a, b) => a.title.localeCompare(b.title, "de"))
@@ -234,32 +279,42 @@ export function buildOverviewDrillTables(input: BuildOverviewDrillTablesInput): 
 
   const challengeRows: OverviewDrillRow[] = [...input.challenges]
     .sort((a, b) => Number(b.challenge_score ?? 0) - Number(a.challenge_score ?? 0))
-    .map((c) => ({
-      id: c.id,
-      cells: {
-        title: c.title,
-        challenge_score:
-          c.challenge_score != null ? Number(c.challenge_score).toFixed(2) : "—",
-        directions: String(input.directionCountByChallengeId[c.id] ?? 0),
-        impact_score: cell(c.impact_score),
-        urgency_score: cell(c.urgency_score),
-        ...versioningCells(c.versioning),
-      },
-    }));
+    .map((c) => {
+      const quality = input.descriptionQualityByChallengeId?.[c.id];
+      return {
+        id: c.id,
+        href: descriptionQualityRowHref("challenge", c.id, quality),
+        cells: {
+          title: c.title,
+          challenge_score:
+            c.challenge_score != null ? Number(c.challenge_score).toFixed(2) : "—",
+          directions: String(input.directionCountByChallengeId[c.id] ?? 0),
+          impact_score: cell(c.impact_score),
+          urgency_score: cell(c.urgency_score),
+          description_quality: descriptionQualityCell(quality),
+          ...versioningCells(c.versioning),
+        },
+      };
+    });
 
   const directionRows: OverviewDrillRow[] = [...input.directions]
     .sort((a, b) => Number(b.priority ?? 0) - Number(a.priority ?? 0))
-    .map((d) => ({
-      id: d.id,
-      cells: {
-        title: d.title,
-        priority:
-          d.priority != null && d.priority !== "" ? Number(d.priority).toFixed(2) : "—",
-        challenges: String((input.challengeIdsByDirection[d.id] ?? []).length),
-        objectives: String((input.objectiveIdsByDirection[d.id] ?? []).length),
-        ...versioningCells(d.versioning),
-      },
-    }));
+    .map((d) => {
+      const quality = input.descriptionQualityByDirectionId?.[d.id];
+      return {
+        id: d.id,
+        href: descriptionQualityRowHref("direction", d.id, quality),
+        cells: {
+          title: d.title,
+          priority:
+            d.priority != null && d.priority !== "" ? Number(d.priority).toFixed(2) : "—",
+          challenges: String((input.challengeIdsByDirection[d.id] ?? []).length),
+          objectives: String((input.objectiveIdsByDirection[d.id] ?? []).length),
+          description_quality: descriptionQualityCell(quality),
+          ...versioningCells(d.versioning),
+        },
+      };
+    });
 
   const programRows: OverviewDrillRow[] = [...input.programs]
     .sort((a, b) => a.title.localeCompare(b.title, "de"))
@@ -305,16 +360,16 @@ export function buildOverviewDrillTables(input: BuildOverviewDrillTablesInput): 
 
   return {
     objectives: {
-      columns: [...OVERVIEW_DRILL_COLUMNS.objectives, ...VERSIONING_COLUMNS],
+      columns: [...OVERVIEW_DRILL_COLUMNS.objectives, DESCRIPTION_QUALITY_COLUMN, ...VERSIONING_COLUMNS],
       rows: objectivesRows,
     },
     analysisEntries: { columns: [...OVERVIEW_DRILL_COLUMNS.analysisEntries], rows: analysisRows },
     challenges: {
-      columns: [...OVERVIEW_DRILL_COLUMNS.challenges, ...VERSIONING_COLUMNS],
+      columns: [...OVERVIEW_DRILL_COLUMNS.challenges, DESCRIPTION_QUALITY_COLUMN, ...VERSIONING_COLUMNS],
       rows: challengeRows,
     },
     directions: {
-      columns: [...OVERVIEW_DRILL_COLUMNS.directions, ...VERSIONING_COLUMNS],
+      columns: [...OVERVIEW_DRILL_COLUMNS.directions, DESCRIPTION_QUALITY_COLUMN, ...VERSIONING_COLUMNS],
       rows: directionRows,
     },
     programs: { columns: [...OVERVIEW_DRILL_COLUMNS.programs], rows: programRows },

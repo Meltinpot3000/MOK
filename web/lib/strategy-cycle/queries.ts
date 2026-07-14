@@ -116,6 +116,7 @@ export async function getStrategyCycleWorkspaceData(
     objectives,
     clusterObjectiveRelationsResult,
     correlationOverridesResult,
+    pathLinkReviewsResult,
     programsResult,
     annualTargetsResult,
     initiativesResult,
@@ -277,6 +278,12 @@ export async function getStrategyCycleWorkspaceData(
       .eq("cycle_instance_id", cycleInstanceId),
     supabase
       .schema("app")
+      .from("strategy_path_link_reviews")
+      .select("edge_kind, source_id, target_id, status, suggestion_score, note, reviewed_at")
+      .eq("organization_id", organizationId)
+      .eq("cycle_instance_id", cycleInstanceId),
+    supabase
+      .schema("app")
       .from("strategy_programs")
       .select(
         "id, title, description, strategic_direction_id, owner_membership_id, budget_total, timeline, status, start_date, end_date, strategic_challenge_id, program_origin, matrix_cell_score, supported_objective_ids"
@@ -295,7 +302,7 @@ export async function getStrategyCycleWorkspaceData(
       .schema("app")
       .from("initiatives")
       .select(
-        "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent, start_date, end_date"
+        "id, title, description, status, priority, program_id, owner_membership_id, linked_okrs, deliverables, progress_percent, start_date, end_date, budget"
       )
       .eq("organization_id", organizationId)
       .eq("cycle_instance_id", annualCycleId)
@@ -570,6 +577,26 @@ export async function getStrategyCycleWorkspaceData(
       updated_at: r.updated_at,
     };
   });
+  const pathLinkReviews = (pathLinkReviewsResult.data ?? []).map((row) => {
+    const r = row as {
+      edge_kind: string;
+      source_id: string;
+      target_id: string;
+      status: string;
+      suggestion_score: number | null;
+      note: string | null;
+      reviewed_at: string | null;
+    };
+    return {
+      edge_kind: r.edge_kind,
+      source_id: r.source_id,
+      target_id: r.target_id,
+      status: r.status,
+      suggestion_score: r.suggestion_score,
+      note: r.note,
+      reviewed_at: r.reviewed_at,
+    };
+  });
   const programs = programsResult.data ?? [];
   let programOverviews: ProgramOverviewViewRow[] = [];
   if (programs.length > 0) {
@@ -601,6 +628,7 @@ export async function getStrategyCycleWorkspaceData(
     progress_percent?: number | null;
     start_date?: string | null;
     end_date?: string | null;
+    budget?: number | null;
     linked_key_result_titles?: string[];
     kr_link_contexts?: InitiativeKrLinkContext[];
   };
@@ -893,6 +921,7 @@ export async function getStrategyCycleWorkspaceData(
     objectives,
     clusterObjectiveRelations,
     correlationStatusOverrides,
+    pathLinkReviews,
     programs,
     programOverviews,
     programOwnerOptions,
