@@ -57,6 +57,15 @@ export type AnnualTargetSmartCheck = {
   time_bound: boolean;
 };
 
+/** SMART-Formulierungstexte, persistiert in annual_targets.smart_formulation. */
+export type AnnualTargetSmartFormulation = {
+  specific: string;
+  measurable: string;
+  achievable: string;
+  relevant: string;
+  time_bound: string;
+};
+
 export const SMART_DIMENSION_KEYS = [
   "specific",
   "measurable",
@@ -71,6 +80,50 @@ export const SMART_DIMENSION_LABELS_DE: Record<keyof AnnualTargetSmartCheck, str
   achievable: "Erreichbar",
   relevant: "Relevant",
   time_bound: "Terminiert",
+};
+
+export const SMART_DIMENSION_HINTS_DE: Record<keyof AnnualTargetSmartCheck, string> = {
+  specific: "Was genau soll erreicht werden? Wer macht was?",
+  measurable: "Woran messen wir den Erfolg? Kennzahl und Zielwert.",
+  achievable: "Warum ist das Ziel mit den vorhandenen Mitteln realistisch?",
+  relevant: "Warum trägt das Ziel zur Stoßrichtung bzw. zum Programm bei?",
+  time_bound: "Bis wann? Meilensteine oder Frist innerhalb des Zieljahrs.",
+};
+
+export function emptySmartFormulation(): AnnualTargetSmartFormulation {
+  return {
+    specific: "",
+    measurable: "",
+    achievable: "",
+    relevant: "",
+    time_bound: "",
+  };
+}
+
+export type AnnualTargetProposalField = "title" | keyof AnnualTargetSmartFormulation;
+
+/** Pending Sentinel-Vorschläge (nicht übernommen). */
+export type AnnualTargetSmartProposal = {
+  title: string;
+  formulation: AnnualTargetSmartFormulation;
+  smart_check: AnnualTargetSmartCheck;
+  improvement_notes: string[];
+  generated_at: string;
+};
+
+export type AnnualTargetAnchorFitLevel = "insufficient" | "low" | "medium" | "high";
+
+/** Sentinel-Fit zum Anker (Run → Stoßrichtung, Change → Programm). */
+export type AnnualTargetAnchorFit = {
+  anchor_type: "strategic_direction" | "strategy_program";
+  anchor_id: string;
+  anchor_title: string;
+  overall_level: AnnualTargetAnchorFitLevel;
+  alignment_level: AnnualTargetAnchorFitLevel;
+  formulation_level: AnnualTargetAnchorFitLevel;
+  reason: string;
+  improvement_hint: string | null;
+  assessed_at: string;
 };
 
 export type AnnualTargetRow = {
@@ -101,6 +154,9 @@ export type AnnualTargetRow = {
   ai_model_provider: string | null;
   ai_generated_at: string | null;
   smart_check: AnnualTargetSmartCheck | null;
+  smart_formulation: AnnualTargetSmartFormulation | null;
+  smart_proposal: AnnualTargetSmartProposal | null;
+  anchor_fit: AnnualTargetAnchorFit | null;
   updated_at: string;
 };
 
@@ -117,7 +173,12 @@ export type AnnualTargetPlanningRow = AnnualTargetRow & {
 
 export type AnnualTargetWorkspaceContext = {
   directions: { id: string; title: string; versioning?: StrategyObjectVersioningMeta | null }[];
-  programs: { id: string; title: string; status?: string }[];
+  programs: {
+    id: string;
+    title: string;
+    status?: string;
+    strategic_direction_id?: string | null;
+  }[];
   strategicObjectives: { id: string; title: string; versioning?: StrategyObjectVersioningMeta | null }[];
   ownerOptions: { membershipId: string; fullName: string }[];
   /** Team-Tab: nur Unterstellte (rekursiv), unabhängig von write.all. */

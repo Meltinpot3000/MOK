@@ -13,11 +13,10 @@ import {
 type Props = {
   filters: AnnualTargetsFilters;
   directions: { id: string; title: string }[];
-  objectives: { id: string; title: string }[];
   ownerOptions: { membershipId: string; fullName: string }[];
 };
 
-export function AnnualTargetsTeamFilters({ filters, directions, objectives, ownerOptions }: Props) {
+export function AnnualTargetsTeamFilters({ filters, directions, ownerOptions }: Props) {
   const baseHref = useMemo(() => "/annual-targets?tab=team", []);
 
   return (
@@ -58,21 +57,6 @@ export function AnnualTargetsTeamFilters({ filters, directions, objectives, owne
           {directions.map((d) => (
             <option key={d.id} value={d.id}>
               {d.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="text-xs text-zinc-600">
-        Strategisches Ziel
-        <select
-          name="objective"
-          defaultValue={filters.strategicObjectiveId ?? ""}
-          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm"
-        >
-          <option value="">Alle</option>
-          {objectives.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.title}
             </option>
           ))}
         </select>

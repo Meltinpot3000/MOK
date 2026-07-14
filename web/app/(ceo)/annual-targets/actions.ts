@@ -25,14 +25,25 @@ import { getOrgAnnualTargetSignatureSettings } from "@/lib/annual-targets/org-se
 import { buildAnnualTargetDocumentPayload } from "@/lib/annual-targets/document-payload";
 import { resolveAnnualTargetSignatureProvider } from "@/lib/annual-targets/signature/registry";
 import { improveAnnualTargetWithSmartLlm } from "@/lib/annual-targets/annual-target-smart-ai";
-import { parseAnnualTargetSmartCheck } from "@/lib/annual-targets/smart-check";
+import {
+  composeDescriptionFromSmart,
+  composeMeasurementLogicFromSmart,
+  parseAnnualTargetSmartCheck,
+  parseAnnualTargetSmartFormulation,
+  parseAnnualTargetSmartProposal,
+} from "@/lib/annual-targets/smart-check";
 import { readAnalysisNetworkLlmPolicy, isLlmFeatureEnabled } from "@/lib/analysis-network/policy";
 import { getTenantBranding } from "@/lib/ceo/queries";
 import type {
+  AnnualTargetAnchorFit,
   AnnualTargetLifecycleStatus,
+  AnnualTargetProposalField,
+  AnnualTargetSmartProposal,
   AnnualTargetType,
   ProgressCalculationMode,
 } from "@/lib/annual-targets/types";
+import { emptySmartFormulation, SMART_DIMENSION_KEYS } from "@/lib/annual-targets/types";
+import { classifyAnnualTargetExecutionMode } from "@/lib/change-run/change-run-model";
 
 type ActionContext = {
   organizationId: string;
@@ -70,7 +81,38 @@ function parseSmartCheckFromForm(formData: FormData): ReturnType<typeof parseAnn
   }
 }
 
+function parseSmartFormulationFromForm(formData: FormData) {
+  const fromJson = String(formData.get("smart_formulation_json") ?? "").trim();
+  if (fromJson) {
+    try {
+      return parseAnnualTargetSmartFormulation(JSON.parse(fromJson));
+    } catch {
+      /* fall through to named fields */
+    }
+  }
+  const formulation = emptySmartFormulation();
+  for (const key of SMART_DIMENSION_KEYS) {
+    formulation[key] = String(formData.get(`smart_${key}`) ?? "").trim();
+  }
+  return formulation;
+}
+
 function parsePayload(formData: FormData): AnnualTargetFormPayload {
+  const executionModeRaw = String(formData.get("execution_mode") ?? "").trim();
+  const strategyProgramId = String(formData.get("strategy_program_id") ?? "").trim() || null;
+  const executionMode =
+    executionModeRaw === "change" || executionModeRaw === "run"
+      ? executionModeRaw
+      : classifyAnnualTargetExecutionMode(strategyProgramId);
+
+  const smartFormulation = parseSmartFormulationFromForm(formData);
+  const description =
+    String(formData.get("description") ?? "").trim() ||
+    composeDescriptionFromSmart(smartFormulation);
+  const measurementLogic =
+    String(formData.get("measurement_logic") ?? "").trim() ||
+    composeMeasurementLogicFromSmart(smartFormulation);
+
   return {
     title: String(formData.get("title") ?? "").trim(),
     targetYear: Number(formData.get("target_year") ?? new Date().getUTCFullYear()),
@@ -78,8 +120,8 @@ function parsePayload(formData: FormData): AnnualTargetFormPayload {
     strategicDirectionId: String(
       formData.get("strategic_direction_id") ?? formData.get("direction_id") ?? ""
     ).trim(),
-    description: String(formData.get("description") ?? "").trim(),
-    measurementLogic: String(formData.get("measurement_logic") ?? "").trim(),
+    description,
+    measurementLogic,
     progressPercent: Number(formData.get("progress_percent") ?? 0),
     status: (String(formData.get("status") ?? "draft").trim() || "draft") as AnnualTargetLifecycleStatus,
     annualTargetType: (String(formData.get("annual_target_type") ?? "strategic_commitment").trim() ||
@@ -88,10 +130,12 @@ function parsePayload(formData: FormData): AnnualTargetFormPayload {
       "manual") as ProgressCalculationMode,
     derivationNote: String(formData.get("derivation_note") ?? "").trim(),
     strategicObjectiveId: String(formData.get("strategic_objective_id") ?? "").trim() || null,
-    strategyProgramId: String(formData.get("strategy_program_id") ?? "").trim() || null,
+    strategyProgramId: executionMode === "run" ? null : strategyProgramId,
     bonusWeight: formData.get("bonus_weight") ? Number(formData.get("bonus_weight")) : null,
     baseline: formData.get("baseline") ? Number(formData.get("baseline")) : null,
     currentMeasure: formData.get("current_measure") ? Number(formData.get("current_measure")) : null,
+    smartFormulation,
+    executionMode,
   };
 }
 
@@ -145,13 +189,44 @@ async function upsertStrategicObjectiveLink(
   return { ok: true };
 }
 
+async function resolveDirectionFromProgramIfNeeded(
+  organizationId: string,
+  cycleInstanceId: string,
+  payload: AnnualTargetFormPayload
+): Promise<AnnualTargetFormPayload> {
+  if (payload.executionMode !== "change" || !payload.strategyProgramId) {
+    return payload;
+  }
+  if (payload.strategicDirectionId.trim()) {
+    return payload;
+  }
+  const supabase = await createSupabaseServerClient();
+  const { data: program } = await supabase
+    .schema("app")
+    .from("strategy_programs")
+    .select("strategic_direction_id")
+    .eq("id", payload.strategyProgramId)
+    .eq("organization_id", organizationId)
+    .eq("cycle_instance_id", cycleInstanceId)
+    .maybeSingle();
+  return {
+    ...payload,
+    strategicDirectionId: String(program?.strategic_direction_id ?? "").trim(),
+  };
+}
+
 export async function createAnnualTarget(formData: FormData) {
   const ctx = await getActionContextOrRedirect();
   const returnTab = String(formData.get("return_tab") ?? "mine") === "team" ? "team" : "mine";
-  const payload = parsePayload(formData);
+  let payload = parsePayload(formData);
   if (returnTab === "mine") {
     payload.ownerMembershipId = ctx.membershipId;
   }
+  payload = await resolveDirectionFromProgramIfNeeded(
+    ctx.organizationId,
+    ctx.cycleInstanceId,
+    payload
+  );
   const draftIssues = validateAnnualTargetDraft(payload);
   if (hasBlockingIssues(draftIssues)) done(`/annual-targets?tab=${returnTab}&error=validation`);
 
@@ -169,7 +244,7 @@ export async function createAnnualTarget(formData: FormData) {
     cycleInstanceId: ctx.cycleInstanceId,
     strategicDirectionId: payload.strategicDirectionId,
     strategyProgramId: payload.strategyProgramId,
-    strategicObjectiveId: payload.strategicObjectiveId,
+    strategicObjectiveId: null,
   });
   if (!alignmentCheck.ok) done(`/annual-targets?tab=${returnTab}&error=alignment-invalid`);
 
@@ -193,10 +268,10 @@ export async function createAnnualTarget(formData: FormData) {
       progress_percent: payload.progressPercent,
       target_year: payload.targetYear,
       annual_target_type: payload.annualTargetType,
-      progress_calculation_mode: payload.progressCalculationMode,
+      progress_calculation_mode: "manual",
       bonus_weight: payload.bonusWeight,
       owner_membership_id: payload.ownerMembershipId,
-      derivation_note: payload.derivationNote || null,
+      derivation_note: null,
       status: "draft",
       signature_status: signatureSettings.requireSignature ? "not_required" : "not_required",
       comment: String(formData.get("comment") ?? "").trim() || null,
@@ -205,13 +280,14 @@ export async function createAnnualTarget(formData: FormData) {
       ai_model_provider: formData.get("ai_assisted") === "1" ? "groq" : null,
       ai_generated_at: formData.get("ai_assisted") === "1" ? new Date().toISOString() : null,
       smart_check: parseSmartCheckFromForm(formData),
+      smart_formulation: payload.smartFormulation,
     })
     .select("id")
     .single();
 
   if (error || !data?.id) done(`/annual-targets?tab=${returnTab}&error=create-failed`);
-  const linkResult = await upsertStrategicObjectiveLink(ctx, data.id, payload.strategicObjectiveId);
-  if (!linkResult.ok) done(`/annual-targets?tab=${returnTab}&error=link-failed`);
+  // Strategische-Ziel-Links werden nicht mehr gesetzt.
+  await upsertStrategicObjectiveLink(ctx, data.id, null);
   done(`/annual-targets?tab=${returnTab}&success=created`);
 }
 
@@ -220,7 +296,12 @@ export async function updateAnnualTarget(formData: FormData) {
   const targetId = String(formData.get("target_id") ?? "");
   if (!targetId) done();
 
-  const payload = parsePayload(formData);
+  let payload = parsePayload(formData);
+  payload = await resolveDirectionFromProgramIfNeeded(
+    ctx.organizationId,
+    ctx.cycleInstanceId,
+    payload
+  );
   const responsibles = await loadResponsibles(ctx.organizationId);
   const ownerCheck = await assertCanAssignAnnualTargetOwner({
     organizationId: ctx.organizationId,
@@ -235,7 +316,7 @@ export async function updateAnnualTarget(formData: FormData) {
     cycleInstanceId: ctx.cycleInstanceId,
     strategicDirectionId: payload.strategicDirectionId,
     strategyProgramId: payload.strategyProgramId,
-    strategicObjectiveId: payload.strategicObjectiveId,
+    strategicObjectiveId: null,
   });
   if (!alignmentCheck.ok) done("/annual-targets?error=alignment-invalid");
 
@@ -276,10 +357,10 @@ export async function updateAnnualTarget(formData: FormData) {
       progress_percent: payload.progressPercent,
       target_year: payload.targetYear,
       annual_target_type: payload.annualTargetType,
-      progress_calculation_mode: payload.progressCalculationMode,
+      progress_calculation_mode: "manual",
       bonus_weight: payload.bonusWeight,
       owner_membership_id: payload.ownerMembershipId,
-      derivation_note: payload.derivationNote || null,
+      derivation_note: null,
       status: nextStatus,
       comment: String(formData.get("comment") ?? "").trim() || null,
       activated_at: nextStatus === "active" ? new Date().toISOString() : undefined,
@@ -295,12 +376,12 @@ export async function updateAnnualTarget(formData: FormData) {
           : (existing?.ai_generated_at as string | null) ?? null,
       smart_check:
         parseSmartCheckFromForm(formData) ?? parseAnnualTargetSmartCheck(existing?.smart_check),
+      smart_formulation: payload.smartFormulation,
     })
     .eq("id", targetId)
     .eq("organization_id", ctx.organizationId);
 
-  const linkResult = await upsertStrategicObjectiveLink(ctx, targetId, payload.strategicObjectiveId);
-  if (!linkResult.ok) done("/annual-targets?error=link-failed");
+  await upsertStrategicObjectiveLink(ctx, targetId, null);
   done("/annual-targets?success=updated");
 }
 
@@ -389,6 +470,11 @@ export async function transitionAnnualTargetLifecycle(formData: FormData) {
       bonusWeight: row.bonus_weight as number | null,
       baseline: row.baseline as number | null,
       currentMeasure: row.current_measure as number | null,
+      smartFormulation: parseAnnualTargetSmartFormulation(row.smart_formulation, {
+        description: row.description as string | null,
+        measurementLogic: row.measurement_logic as string | null,
+      }),
+      executionMode: classifyAnnualTargetExecutionMode(row.strategy_program_id as string | null),
     };
     const activationIssues = validateAnnualTargetActivation(
       payload,
@@ -513,35 +599,320 @@ export async function improveAnnualTargetWithSentinelAction(formData: FormData) 
   if (!phase0) redirect("/no-access");
   const branding = await getTenantBranding(phase0.organizationId);
   const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config);
-  if (!isLlmFeatureEnabled(policy, "annual_target_smart_formulation")) {
-    return { ok: false as const, error: "Sentinel für Jahresziele ist deaktiviert." };
-  }
 
+  const smartFormulation = parseSmartFormulationFromForm(formData);
   const title = String(formData.get("title") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
-  const measurementLogic = String(formData.get("measurement_logic") ?? "").trim();
-  const derivationNote = String(formData.get("derivation_note") ?? "").trim();
-  if (!title && !description && !measurementLogic) {
+  const hasSmartContent = SMART_DIMENSION_KEYS.some((k) => smartFormulation[k].trim());
+  if (!title && !hasSmartContent) {
     return {
       ok: false as const,
-      error: "Bitte zuerst Titel, Beschreibung oder Messlogik im Formular erfassen.",
+      error: "Bitte zuerst Titel oder SMART-Felder im Formular erfassen.",
     };
   }
 
-  const result = await improveAnnualTargetWithSmartLlm({
-    title,
-    description,
-    measurementLogic,
-    derivationNote,
-    targetYear: Number(formData.get("target_year") ?? new Date().getUTCFullYear()),
-    directionTitle: String(formData.get("direction_title") ?? ""),
-    strategicObjectiveTitle: String(formData.get("strategic_objective_title") ?? "") || null,
-    programTitle: String(formData.get("program_title") ?? "") || null,
-    annualTargetType: String(formData.get("annual_target_type") ?? "strategic_commitment"),
-    measurementLogicHint: measurementLogic,
-    baseline: formData.get("baseline") ? Number(formData.get("baseline")) : null,
-    currentMeasure: formData.get("current_measure") ? Number(formData.get("current_measure")) : null,
-  });
+  const executionModeRaw = String(formData.get("execution_mode") ?? "").trim();
+  const programId = String(formData.get("strategy_program_id") ?? "").trim() || null;
+  const executionMode =
+    executionModeRaw === "change" || executionModeRaw === "run"
+      ? executionModeRaw
+      : classifyAnnualTargetExecutionMode(programId);
+  const directionTitle = String(formData.get("direction_title") ?? "");
+  const programTitle = String(formData.get("program_title") ?? "") || null;
+  const anchorType = executionMode === "change" ? "strategy_program" : "strategic_direction";
+  const anchorTitle =
+    executionMode === "change" ? programTitle ?? "" : directionTitle;
 
-  return result;
+  if (!isLlmFeatureEnabled(policy, "annual_target_smart_formulation")) {
+    return {
+      ok: true as const,
+      data: {
+        title,
+        smart_formulation: smartFormulation,
+        smart_check: {
+          specific: false,
+          measurable: false,
+          achievable: false,
+          relevant: false,
+          time_bound: false,
+        },
+        improvement_notes: [
+          "Sentinel-Review ist deaktiviert — Entwurf kann ohne KI-Prüfung gespeichert werden.",
+        ],
+        anchor_fit: {
+          overall_level: "insufficient" as const,
+          alignment_level: "insufficient" as const,
+          formulation_level: "insufficient" as const,
+          reason: "Sentinel-Review ist deaktiviert.",
+          improvement_hint: null,
+        },
+      },
+    };
+  }
+
+  return improveAnnualTargetWithSmartLlm({
+    title,
+    smartFormulation,
+    targetYear: Number(formData.get("target_year") ?? new Date().getUTCFullYear()),
+    executionMode,
+    directionTitle,
+    programTitle,
+    anchorType,
+    anchorTitle,
+  });
+}
+
+/**
+ * Speichert den Entwurf und legt Sentinel-Vorschläge + Anchor-Fit am Objekt ab
+ * (sichtbar in der Übersicht; Übernahme pro Feld).
+ */
+export async function saveAnnualTargetDraftWithSentinelReview(formData: FormData) {
+  const ctx = await getActionContextOrRedirect();
+  const returnTab = String(formData.get("return_tab") ?? "mine") === "team" ? "team" : "mine";
+  let payload = parsePayload(formData);
+  if (returnTab === "mine") {
+    payload.ownerMembershipId = ctx.membershipId;
+  }
+  payload = await resolveDirectionFromProgramIfNeeded(
+    ctx.organizationId,
+    ctx.cycleInstanceId,
+    payload
+  );
+
+  const draftIssues = validateAnnualTargetDraft(payload);
+  if (hasBlockingIssues(draftIssues)) {
+    done(`/annual-targets?tab=${returnTab}&error=validation`);
+  }
+
+  const responsibles = await loadResponsibles(ctx.organizationId);
+  const ownerCheck = await assertCanAssignAnnualTargetOwner({
+    organizationId: ctx.organizationId,
+    currentMembershipId: ctx.membershipId,
+    targetOwnerMembershipId: payload.ownerMembershipId,
+    responsibles,
+  });
+  if (!ownerCheck.ok) done(`/annual-targets?tab=${returnTab}&error=owner-forbidden`);
+
+  const alignmentCheck = await assertAnnualTargetAlignmentRefsEligible({
+    organizationId: ctx.organizationId,
+    cycleInstanceId: ctx.cycleInstanceId,
+    strategicDirectionId: payload.strategicDirectionId,
+    strategyProgramId: payload.strategyProgramId,
+    strategicObjectiveId: null,
+  });
+  if (!alignmentCheck.ok) done(`/annual-targets?tab=${returnTab}&error=alignment-invalid`);
+
+  const supabase = await createSupabaseServerClient();
+  const signatureSettings = await getOrgAnnualTargetSignatureSettings(ctx.organizationId);
+  const existingId = String(formData.get("target_id") ?? "").trim();
+
+  const rowValues = {
+    strategic_direction_id: payload.strategicDirectionId,
+    strategy_program_id: payload.strategyProgramId,
+    title: payload.title,
+    description: payload.description || null,
+    measurement_logic: payload.measurementLogic,
+    baseline: payload.baseline ?? 0,
+    current_measure: payload.currentMeasure ?? 0,
+    progress_percent: payload.progressPercent,
+    target_year: payload.targetYear,
+    annual_target_type: payload.annualTargetType,
+    progress_calculation_mode: "manual" as const,
+    bonus_weight: payload.bonusWeight,
+    owner_membership_id: payload.ownerMembershipId,
+    derivation_note: null,
+    status: "draft" as const,
+    comment: String(formData.get("comment") ?? "").trim() || null,
+    smart_formulation: payload.smartFormulation,
+  };
+
+  let targetId = existingId;
+  if (existingId) {
+    const { error } = await supabase
+      .schema("app")
+      .from("annual_targets")
+      .update(rowValues)
+      .eq("id", existingId)
+      .eq("organization_id", ctx.organizationId);
+    if (error) done(`/annual-targets?tab=${returnTab}&error=create-failed`);
+  } else {
+    const { data, error } = await supabase
+      .schema("app")
+      .from("annual_targets")
+      .insert({
+        organization_id: ctx.organizationId,
+        planning_cycle_id: ctx.cycleInstanceId,
+        cycle_instance_id: ctx.cycleInstanceId,
+        ...rowValues,
+        signature_status: signatureSettings.requireSignature ? "not_required" : "not_required",
+        created_by_membership_id: ctx.membershipId,
+        ai_assisted: false,
+      })
+      .select("id")
+      .single();
+    if (error || !data?.id) done(`/annual-targets?tab=${returnTab}&error=create-failed`);
+    targetId = data.id;
+    await upsertStrategicObjectiveLink(ctx, targetId, null);
+  }
+
+  const directionTitle = String(formData.get("direction_title") ?? "").trim();
+  const programTitle = String(formData.get("program_title") ?? "").trim() || null;
+  const anchorType =
+    payload.executionMode === "change" ? "strategy_program" : "strategic_direction";
+  const anchorId =
+    payload.executionMode === "change"
+      ? payload.strategyProgramId ?? ""
+      : payload.strategicDirectionId;
+  const anchorTitle =
+    payload.executionMode === "change" ? programTitle ?? "" : directionTitle;
+
+  const branding = await getTenantBranding(ctx.organizationId);
+  const policy = readAnalysisNetworkLlmPolicy(branding?.branding_config);
+  const now = new Date().toISOString();
+
+  let smartProposal: AnnualTargetSmartProposal | null = null;
+  let anchorFit: AnnualTargetAnchorFit | null = null;
+  let sentinelFailed = false;
+
+  if (isLlmFeatureEnabled(policy, "annual_target_smart_formulation")) {
+    const llm = await improveAnnualTargetWithSmartLlm({
+      title: payload.title,
+      smartFormulation: payload.smartFormulation,
+      targetYear: payload.targetYear,
+      executionMode: payload.executionMode,
+      directionTitle,
+      programTitle,
+      anchorType,
+      anchorTitle,
+    });
+    if (llm.ok) {
+      smartProposal = {
+        title: llm.data.title,
+        formulation: llm.data.smart_formulation,
+        smart_check: llm.data.smart_check,
+        improvement_notes: llm.data.improvement_notes,
+        generated_at: now,
+      };
+      anchorFit = {
+        anchor_type: anchorType,
+        anchor_id: anchorId,
+        anchor_title: anchorTitle,
+        overall_level: llm.data.anchor_fit.overall_level,
+        alignment_level: llm.data.anchor_fit.alignment_level,
+        formulation_level: llm.data.anchor_fit.formulation_level,
+        reason: llm.data.anchor_fit.reason,
+        improvement_hint: llm.data.anchor_fit.improvement_hint ?? null,
+        assessed_at: now,
+      };
+    } else {
+      sentinelFailed = true;
+    }
+  }
+
+  const persist = await supabase
+    .schema("app")
+    .from("annual_targets")
+    .update({
+      smart_proposal: smartProposal,
+      anchor_fit: anchorFit,
+      smart_check: smartProposal?.smart_check ?? null,
+      ai_assisted: Boolean(smartProposal),
+      ai_model_provider: smartProposal ? "groq" : null,
+      ai_generated_at: smartProposal ? now : null,
+    })
+    .eq("id", targetId)
+    .eq("organization_id", ctx.organizationId);
+  if (persist.error) {
+    console.error("[annual-targets] sentinel proposal persist failed:", persist.error.message);
+    sentinelFailed = true;
+  }
+
+  const success = sentinelFailed
+    ? "draft-saved-sentinel-failed"
+    : smartProposal
+      ? "draft-saved-sentinel"
+      : "draft-saved";
+  done(`/annual-targets?tab=${returnTab}&targetId=${targetId}&success=${success}`);
+}
+
+export async function acceptAnnualTargetProposalField(formData: FormData) {
+  const ctx = await getActionContextOrRedirect();
+  const returnTab = String(formData.get("return_tab") ?? "mine") === "team" ? "team" : "mine";
+  const targetId = String(formData.get("target_id") ?? "").trim();
+  const field = String(formData.get("proposal_field") ?? "").trim() as AnnualTargetProposalField;
+  if (!targetId || !field) done(`/annual-targets?tab=${returnTab}`);
+
+  const allowed: AnnualTargetProposalField[] = ["title", ...SMART_DIMENSION_KEYS];
+  if (!allowed.includes(field)) done(`/annual-targets?tab=${returnTab}&error=validation`);
+
+  const supabase = await createSupabaseServerClient();
+  const { data: row } = await supabase
+    .schema("app")
+    .from("annual_targets")
+    .select("title, smart_formulation, smart_proposal, description, measurement_logic")
+    .eq("id", targetId)
+    .eq("organization_id", ctx.organizationId)
+    .maybeSingle();
+
+  if (!row) done(`/annual-targets?tab=${returnTab}&error=not-found`);
+
+  const proposal = parseAnnualTargetSmartProposal(row.smart_proposal);
+  if (!proposal) {
+    done(`/annual-targets?tab=${returnTab}&targetId=${targetId}&error=validation`);
+  }
+
+  let nextTitle = String(row.title ?? "");
+  let nextFormulation = parseAnnualTargetSmartFormulation(row.smart_formulation, {
+    description: row.description as string | null,
+    measurementLogic: row.measurement_logic as string | null,
+  });
+  const nextProposal: AnnualTargetSmartProposal = {
+    ...proposal,
+    formulation: { ...proposal.formulation },
+  };
+
+  if (field === "title") {
+    if (proposal.title.trim()) nextTitle = proposal.title.trim();
+    nextProposal.title = "";
+  } else {
+    const value = proposal.formulation[field]?.trim() ?? "";
+    if (value) nextFormulation = { ...nextFormulation, [field]: value };
+    nextProposal.formulation = { ...nextProposal.formulation, [field]: "" };
+  }
+
+  const stillPending =
+    Boolean(nextProposal.title.trim()) ||
+    SMART_DIMENSION_KEYS.some((k) => nextProposal.formulation[k].trim());
+
+  await supabase
+    .schema("app")
+    .from("annual_targets")
+    .update({
+      title: nextTitle,
+      smart_formulation: nextFormulation,
+      description: composeDescriptionFromSmart(nextFormulation) || null,
+      measurement_logic: composeMeasurementLogicFromSmart(nextFormulation),
+      smart_proposal: stillPending ? nextProposal : null,
+      smart_check: stillPending ? nextProposal.smart_check : proposal.smart_check,
+    })
+    .eq("id", targetId)
+    .eq("organization_id", ctx.organizationId);
+
+  done(`/annual-targets?tab=${returnTab}&targetId=${targetId}&success=proposal-accepted`);
+}
+
+export async function dismissAnnualTargetSmartProposal(formData: FormData) {
+  const ctx = await getActionContextOrRedirect();
+  const returnTab = String(formData.get("return_tab") ?? "mine") === "team" ? "team" : "mine";
+  const targetId = String(formData.get("target_id") ?? "").trim();
+  if (!targetId) done(`/annual-targets?tab=${returnTab}`);
+
+  const supabase = await createSupabaseServerClient();
+  await supabase
+    .schema("app")
+    .from("annual_targets")
+    .update({ smart_proposal: null })
+    .eq("id", targetId)
+    .eq("organization_id", ctx.organizationId);
+
+  done(`/annual-targets?tab=${returnTab}&targetId=${targetId}&success=proposal-dismissed`);
 }

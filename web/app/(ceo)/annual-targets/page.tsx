@@ -86,8 +86,8 @@ export default async function AnnualTargetsPage({ searchParams }: PageProps) {
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Jahresplanung</p>
         <h1 className="mt-1 text-2xl font-semibold text-zinc-900">Jahresziele</h1>
         <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-          Eigenständige Commitment-Objekte aus Strategieelementen. OKRs operationalisieren freigegebene
-          Jahresziele im OKR-Zyklus.
+          Run-Jahresziele an Stoßrichtungen, Change-Jahresziele an Programmen — strukturiert nach
+          SMART und mit Sentinel-Review beim Speichern.
         </p>
         {statusMessage ? (
           <p
@@ -104,7 +104,6 @@ export default async function AnnualTargetsPage({ searchParams }: PageProps) {
         <AnnualTargetsTeamFilters
           filters={filters}
           directions={workspaceContext.directions}
-          objectives={workspaceContext.strategicObjectives}
           ownerOptions={workspaceContext.teamOwnerOptions}
         />
       ) : null}
@@ -127,9 +126,8 @@ function mapError(code: string): string {
     "activation-validation": "Aktivierung nicht möglich — Pflichtfelder oder Signatur fehlen.",
     "owner-forbidden": "Keine Berechtigung für diesen Ziel-Owner.",
     "alignment-invalid":
-      "Stoßrichtung, Programm oder strategisches Ziel ist nicht im aktiven Lifecycle — bitte andere Auswahl.",
+      "Auswahl konnte nicht gespeichert werden — bitte Stoßrichtung bzw. Programm erneut wählen.",
     "create-failed": "Jahresziel konnte nicht angelegt werden.",
-    "link-failed": "Strategisches Ziel konnte nicht verknüpft werden.",
     "invalid-transition": "Statusübergang ist nicht erlaubt.",
     "not-found": "Jahresziel nicht gefunden.",
     "signature-not-ready": "Zur Signatur nur im Status Freigegeben.",
@@ -144,6 +142,13 @@ function mapSuccess(code: string): string {
     deleted: "Entwurf gelöscht.",
     lifecycle: "Status aktualisiert.",
     "signature-sent": "Zur Signatur gesendet.",
+    "draft-saved": "Entwurf gespeichert.",
+    "draft-saved-sentinel":
+      "Entwurf gespeichert. Sentinel-Vorschläge und Anker-Fit sind in der Übersicht (Zeile aufklappen).",
+    "draft-saved-sentinel-failed":
+      "Entwurf gespeichert, aber Sentinel konnte nicht antworten. Bitte später erneut prüfen.",
+    "proposal-accepted": "Vorschlag übernommen.",
+    "proposal-dismissed": "Sentinel-Vorschläge verworfen.",
   };
   return map[code] ?? "Gespeichert.";
 }

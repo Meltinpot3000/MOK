@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { ExpandableTable, type ColumnDef } from "@/components/ceo/ExpandableTable";
 import {
   TableFilterBar,
@@ -10,48 +9,41 @@ import {
 } from "@/components/table/TableFilterBar";
 import { matchesTableTitleSearch } from "@/lib/table/filter-utils";
 import {
-  createAnnualTarget,
+  acceptAnnualTargetProposalField,
   deleteAnnualTarget,
-  improveAnnualTargetWithSentinelAction,
+  dismissAnnualTargetSmartProposal,
+  saveAnnualTargetDraftWithSentinelReview,
   sendAnnualTargetForSignature,
   transitionAnnualTargetLifecycle,
-  updateAnnualTarget,
 } from "@/app/(ceo)/annual-targets/actions";
 import type {
   AnnualTargetPlanningRow,
+  AnnualTargetProposalField,
   AnnualTargetWorkspaceContext,
-  ProgressCalculationMode,
 } from "@/lib/annual-targets/types";
 import {
-  ANNUAL_TARGET_TYPES,
-  ANNUAL_TARGET_TYPE_LABELS_DE,
   LIFECYCLE_STATUS_LABELS_DE,
-  PROGRESS_CALCULATION_MODES,
-  PROGRESS_CALCULATION_MODE_LABELS_DE,
-  PROGRESS_CALCULATION_MODE_HINTS_DE,
-  ANNUAL_TARGET_DERIVATION_NOTE_LABEL_DE,
-  ANNUAL_TARGET_DERIVATION_NOTE_HINT_DE,
-  ANNUAL_TARGET_BASELINE_LABEL_DE,
-  ANNUAL_TARGET_BASELINE_HINT_DE,
-  ANNUAL_TARGET_CURRENT_MEASURE_LABEL_DE,
-  ANNUAL_TARGET_CURRENT_MEASURE_HINT_DE,
   ANNUAL_TARGET_LIFECYCLE_STATUSES,
+  SMART_DIMENSION_KEYS,
+  SMART_DIMENSION_LABELS_DE,
 } from "@/lib/annual-targets/types";
 import {
   availableLifecycleActions,
   LIFECYCLE_ACTION_LABELS_DE,
   type LifecycleAction,
 } from "@/lib/annual-targets/lifecycle";
-import { smartDimensionMark } from "@/lib/annual-targets/smart-check";
+import { proposalHasPendingField, smartDimensionMark } from "@/lib/annual-targets/smart-check";
+import { OKR_CONTRIBUTION_TIER_META } from "@/lib/strategy-cycle/coverage-level";
+import { formulationTierLabelDe } from "@/lib/okr/okr-contribution-direction-labels";
 import {
   classifyAnnualTargetExecutionMode,
   PROGRAM_STATUSES_FOR_PLANNING,
+  type AnnualTargetExecutionMode,
 } from "@/lib/change-run/change-run-model";
 import {
-  SMART_DIMENSION_KEYS,
-  SMART_DIMENSION_LABELS_DE,
-} from "@/lib/annual-targets/types";
-import { AnnualTargetSentinelPanel } from "@/components/ceo/annual-targets/AnnualTargetSentinelPanel";
+  AnnualTargetSentinelPanel,
+  SmartFormulationFields,
+} from "@/components/ceo/annual-targets/AnnualTargetSentinelPanel";
 
 const INPUT =
   "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500";
@@ -102,6 +94,7 @@ export function AnnualTargetsPlanningWorkspace({
       if (matchesTableTitleSearch(r.title, searchTitle)) return true;
       if (matchesTableTitleSearch(r.directionTitle, searchTitle)) return true;
       if (matchesTableTitleSearch(r.ownerDisplayName, searchTitle)) return true;
+      if (matchesTableTitleSearch(r.programTitle ?? "", searchTitle)) return true;
       return false;
     });
   }, [rows, searchTitle, filterStatus, filterOwnerMembershipId]);
@@ -110,13 +103,17 @@ export function AnnualTargetsPlanningWorkspace({
     { id: "title", label: "Jahresziel", render: (r) => r.title, sortValue: (r) => r.title },
     { id: "year", label: "Zieljahr", render: (r) => r.target_year ?? "—", sortValue: (r) => r.target_year ?? 0 },
     { id: "owner", label: "Owner", render: (r) => r.ownerDisplayName },
-    { id: "direction", label: "Stoßrichtung", render: (r) => r.directionTitle },
-    { id: "objective", label: "Strategisches Ziel", render: (r) => r.strategicObjectiveTitle ?? "—" },
-    { id: "program", label: "Programm", render: (r) => r.programTitle ?? (r.strategy_program_id ? "—" : "Run") },
     {
-      id: "type",
-      label: "Typ",
-      render: (r) => ANNUAL_TARGET_TYPE_LABELS_DE[r.annual_target_type] ?? r.annual_target_type,
+      id: "mode",
+      label: "Modus",
+      render: (r) =>
+        classifyAnnualTargetExecutionMode(r.strategy_program_id) === "change" ? "Change" : "Run",
+    },
+    { id: "direction", label: "Stoßrichtung", render: (r) => r.directionTitle },
+    {
+      id: "program",
+      label: "Programm",
+      render: (r) => r.programTitle ?? (r.strategy_program_id ? "—" : "—"),
     },
     ...SMART_DIMENSION_KEYS.map((key) => ({
       id: `smart_${key}`,
@@ -130,27 +127,56 @@ export function AnnualTargetsPlanningWorkspace({
               : key === "relevant"
                 ? "R"
                 : "T",
-      render: (r: AnnualTargetPlanningRow) => (
-        <span
-          className={
-            r.smart_check?.[key] === true
-              ? "font-medium text-emerald-700"
-              : r.smart_check?.[key] === false
-                ? "text-zinc-400"
-                : "text-zinc-300"
-          }
-          title={SMART_DIMENSION_LABELS_DE[key]}
-        >
-          {smartDimensionMark(r.smart_check?.[key])}
-        </span>
-      ),
+      render: (r: AnnualTargetPlanningRow) => {
+        const check = r.smart_proposal?.smart_check?.[key] ?? r.smart_check?.[key];
+        const hasProposal = proposalHasPendingField(r.smart_proposal, key);
+        return (
+          <span
+            className={
+              check === true
+                ? "font-medium text-emerald-700"
+                : check === false
+                  ? "text-zinc-400"
+                  : "text-zinc-300"
+            }
+            title={
+              hasProposal
+                ? `${SMART_DIMENSION_LABELS_DE[key]} · Sentinel-Vorschlag offen`
+                : SMART_DIMENSION_LABELS_DE[key]
+            }
+          >
+            {smartDimensionMark(check)}
+            {hasProposal ? <span className="ml-0.5 text-[9px] text-amber-700">+</span> : null}
+          </span>
+        );
+      },
     })),
-    { id: "progress", label: "Fortschritt", render: (r) => `${r.progress_percent}%` },
-    { id: "okr", label: "OKR-Alignment", render: (r) => r.okrAlignmentLabel },
+    {
+      id: "fit",
+      label: "Anker-Fit",
+      render: (r) => {
+        const fit = r.anchor_fit;
+        if (!fit) return <span className="text-zinc-300">·</span>;
+        const meta = OKR_CONTRIBUTION_TIER_META[fit.overall_level];
+        return (
+          <span className="text-xs" title={fit.reason}>
+            {meta.emoji} {meta.labelDe}
+            <span className="block text-[10px] text-zinc-500">Vorschlag</span>
+          </span>
+        );
+      },
+    },
     {
       id: "status",
       label: "Status",
-      render: (r) => LIFECYCLE_STATUS_LABELS_DE[r.status] ?? r.status,
+      render: (r) => (
+        <span>
+          {LIFECYCLE_STATUS_LABELS_DE[r.status] ?? r.status}
+          {r.smart_proposal ? (
+            <span className="mt-0.5 block text-[10px] text-amber-700">Sentinel-Vorschlag</span>
+          ) : null}
+        </span>
+      ),
     },
     {
       id: "actions",
@@ -172,7 +198,8 @@ export function AnnualTargetsPlanningWorkspace({
       <article className="brand-card p-6">
         <h2 className="text-lg font-semibold text-zinc-900">Jahresziel anlegen</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Commitment-Objekt aus Strategieelementen — nicht aus OKRs abgeleitet.
+          Run-Ziele hängen an einer Stoßrichtung, Change-Ziele an einem Programm — formuliert nach
+          SMART.
         </p>
         {canWrite ? (
           <AnnualTargetForm
@@ -192,7 +219,8 @@ export function AnnualTargetsPlanningWorkspace({
         <div>
           <h2 className="text-lg font-semibold text-zinc-900">Jahresziel-Übersicht</h2>
           <p className="mt-0.5 text-xs text-zinc-500">
-            SMART-Spalten (S/M/A/R/T): ✓ erfüllt nach letzter Sentinel-Ausarbeitung, — offen
+            SMART-Spalten: ✓ nach Sentinel; «+» = offener Vorschlag. Anker-Fit analog OKR-Einstufung.
+            Details und «Vorschlag übernehmen» in der aufgeklappten Zeile.
           </p>
         </div>
         <div className="mt-4">
@@ -217,7 +245,7 @@ export function AnnualTargetsPlanningWorkspace({
               value={searchTitle}
               onChange={setSearchTitle}
               label="Suche"
-              placeholder="Titel, Stoßrichtung oder Owner…"
+              placeholder="Titel, Stoßrichtung, Programm oder Owner…"
             />
           </TableFilterBar>
         </div>
@@ -226,6 +254,7 @@ export function AnnualTargetsPlanningWorkspace({
             columns={columns}
             rows={filtered}
             getRowId={(r) => r.id}
+            initialExpandedIds={editTargetId ? [editTargetId] : undefined}
             emptyMessage={
               rows.length === 0
                 ? "Keine Jahresziele in dieser Ansicht."
@@ -254,20 +283,16 @@ function AnnualTargetForm({
   editRow: AnnualTargetPlanningRow | null;
   onCancelEdit: () => void;
 }) {
-  const action = editRow ? updateAnnualTarget : createAnnualTarget;
   const ownerId = editRow?.owner_membership_id ?? context.defaultOwnerMembershipId;
   const showOwnerPick = context.canPickOwner && tab === "team";
-  const [progressMode, setProgressMode] = useState<ProgressCalculationMode>(
-    editRow?.progress_calculation_mode ?? "manual"
-  );
+
+  const initialMode: AnnualTargetExecutionMode = editRow
+    ? classifyAnnualTargetExecutionMode(editRow.strategy_program_id)
+    : "run";
+  const [executionMode, setExecutionMode] = useState<AnnualTargetExecutionMode>(initialMode);
+  const [directionId, setDirectionId] = useState(editRow?.strategic_direction_id ?? "");
   const [programId, setProgramId] = useState(editRow?.strategy_program_id ?? "");
-  const executionMode = classifyAnnualTargetExecutionMode(programId || null);
-  const progressModeOptions = useMemo(() => {
-    if (executionMode === "run") {
-      return PROGRESS_CALCULATION_MODES.filter((m) => m !== "key_result_based");
-    }
-    return PROGRESS_CALCULATION_MODES;
-  }, [executionMode]);
+
   const selectablePrograms = useMemo(
     () =>
       context.programs.filter((p) =>
@@ -276,10 +301,121 @@ function AnnualTargetForm({
     [context.programs]
   );
 
+  const resolvedDirectionId =
+    executionMode === "change"
+      ? selectablePrograms.find((p) => p.id === programId)?.strategic_direction_id ??
+        directionId
+      : directionId;
+
+  const switchMode = (mode: AnnualTargetExecutionMode) => {
+    setExecutionMode(mode);
+    if (mode === "run") {
+      setProgramId("");
+    } else {
+      setDirectionId("");
+    }
+  };
+
   return (
-    <form id="annual-target-form" action={action} className="mt-4 space-y-3">
+    <form id="annual-target-form" className="mt-4 space-y-3" onSubmit={(e) => e.preventDefault()}>
       <input type="hidden" name="return_tab" value={tab} />
+      <input type="hidden" name="execution_mode" value={executionMode} />
+      <input type="hidden" name="progress_calculation_mode" value="manual" />
+      <input type="hidden" name="annual_target_type" value="strategic_commitment" />
       {editRow ? <input type="hidden" name="target_id" value={editRow.id} /> : null}
+
+      <div>
+        <p className={LABEL}>Zieltyp *</p>
+        <div
+          className="mt-1 inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-1"
+          role="tablist"
+          aria-label="Run oder Change"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={executionMode === "run"}
+            onClick={() => switchMode("run")}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              executionMode === "run"
+                ? "bg-teal-700 text-white shadow-sm"
+                : "text-zinc-600 hover:bg-zinc-200/60"
+            }`}
+          >
+            Run-Ziel
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={executionMode === "change"}
+            onClick={() => switchMode("change")}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              executionMode === "change"
+                ? "bg-teal-700 text-white shadow-sm"
+                : "text-zinc-600 hover:bg-zinc-200/60"
+            }`}
+          >
+            Change-Ziel
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-zinc-500">
+          {executionMode === "run"
+            ? "Stabiles Betriebsziel, verknüpft mit einer Stoßrichtung."
+            : "Veränderungsziel, verknüpft mit einem Programm (Stoßrichtung folgt aus dem Programm)."}
+        </p>
+      </div>
+
+      {executionMode === "run" ? (
+        <div>
+          <label className={LABEL}>Stoßrichtung *</label>
+          <select
+            name="strategic_direction_id"
+            required
+            value={directionId}
+            onChange={(e) => setDirectionId(e.target.value)}
+            className={INPUT}
+          >
+            <option value="">— wählen —</option>
+            {context.directions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.title}
+              </option>
+            ))}
+          </select>
+          <input type="hidden" name="strategy_program_id" value="" />
+        </div>
+      ) : (
+        <div>
+          <label className={LABEL}>Programm *</label>
+          <select
+            name="strategy_program_id"
+            required
+            value={programId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setProgramId(next);
+              const prog = selectablePrograms.find((p) => p.id === next);
+              setDirectionId(prog?.strategic_direction_id ?? "");
+            }}
+            className={INPUT}
+          >
+            <option value="">— Programm wählen —</option>
+            {selectablePrograms.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title}
+                {p.status && p.status !== "active" ? ` (${p.status})` : ""}
+              </option>
+            ))}
+          </select>
+          <input type="hidden" name="strategic_direction_id" value={resolvedDirectionId ?? ""} />
+          {programId && !resolvedDirectionId ? (
+            <p className="mt-1 text-xs text-amber-700">
+              Das gewählte Programm hat keine Stoßrichtung — bitte zuerst am Programm hinterlegen.
+            </p>
+          ) : null}
+        </div>
+      )}
+
       <div>
         <label className={LABEL}>Titel *</label>
         <input name="title" required defaultValue={editRow?.title ?? ""} className={INPUT} />
@@ -313,202 +449,38 @@ function AnnualTargetForm({
           </>
         )}
       </div>
-      <div>
-        <label className={LABEL}>Stoßrichtung *</label>
-        <select
-          name="strategic_direction_id"
-          required
-          defaultValue={editRow?.strategic_direction_id ?? ""}
-          className={INPUT}
-        >
-          <option value="">— wählen —</option>
-          {context.directions.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={LABEL}>Beschreibung *</label>
-        <textarea
-          name="description"
-          rows={3}
-          defaultValue={editRow?.description ?? ""}
-          className={INPUT}
-        />
-      </div>
-      <div>
-        <label className={LABEL}>Messlogik / Zielwert *</label>
-        <textarea
-          name="measurement_logic"
-          rows={2}
-          defaultValue={editRow?.measurement_logic ?? ""}
-          className={INPUT}
-        />
-      </div>
-      <div>
-        <label className={LABEL}>Fortschritt %</label>
-        <input
-          name="progress_percent"
-          type="number"
-          min={0}
-          max={100}
-          step={0.1}
-          defaultValue={editRow?.progress_percent ?? 0}
-          className={INPUT}
-        />
-      </div>
-      <div>
-        <label className={LABEL}>Lifecycle-Status</label>
-        <select name="status" defaultValue={editRow?.status ?? "draft"} className={INPUT}>
-          {ANNUAL_TARGET_LIFECYCLE_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {LIFECYCLE_STATUS_LABELS_DE[s]}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={LABEL}>Jahresziel-Typ</label>
-        <select
-          name="annual_target_type"
-          defaultValue={editRow?.annual_target_type ?? "strategic_commitment"}
-          className={INPUT}
-        >
-          {ANNUAL_TARGET_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {ANNUAL_TARGET_TYPE_LABELS_DE[t]}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={LABEL}>Fortschrittsmodus</label>
-        <select
-          name="progress_calculation_mode"
-          value={progressMode}
-          onChange={(e) => setProgressMode(e.target.value as ProgressCalculationMode)}
-          className={INPUT}
-        >
-          {progressModeOptions.map((m) => (
-            <option key={m} value={m}>
-              {PROGRESS_CALCULATION_MODE_LABELS_DE[m]}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-zinc-500">{PROGRESS_CALCULATION_MODE_HINTS_DE[progressMode]}</p>
-      </div>
-      <div>
-        <label className={LABEL}>Strategisches Ziel (empfohlen)</label>
-        <select
-          name="strategic_objective_id"
-          defaultValue={editRow?.strategicObjectiveId ?? ""}
-          className={INPUT}
-        >
-          <option value="">— keins —</option>
-          {context.strategicObjectives.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.title}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={LABEL}>
-          {executionMode === "change" ? "Change-Programm *" : "Programm (leer = Run-Jahresziel)"}
-        </label>
-        <select
-          name="strategy_program_id"
-          value={programId}
-          onChange={(e) => {
-            setProgramId(e.target.value);
-            if (!e.target.value && progressMode === "key_result_based") {
-              setProgressMode("manual");
-            }
-          }}
-          className={INPUT}
-        >
-          <option value="">— Run (kein Programm) —</option>
-          {selectablePrograms.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-              {p.status && p.status !== "active" ? ` (${p.status})` : ""}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-zinc-500">
-          {executionMode === "change"
-            ? "Change-Jahresziel: Programm Pflicht. OKR-Verknüpfung erst nach Freigabe (active) von Programm und Jahresziel."
-            : "Run-Jahresziel: stabile Betriebsziele ohne Programm, ohne OKR und ohne Initiativen."}
-        </p>
-      </div>
-      <div>
-        <label className={LABEL}>{ANNUAL_TARGET_DERIVATION_NOTE_LABEL_DE}</label>
-        <textarea
-          name="derivation_note"
-          rows={2}
-          defaultValue={editRow?.derivation_note ?? ""}
-          className={INPUT}
-        />
-        <p className="mt-1 text-xs text-zinc-500">{ANNUAL_TARGET_DERIVATION_NOTE_HINT_DE}</p>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
+
+      <SmartFormulationFields initial={editRow?.smart_formulation ?? null} />
+
+      {editRow ? (
         <div>
-          <label className={LABEL}>{ANNUAL_TARGET_BASELINE_LABEL_DE}</label>
-          <input
-            name="baseline"
-            type="number"
-            step="0.01"
-            defaultValue={editRow?.baseline ?? ""}
-            className={INPUT}
-          />
-          <p className="mt-1 text-xs text-zinc-500">{ANNUAL_TARGET_BASELINE_HINT_DE}</p>
+          <label className={LABEL}>Status</label>
+          <select name="status" defaultValue={editRow.status} className={INPUT}>
+            {ANNUAL_TARGET_LIFECYCLE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {LIFECYCLE_STATUS_LABELS_DE[s]}
+              </option>
+            ))}
+          </select>
         </div>
-        <div>
-          <label className={LABEL}>{ANNUAL_TARGET_CURRENT_MEASURE_LABEL_DE}</label>
-          <input
-            name="current_measure"
-            type="number"
-            step="0.01"
-            defaultValue={editRow?.current_measure ?? ""}
-            className={INPUT}
-          />
-          <p className="mt-1 text-xs text-zinc-500">{ANNUAL_TARGET_CURRENT_MEASURE_HINT_DE}</p>
-        </div>
-      </div>
-      <div>
-        <label className={LABEL}>Bonusgewichtung</label>
-        <input
-          name="bonus_weight"
-          type="number"
-          step="0.01"
-          defaultValue={editRow?.bonus_weight ?? ""}
-          className={INPUT}
-        />
-      </div>
+      ) : (
+        <input type="hidden" name="status" value="draft" />
+      )}
 
       <AnnualTargetSentinelPanel
         directions={context.directions}
         programs={context.programs}
-        strategicObjectives={context.strategicObjectives}
-        initialSmartCheckJson={
-          editRow?.smart_check ? JSON.stringify(editRow.smart_check) : ""
+        saveAction={saveAnnualTargetDraftWithSentinelReview}
+        submitLabel={
+          editRow ? "Speichern inkl. Sentinel-Review" : "Entwurf speichern inkl. Sentinel-Review"
         }
-        initialAiAssisted={editRow?.ai_assisted ? "1" : "0"}
-        improveAction={improveAnnualTargetWithSentinelAction}
       />
 
-      <div className="flex flex-wrap gap-2 pt-2">
-        <button type="submit" className="brand-btn px-4 py-2 text-sm">
-          {editRow ? "Speichern" : "Als Entwurf speichern"}
+      {editRow ? (
+        <button type="button" className="brand-btn-secondary px-4 py-2 text-sm" onClick={onCancelEdit}>
+          Abbrechen
         </button>
-        {editRow ? (
-          <button type="button" className="brand-btn-secondary px-4 py-2 text-sm" onClick={onCancelEdit}>
-            Abbrechen
-          </button>
-        ) : null}
-      </div>
+      ) : null}
     </form>
   );
 }
@@ -529,13 +501,125 @@ function AnnualTargetDetailPanel({
     context.orgSignatureSettings,
     row.signature_status
   );
+  const formulation = row.smart_formulation;
+  const proposal = row.smart_proposal;
+  const fit = row.anchor_fit;
 
   return (
     <div className="space-y-3 text-sm text-zinc-700">
-      <p>{row.description || "Keine Beschreibung."}</p>
-      <p>
-        <span className="font-medium">Messlogik:</span> {row.measurement_logic || "—"}
-      </p>
+      {fit ? (
+        <section className="rounded-md border border-violet-100 bg-violet-50/40 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Anker-Fit</p>
+          <p className="mt-1 text-[11px] font-semibold text-zinc-800">
+            {fit.anchor_type === "strategy_program" ? "Programm" : "Stoßrichtung"} ·{" "}
+            {fit.anchor_title || "—"}
+          </p>
+          <dl className="mt-2 grid gap-1.5 text-[11px] sm:grid-cols-3">
+            <div>
+              <dt className="font-medium text-zinc-600">Alignment</dt>
+              <dd className="text-zinc-900">
+                {OKR_CONTRIBUTION_TIER_META[fit.alignment_level].emoji}{" "}
+                {OKR_CONTRIBUTION_TIER_META[fit.alignment_level].labelDe}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium text-zinc-600">Formulierung</dt>
+              <dd className="text-zinc-900">{formulationTierLabelDe(fit.formulation_level)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-zinc-600">Gesamt</dt>
+              <dd className="font-semibold text-zinc-900">
+                {OKR_CONTRIBUTION_TIER_META[fit.overall_level].emoji}{" "}
+                {OKR_CONTRIBUTION_TIER_META[fit.overall_level].labelDe}
+              </dd>
+            </div>
+          </dl>
+          {fit.reason ? (
+            <p className="mt-2 text-[11px] leading-snug text-zinc-600">{fit.reason}</p>
+          ) : null}
+          {fit.improvement_hint ? (
+            <p className="mt-1.5 text-[11px] leading-snug text-amber-900">
+              <span className="font-medium">Verbesserung:</span> {fit.improvement_hint}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {proposal ? (
+        <section className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+              Sentinel-Vorschläge
+            </p>
+            {canWrite ? (
+              <form action={dismissAnnualTargetSmartProposal}>
+                <input type="hidden" name="target_id" value={row.id} />
+                <input type="hidden" name="return_tab" value={tab} />
+                <button type="submit" className="text-[11px] text-zinc-600 hover:underline">
+                  Vorschläge verwerfen
+                </button>
+              </form>
+            ) : null}
+          </div>
+          {proposal.improvement_notes.length > 0 ? (
+            <ul className="mt-2 list-disc pl-4 text-[11px] text-zinc-600">
+              {proposal.improvement_notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="mt-3 space-y-2">
+            {proposalHasPendingField(proposal, "title") ? (
+              <ProposalFieldRow
+                targetId={row.id}
+                tab={tab}
+                field="title"
+                label="Titel"
+                currentValue={row.title}
+                proposedValue={proposal.title}
+                canWrite={canWrite}
+              />
+            ) : null}
+            {SMART_DIMENSION_KEYS.map((key) =>
+              proposalHasPendingField(proposal, key) ? (
+                <ProposalFieldRow
+                  key={key}
+                  targetId={row.id}
+                  tab={tab}
+                  field={key}
+                  label={SMART_DIMENSION_LABELS_DE[key]}
+                  currentValue={formulation?.[key] ?? ""}
+                  proposedValue={proposal.formulation[key]}
+                  canWrite={canWrite}
+                />
+              ) : null
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {formulation ? (
+        <dl className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Aktuelle Formulierung
+          </p>
+          {SMART_DIMENSION_KEYS.map((key) =>
+            formulation[key] ? (
+              <div key={key}>
+                <dt className="font-medium text-zinc-900">{SMART_DIMENSION_LABELS_DE[key]}</dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-zinc-700">{formulation[key]}</dd>
+              </div>
+            ) : null
+          )}
+        </dl>
+      ) : (
+        <>
+          <p>{row.description || "Keine Beschreibung."}</p>
+          <p>
+            <span className="font-medium">Messlogik:</span> {row.measurement_logic || "—"}
+          </p>
+        </>
+      )}
       <p>
         <span className="font-medium">Signaturstatus:</span> {row.signature_status}
       </p>
@@ -565,6 +649,51 @@ function AnnualTargetDetailPanel({
           <input type="hidden" name="target_id" value={row.id} />
           <button type="submit" className="text-xs text-red-700 hover:underline">
             Entwurf löschen
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function ProposalFieldRow({
+  targetId,
+  tab,
+  field,
+  label,
+  currentValue,
+  proposedValue,
+  canWrite,
+}: {
+  targetId: string;
+  tab: "mine" | "team";
+  field: AnnualTargetProposalField;
+  label: string;
+  currentValue: string;
+  proposedValue: string;
+  canWrite: boolean;
+}) {
+  return (
+    <div className="rounded border border-amber-100 bg-white p-2 text-[11px]">
+      <p className="font-medium text-zinc-800">{label}</p>
+      {currentValue.trim() ? (
+        <p className="mt-1 text-zinc-500">
+          <span className="font-medium text-zinc-600">Aktuell:</span> {currentValue}
+        </p>
+      ) : null}
+      <p className="mt-1 whitespace-pre-wrap text-zinc-800">
+        <span className="font-medium text-amber-800">Vorschlag:</span> {proposedValue}
+      </p>
+      {canWrite ? (
+        <form action={acceptAnnualTargetProposalField} className="mt-2">
+          <input type="hidden" name="target_id" value={targetId} />
+          <input type="hidden" name="return_tab" value={tab} />
+          <input type="hidden" name="proposal_field" value={field} />
+          <button
+            type="submit"
+            className="rounded-md bg-amber-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-800"
+          >
+            Vorschlag übernehmen
           </button>
         </form>
       ) : null}

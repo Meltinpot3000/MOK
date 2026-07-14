@@ -1,19 +1,39 @@
 import type { StrategyObjectVersioningMeta } from "@/lib/strategy-objects";
 import { isObjectiveEligibleForDirectionLink } from "@/lib/strategy-cycle/objective-direction-link-eligibility";
-import { isStrategicDirectionEligibleForPrograms } from "@/lib/strategy-objects/direction-program-eligibility";
+import { PROGRAM_STATUSES_FOR_PLANNING } from "@/lib/change-run/change-run-model";
 
-/** Stoßrichtung: aktive Identität mit gültiger Fassung. */
+/**
+ * Stoßrichtung für Jahresziel-Planung (Run): draft oder active mit aktueller Fassung.
+ * Strenger als Programm-Anlage (dort nur fully active) — analog Draft-Programme.
+ */
 export function isStrategicDirectionEligibleForAnnualTargetLink(
   versioning?: StrategyObjectVersioningMeta | null
 ): boolean {
-  return isStrategicDirectionEligibleForPrograms(versioning);
+  if (!versioning) return false;
+  const lifecycle = versioning.identity_lifecycle_state;
+  if (lifecycle !== "draft" && lifecycle !== "active") return false;
+  if (versioning.revision_state !== "current") return false;
+  const signal = versioning.latest_operational_signal;
+  const operationalStatus = versioning.operational_status;
+  if (
+    operationalStatus === "completed" ||
+    operationalStatus === "retired" ||
+    operationalStatus === "removed" ||
+    operationalStatus === "archived"
+  ) {
+    return false;
+  }
+  if (signal === "completed" || signal === "retired" || signal === "removed") return false;
+  return true;
 }
 
-/** Programme: nur Status «aktiv». */
+/** Programme: planungsrelevante Status (Draft bis Aktiv). */
 export function isStrategyProgramEligibleForAnnualTargetLink(
   status: string | null | undefined
 ): boolean {
-  return String(status ?? "").trim() === "active";
+  return (PROGRAM_STATUSES_FOR_PLANNING as readonly string[]).includes(
+    String(status ?? "").trim()
+  );
 }
 
 export function isStrategicObjectiveEligibleForAnnualTargetLink(

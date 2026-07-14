@@ -10,7 +10,7 @@ import {
   filterObjectivesForAnnualTargetSelect,
   filterProgramsForAnnualTargetSelect,
 } from "@/lib/annual-targets/alignment-eligibility";
-import { parseAnnualTargetSmartCheck } from "@/lib/annual-targets/smart-check";
+import { parseAnnualTargetSmartCheck, parseAnnualTargetSmartFormulation, parseAnnualTargetSmartProposal, parseAnnualTargetAnchorFit } from "@/lib/annual-targets/smart-check";
 import { getOrgAnnualTargetSignatureSettings } from "@/lib/annual-targets/org-settings";
 import type {
   AnnualTargetPlanningRow,
@@ -22,8 +22,10 @@ import type {
   ProgressCalculationMode,
 } from "@/lib/annual-targets/types";
 
-const TARGET_SELECT =
-  "id, organization_id, cycle_instance_id, planning_cycle_id, strategic_direction_id, strategy_program_id, title, description, measurement_logic, baseline, current_measure, progress_percent, target_year, annual_target_type, progress_calculation_mode, bonus_weight, owner_membership_id, created_by_membership_id, derivation_note, status, signature_status, comment, is_primary, ai_assisted, ai_model_provider, ai_generated_at, smart_check, updated_at";
+const TARGET_SELECT_CORE =
+  "id, organization_id, cycle_instance_id, planning_cycle_id, strategic_direction_id, strategy_program_id, title, description, measurement_logic, baseline, current_measure, progress_percent, target_year, annual_target_type, progress_calculation_mode, bonus_weight, owner_membership_id, created_by_membership_id, derivation_note, status, signature_status, comment, is_primary, ai_assisted, ai_model_provider, ai_generated_at, smart_check, smart_formulation, updated_at";
+
+const TARGET_SELECT = `${TARGET_SELECT_CORE}, smart_proposal, anchor_fit`;
 
 function normMembershipId(id: string | null | undefined): string {
   return (id ?? "").trim().toLowerCase();
@@ -59,17 +61,30 @@ export async function getAnnualTargetsWorkspaceData(input: {
     membershipsResult,
     orgSignatureSettings,
   ] = await Promise.all([
-    supabase
-      .schema("app")
-      .from("annual_targets")
-      .select(TARGET_SELECT)
-      .eq("organization_id", input.organizationId)
-      .eq("cycle_instance_id", input.cycleInstanceId),
+    (async () => {
+      const primary = await supabase
+        .schema("app")
+        .from("annual_targets")
+        .select(TARGET_SELECT)
+        .eq("organization_id", input.organizationId)
+        .eq("cycle_instance_id", input.cycleInstanceId);
+      if (!primary.error) return primary;
+      console.error(
+        "[annual-targets] select with proposal columns failed, falling back:",
+        primary.error.message
+      );
+      return supabase
+        .schema("app")
+        .from("annual_targets")
+        .select(TARGET_SELECT_CORE)
+        .eq("organization_id", input.organizationId)
+        .eq("cycle_instance_id", input.cycleInstanceId);
+    })(),
     fetchDirectionsForCycle(input.organizationId, input.cycleInstanceId, { supabase }),
     supabase
       .schema("app")
       .from("strategy_programs")
-      .select("id, title, status")
+      .select("id, title, status, strategic_direction_id")
       .eq("organization_id", input.organizationId)
       .eq("cycle_instance_id", input.cycleInstanceId)
       .order("title"),
@@ -157,6 +172,10 @@ export async function getAnnualTargetsWorkspaceData(input: {
     }),
   ]);
 
+  if (targetsResult.error) {
+    console.error("[annual-targets] targets select failed:", targetsResult.error.message);
+  }
+
   let rows = (targetsResult.data ?? []).map((raw) => {
     const id = raw.id as string;
     const objectiveId = objectiveByTargetId.get(id) ?? null;
@@ -178,6 +197,12 @@ export async function getAnnualTargetsWorkspaceData(input: {
       annual_target_type: raw.annual_target_type as AnnualTargetType,
       progress_calculation_mode: raw.progress_calculation_mode as ProgressCalculationMode,
       smart_check: parseAnnualTargetSmartCheck(raw.smart_check),
+      smart_formulation: parseAnnualTargetSmartFormulation(raw.smart_formulation, {
+        description: raw.description as string | null,
+        measurementLogic: raw.measurement_logic as string | null,
+      }),
+      smart_proposal: parseAnnualTargetSmartProposal(raw.smart_proposal),
+      anchor_fit: parseAnnualTargetAnchorFit(raw.anchor_fit),
     };
   });
 
@@ -186,6 +211,7 @@ export async function getAnnualTargetsWorkspaceData(input: {
   if (input.tab === "mine") {
     rows = rows.filter(
       (r) =>
+        (input.editTargetId != null && r.id === input.editTargetId) ||
         normMembershipId(r.owner_membership_id) === currentMembershipNorm ||
         normMembershipId(r.created_by_membership_id) === currentMembershipNorm
     );
@@ -193,7 +219,8 @@ export async function getAnnualTargetsWorkspaceData(input: {
     const allowedOwners = new Set(teamOwnerOptions.map((o) => normMembershipId(o.membershipId)));
     rows = rows.filter(
       (r) =>
-        r.owner_membership_id && allowedOwners.has(normMembershipId(r.owner_membership_id))
+        (input.editTargetId != null && r.id === input.editTargetId) ||
+        (r.owner_membership_id && allowedOwners.has(normMembershipId(r.owner_membership_id)))
     );
   }
 
@@ -241,6 +268,7 @@ export async function getAnnualTargetsWorkspaceData(input: {
     id: p.id as string,
     title: String(p.title ?? ""),
     status: String(p.status ?? ""),
+    strategic_direction_id: (p.strategic_direction_id as string | null) ?? null,
   }));
   const allObjectives = objectivesResult.map((o) => ({
     id: o.id,

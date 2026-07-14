@@ -3,6 +3,7 @@ import {
 } from "@/lib/change-run/change-run-model";
 import type {
   AnnualTargetLifecycleStatus,
+  AnnualTargetSmartFormulation,
   AnnualTargetType,
   OrgAnnualTargetSignatureSettings,
   ProgressCalculationMode,
@@ -25,6 +26,8 @@ export type AnnualTargetFormPayload = {
   bonusWeight: number | null;
   baseline: number | null;
   currentMeasure: number | null;
+  smartFormulation: AnnualTargetSmartFormulation;
+  executionMode: "run" | "change";
 };
 
 export type ValidationIssue = { field: string; message: string; severity: "error" | "warning" };
@@ -40,29 +43,47 @@ export function validateAnnualTargetDraft(payload: AnnualTargetFormPayload): Val
   if (!payload.ownerMembershipId.trim()) {
     issues.push({ field: "ownerMembershipId", message: "Ziel-Owner ist erforderlich.", severity: "error" });
   }
-  if (!payload.strategicDirectionId.trim()) {
-    issues.push({ field: "strategicDirectionId", message: "Stoßrichtung ist erforderlich.", severity: "error" });
-  }
-  if (!payload.strategicObjectiveId) {
-    issues.push({
-      field: "strategicObjectiveId",
-      message: "Strategisches Ziel ist empfohlen, aber nicht blockierend.",
-      severity: "warning",
-    });
+
+  const mode =
+    payload.executionMode ||
+    classifyAnnualTargetExecutionMode(payload.strategyProgramId);
+
+  if (mode === "run") {
+    if (!payload.strategicDirectionId.trim()) {
+      issues.push({
+        field: "strategicDirectionId",
+        message: "Stoßrichtung ist für Run-Jahresziele erforderlich.",
+        severity: "error",
+      });
+    }
+    if (payload.strategyProgramId?.trim()) {
+      issues.push({
+        field: "strategyProgramId",
+        message: "Run-Jahresziele dürfen kein Programm haben.",
+        severity: "error",
+      });
+    }
+  } else {
+    if (!payload.strategyProgramId?.trim()) {
+      issues.push({
+        field: "strategyProgramId",
+        message: "Programm ist für Change-Jahresziele erforderlich.",
+        severity: "error",
+      });
+    }
+    if (!payload.strategicDirectionId.trim()) {
+      issues.push({
+        field: "strategicDirectionId",
+        message: "Stoßrichtung konnte nicht aus dem Programm abgeleitet werden.",
+        severity: "error",
+      });
+    }
   }
 
-  const mode = classifyAnnualTargetExecutionMode(payload.strategyProgramId);
   if (mode === "run" && payload.progressCalculationMode === "key_result_based") {
     issues.push({
       field: "progressCalculationMode",
       message: "Run-Jahresziele dürfen nicht OKR-basiert fortgeschrieben werden.",
-      severity: "error",
-    });
-  }
-  if (mode === "change" && !payload.strategyProgramId?.trim()) {
-    issues.push({
-      field: "strategyProgramId",
-      message: "Change-Jahresziele benötigen ein Programm.",
       severity: "error",
     });
   }
@@ -76,17 +97,17 @@ export function validateAnnualTargetActivation(
   signatureStatus: string
 ): ValidationIssue[] {
   const issues = validateAnnualTargetDraft(payload).filter((i) => i.severity === "error");
-  if (!payload.measurementLogic.trim()) {
+  if (!payload.measurementLogic.trim() && !payload.smartFormulation.measurable.trim()) {
     issues.push({
       field: "measurementLogic",
-      message: "Messlogik / Zielwert ist für die Aktivierung erforderlich.",
+      message: "Messbar (M) ist für die Aktivierung erforderlich.",
       severity: "error",
     });
   }
-  if (!payload.description.trim()) {
+  if (!payload.description.trim() && !payload.smartFormulation.specific.trim()) {
     issues.push({
       field: "description",
-      message: "Beschreibung ist für die Aktivierung erforderlich.",
+      message: "Spezifisch (S) ist für die Aktivierung erforderlich.",
       severity: "error",
     });
   }

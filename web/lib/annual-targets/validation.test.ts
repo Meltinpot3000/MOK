@@ -4,6 +4,7 @@ import {
   validateAnnualTargetActivation,
   validateAnnualTargetDraft,
 } from "@/lib/annual-targets/validation";
+import { emptySmartFormulation } from "@/lib/annual-targets/types";
 
 const basePayload = {
   title: "Umsatz steigern",
@@ -22,18 +23,45 @@ const basePayload = {
   bonusWeight: null,
   baseline: null,
   currentMeasure: null,
+  smartFormulation: {
+    ...emptySmartFormulation(),
+    specific: "Beschreibung",
+    measurable: "10% Wachstum",
+  },
+  executionMode: "run" as const,
 };
 
 describe("annual-target validation", () => {
-  it("erlaubt Draft ohne strategisches Ziel mit Warnung", () => {
+  it("erlaubt Run-Draft mit Stoßrichtung", () => {
     const issues = validateAnnualTargetDraft(basePayload);
     expect(hasBlockingIssues(issues)).toBe(false);
-    expect(issues.some((i) => i.severity === "warning")).toBe(true);
   });
 
-  it("blockiert Aktivierung ohne Messlogik", () => {
+  it("blockiert Run ohne Stoßrichtung", () => {
+    const issues = validateAnnualTargetDraft({
+      ...basePayload,
+      strategicDirectionId: "",
+    });
+    expect(hasBlockingIssues(issues)).toBe(true);
+  });
+
+  it("blockiert Change ohne Programm", () => {
+    const issues = validateAnnualTargetDraft({
+      ...basePayload,
+      executionMode: "change",
+      strategyProgramId: null,
+    });
+    expect(hasBlockingIssues(issues)).toBe(true);
+  });
+
+  it("blockiert Aktivierung ohne Messlogik/SMART-M", () => {
     const issues = validateAnnualTargetActivation(
-      { ...basePayload, measurementLogic: "", status: "active" },
+      {
+        ...basePayload,
+        measurementLogic: "",
+        smartFormulation: emptySmartFormulation(),
+        status: "active",
+      },
       { requireSignature: false, signatureMode: "none", activationRequiresSignedStatus: true },
       "not_required"
     );

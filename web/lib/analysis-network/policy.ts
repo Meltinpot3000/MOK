@@ -81,7 +81,7 @@ export function readAnalysisNetworkLlmPolicy(brandingConfig: unknown): AnalysisN
     matrix_program_proposal: readBoolean(featureFlagsRaw.matrix_program_proposal, true),
     okr_contribution_assessment: readBoolean(featureFlagsRaw.okr_contribution_assessment, false),
     kr_initiative_matching: readBoolean(featureFlagsRaw.kr_initiative_matching, false),
-    annual_target_smart_formulation: readBoolean(featureFlagsRaw.annual_target_smart_formulation, false),
+    annual_target_smart_formulation: readBoolean(featureFlagsRaw.annual_target_smart_formulation, true),
     design_field_suggestions: readBoolean(featureFlagsRaw.design_field_suggestions, true),
   };
 
